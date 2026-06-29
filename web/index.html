@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3D Battery Life</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/vendor/three.module.js",
+      "three/addons/controls/OrbitControls.js": "/vendor/OrbitControls.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="scene"></div>
+
+  <!-- top-left: live status -->
+  <header id="hud">
+    <h1>🔋 3D Battery Life <a class="help-link" href="/help.html" target="_blank" title="지표·방법 과학 안내">?안내</a></h1>
+    <div id="trend" class="trend">불러오는 중…</div>
+    <dl id="stats"></dl>
+  </header>
+
+  <!-- top-right: controls -->
+  <section id="panel">
+    <div class="grp">
+      <span class="lbl">데이터</span>
+      <div class="seg" data-group="source">
+        <button data-val="demo2" class="on">데모2 ✨</button>
+        <button data-val="demo">데모1</button>
+        <button data-val="real">내 데이터</button>
+      </div>
+    </div>
+    <div class="grp">
+      <span class="lbl">세로축 (Y · 잔량)</span>
+      <div class="seg" data-group="y">
+        <button data-val="pct" class="on">배터리 %</button>
+        <button data-val="watts">전력 W</button>
+      </div>
+    </div>
+    <div class="grp">
+      <span class="lbl">색상</span>
+      <div class="seg" data-group="color">
+        <button data-val="state" class="on">충/방전</button>
+        <button data-val="tempC">온도</button>
+        <button data-val="loadPct">CPU부하</button>
+        <button data-val="watts">전력</button>
+      </div>
+    </div>
+    <div class="grp row">
+      <label><input type="checkbox" id="spin" /> 자동회전</label>
+      <button id="theme" class="btn">🌙 다크</button>
+      <button id="reset" class="btn">시점 리셋</button>
+    </div>
+    <div id="legend">
+      <div class="bar"></div>
+      <div class="ends"><span id="legMin"></span><span id="legLbl"></span><span id="legMax"></span></div>
+    </div>
+    <p class="hint">드래그=회전 · 휠=줌 · 우클릭드래그=이동 · 곡선에 마우스를 올리면 그 세션 정보가 보입니다.</p>
+  </section>
+
+  <!-- bottom-left: per-band average discharge speed -->
+  <section id="buckets"></section>
+
+  <!-- bottom: selected-band rate trend over time (aging) -->
+  <section id="trendchart" hidden></section>
+
+  <!-- hover detail -->
+  <aside id="tip" hidden></aside>
+  <div id="empty" hidden>아직 배터리 세션 데이터가 충분하지 않습니다.<br/>백그라운드 기록이 쌓이면 여기에 나타납니다. 지금은 <b>데모(1년)</b>를 보세요.</div>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

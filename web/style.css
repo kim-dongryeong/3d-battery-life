@@ -1,0 +1,152 @@
+:root {
+  --bg: #0a0c12;
+  --fg: #e8ecf4;
+  --dim: #8a93a6;
+  --line: #232838;
+  --accent: #4dd0c0;
+  --panel: rgba(16, 19, 28, 0.82);
+  --btn: var(--btn);
+  --th: var(--th);
+  --tip: rgba(10, 12, 18, 0.94);
+  --onfg: var(--onfg);
+}
+html.light {
+  --bg: #eef1f6;
+  --fg: #1b2030;
+  --dim: #566074;
+  --line: #d3dae6;
+  --accent: #0c8f80;
+  --panel: rgba(255, 255, 255, 0.84);
+  --btn: #e7ecf3;
+  --th: #e9edf4;
+  --tip: rgba(255, 255, 255, 0.96);
+  --onfg: #ffffff;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg);
+  font: 13px/1.5 -apple-system, "SF Pro Text", system-ui, "Helvetica Neue", sans-serif; }
+#scene { position: fixed; inset: 0; }
+
+#hud, #panel {
+  position: fixed; z-index: 10; padding: 14px 16px;
+  background: var(--panel); backdrop-filter: blur(14px);
+  border: 1px solid var(--line); border-radius: 14px;
+}
+#hud { top: 16px; left: 16px; max-width: 320px; }
+#hud h1 { margin: 0 0 8px; font-size: 15px; font-weight: 600; letter-spacing: .2px; }
+#hud h1 .help-link { float: right; font-size: 11px; font-weight: 600; color: var(--accent); text-decoration: none;
+  border: 1px solid rgba(77,208,192,.4); border-radius: 6px; padding: 1px 7px; }
+#hud h1 .help-link:hover { background: rgba(77,208,192,.15); }
+.trend { font-size: 13px; color: var(--accent); background: rgba(77,208,192,.08);
+  border: 1px solid rgba(77,208,192,.25); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
+#stats { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; }
+#stats dt { color: var(--dim); }
+#stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+#panel { top: 16px; right: 16px; width: 248px; display: flex; flex-direction: column; gap: 12px; }
+.grp { display: flex; flex-direction: column; gap: 6px; }
+.grp.row { flex-direction: row; align-items: center; justify-content: space-between; }
+.lbl { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+.seg { display: flex; gap: 4px; background: var(--btn); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
+.seg button { flex: 1; border: 0; background: transparent; color: var(--dim); padding: 6px 4px;
+  border-radius: 6px; font-size: 12px; cursor: pointer; transition: .12s; }
+.seg button:hover { color: var(--fg); }
+.seg button.on { background: var(--accent); color: var(--onfg); font-weight: 600; }
+.btn { border: 1px solid var(--line); background: var(--btn); color: var(--fg);
+  border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.btn:hover { border-color: var(--accent); }
+label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+#legend .bar { height: 10px; border-radius: 5px;
+  background: linear-gradient(90deg,
+    hsl(240,85%,55%), hsl(180,85%,55%), hsl(120,85%,55%), hsl(60,85%,55%), hsl(0,85%,55%)); }
+#legend .ends { display: flex; justify-content: space-between; color: var(--dim); margin-top: 3px; font-size: 11px; }
+#legend .ends #legLbl { color: var(--fg); }
+.hint { color: var(--dim); font-size: 11px; margin: 2px 0 0; }
+
+/* ⓘ info badge with floating explanation tip */
+.info { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px;
+  margin-left: 5px; border-radius: 50%; border: 1px solid var(--dim); color: var(--dim); font-size: 9px; font-weight: 700;
+  font-style: normal; cursor: help; vertical-align: middle; }
+.info:hover { color: var(--accent); border-color: var(--accent); }
+.info .ftip { position: absolute; bottom: 135%; left: -2px; width: 244px; background: var(--tip); border: 1px solid var(--accent);
+  border-radius: 8px; padding: 8px 10px; font-size: 11px; line-height: 1.55; color: var(--fg); font-weight: 400; letter-spacing: 0;
+  box-shadow: 0 8px 30px rgba(0,0,0,.5); opacity: 0; visibility: hidden; transform: translateY(4px); transition: .12s; z-index: 40; pointer-events: none; }
+.info:hover .ftip { opacity: 1; visibility: visible; transform: translateY(0); }
+.info .ftip b { color: var(--accent); }
+
+#tip { position: fixed; z-index: 20; pointer-events: none; max-width: 260px;
+  background: var(--tip); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.5); }
+#tip h3 { margin: 0 0 6px; font-size: 13px; }
+#tip .big { font-size: 20px; color: var(--accent); font-weight: 700; }
+#tip table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+#tip td { padding: 1px 0; }
+#tip td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+#tip td.k { color: var(--dim); }
+
+#buckets { position: fixed; z-index: 10; left: 16px; bottom: 16px; padding: 12px 14px;
+  background: var(--panel); backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: 14px; min-width: 216px; }
+#buckets h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--fg); }
+#buckets table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+#buckets th { color: var(--dim); font-weight: 500; font-size: 10px; text-transform: uppercase; text-align: right; padding: 0 0 4px; }
+#buckets th:first-child { text-align: left; }
+#buckets td { padding: 1px 0; text-align: right; }
+#buckets td:first-child { text-align: left; color: var(--dim); }
+#buckets .spd { display: inline-block; height: 6px; border-radius: 3px; vertical-align: middle; }
+#buckets .note { color: var(--dim); font-size: 10px; margin-top: 7px; max-width: 230px; }
+#buckets h2 small { color: var(--dim); font-weight: 400; font-size: 10px; }
+#buckets td.rt { text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums; }
+#buckets .rseg { display: flex; gap: 3px; margin-bottom: 5px; align-items: center; }
+#buckets .rseg .rlbl { color: var(--dim); font-size: 10px; margin-right: 2px; }
+#buckets .rseg button { border: 1px solid var(--line); background: var(--btn); color: var(--dim);
+  border-radius: 6px; padding: 3px 7px; font-size: 11px; cursor: pointer; }
+#buckets .rseg button:hover { color: var(--fg); }
+#buckets .rseg button.on { background: var(--accent); color: var(--onfg); border-color: var(--accent); font-weight: 600; }
+#buckets tr[data-band] { cursor: pointer; }
+#buckets tr[data-band]:hover td { color: var(--fg); }
+#buckets tr.sel td { background: rgba(77,208,192,.12); }
+#buckets tr.sel td:first-child { color: var(--accent); font-weight: 600; }
+
+#trendchart { position: fixed; z-index: 10; left: 284px; bottom: 16px; width: 478px; padding: 12px 14px;
+  background: var(--panel); backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: 14px; }
+#trendchart h2 { margin: 0 0 6px; font-size: 12px; font-weight: 600; }
+#trendchart h2 small { color: var(--dim); font-weight: 400; font-size: 10px; }
+#trendchart .slope { color: var(--fg); font-size: 11px; margin-top: 4px; }
+#trendchart .slope b { color: var(--accent); }
+#trendchart .note { color: var(--dim); font-size: 11px; }
+#trendchart h2 .tbtns { float: right; }
+#trendchart .tbtns button { border: 1px solid var(--line); background: var(--btn); color: var(--dim);
+  border-radius: 6px; padding: 2px 8px; font-size: 11px; cursor: pointer; margin-left: 4px; }
+#trendchart .tbtns button:hover { color: var(--fg); }
+#trendchart .tbtns button.on { background: var(--accent); color: var(--onfg); border-color: var(--accent); font-weight: 600; }
+#trendchart .tlegend { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 7px; font-size: 10px; color: var(--dim); }
+#trendchart .tlegend span { display: flex; align-items: center; gap: 4px; }
+#trendchart .tlegend i { width: 11px; height: 3px; border-radius: 2px; display: inline-block; }
+#trendchart.big { left: 50%; top: 50%; right: auto; bottom: auto; transform: translate(-50%, -50%);
+  width: 86vw; max-width: 1120px; z-index: 30; box-shadow: 0 12px 60px rgba(0,0,0,.6); }
+#trendchart #trend-body { line-height: 0; }
+#trendchart #trend-body canvas { display: block; max-width: 100%; }
+#trendchart #trend-body .tlegend { line-height: 1.4; }
+#trendchart .trow { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 12px; margin: 6px 0 2px; font-size: 11px; color: var(--dim); }
+#trendchart .tickg { display: inline-flex; align-items: center; gap: 4px; }
+#trendchart .seg2 { display: inline-flex; gap: 2px; }
+#trendchart .seg2 button, #trendchart .zg button { border: 1px solid var(--line); background: var(--btn); color: var(--dim); border-radius: 5px; padding: 1px 6px; font-size: 11px; cursor: pointer; }
+#trendchart .seg2 button:hover, #trendchart .zg button:hover { color: var(--fg); }
+#trendchart .seg2 button.on, #trendchart .zg button.on { background: var(--accent); color: var(--onfg); border-color: var(--accent); font-weight: 600; }
+#trendchart .zg { display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; }
+#trendchart .hwrap { line-height: 0; }
+#trendchart rect[data-period] { cursor: pointer; }
+#trendchart .hlegend { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--dim); margin-top: 5px; flex-wrap: wrap; line-height: 1.4; }
+#trendchart .hlegend .hbar { width: 84px; height: 8px; border-radius: 3px; display: inline-block;
+  background: linear-gradient(90deg, hsl(0,75%,52%), hsl(60,75%,52%), hsl(120,75%,52%)); }
+#trendchart .hlegend .hbar.div { background: linear-gradient(90deg, hsl(8,75%,50%), #33373f, hsl(205,70%,50%)); }
+#trendchart .hinset { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; font-size: 11px; line-height: 1.4; }
+#trendchart .hinset table { border-collapse: collapse; width: 100%; }
+#trendchart .hinset td { padding: 1px 0; }
+#trendchart .hinset td.rt { text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums; }
+#trendchart .hinset .spd { display: inline-block; height: 6px; border-radius: 3px; vertical-align: middle; }
+
+#empty { position: fixed; z-index: 15; left: 50%; top: 52%; transform: translate(-50%,-50%);
+  text-align: center; color: var(--dim); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 20px 26px; line-height: 1.7; }

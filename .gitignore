@@ -1,0 +1,20 @@
+# personal / generated data — NEVER commit real battery logs (privacy) or large regenerable demos
+data/
+
+# logs
+*.log
+
+# macOS / editor
+.DS_Store
+.vscode/
+
+# node
+node_modules/
+
+# build outputs
+dist/
+*.tsbuildinfo
+
+# Tauri (Rust) build artifacts
+src-tauri/target/
+src-tauri/gen/

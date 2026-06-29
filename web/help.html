@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3D Battery Life — 지표·방법 안내</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script>try { if (localStorage.getItem('battTheme') === 'light') document.documentElement.classList.add('light'); } catch (e) {}</script>
+  <style>
+    body { overflow: auto; }
+    .help { max-width: 860px; margin: 0 auto; padding: 32px 22px 80px; }
+    .help h1 { font-size: 22px; margin: 0 0 4px; }
+    .help .sub { color: var(--dim); margin: 0 0 26px; }
+    .help h2 { font-size: 17px; margin: 30px 0 8px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--accent); }
+    .help h3 { font-size: 14px; margin: 16px 0 4px; }
+    .help p, .help li { color: var(--fg); line-height: 1.65; }
+    .help code, .help .f { background: var(--btn); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: var(--fg); }
+    .help .f { display: inline-block; margin: 4px 0; padding: 4px 9px; }
+    .help table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13px; }
+    .help th, .help td { border: 1px solid var(--line); padding: 7px 9px; text-align: left; vertical-align: top; }
+    .help th { background: var(--th); color: var(--fg); }
+    .help .k { color: var(--accent); font-weight: 600; }
+    .help .warn { color: #ffa94d; }
+    .help .tag { display: inline-block; background: var(--accent); color: #06201d; border-radius: 5px; padding: 1px 7px; font-weight: 700; font-size: 12px; }
+    .help a.back { color: var(--accent); text-decoration: none; }
+    .help ul { margin: 6px 0; padding-left: 20px; }
+    .help .note { color: var(--dim); font-size: 12.5px; }
+  </style>
+</head>
+<body>
+  <div class="help">
+    <a class="back" href="/">← 뷰어로 돌아가기</a>
+    <h1>🔋 지표·방법 과학 안내</h1>
+    <p class="sub">방전 속도/노화를 어떻게 계산하는지, 버전·지표·델타가 무엇이 다른지.</p>
+
+    <h2>0. 데이터가 만들어지는 과정</h2>
+    <p>1분마다 <code>ioreg</code>로 배터리를 기록합니다. 분석은 <b>방전 구간</b>(충전기 분리 <code>ac=false</code>, 잔량 단조 감소, 인접 샘플 간격 ≤ 2분)만 사용합니다. 인접 두 샘플 사이는 <b>직선</b>으로 보고(당신이 제안한 가정), <b>1% 및 날짜 경계</b>로 잘게 잘라 각 <code>(날짜, 10%구간)</code> 칸에 <b>하락(Δ%)·시간·에너지(W·s)</b>를 누적합니다. 이 "잘라서 누적(clipped interval accumulation)"이 모든 계산의 토대입니다.</p>
+    <p class="note">보고 게이트: 한 칸을 표시하려면 그 칸에 <b>관측 ≥ 10분 &amp; 총하락 ≥ 2%p &amp; 구간 ≥ 3개</b>. 미달이면 "데이터 부족"으로 비웁니다(적은 데이터가 가짜 추세를 만들지 않도록).</p>
+
+    <h2>1. 지표: 속도(%/min) vs 노화(Wh/%)</h2>
+    <p>둘은 <b>다른 질문</b>에 답합니다.</p>
+    <h3>속도 — <code>%/min</code> (음수 = 방전)</h3>
+    <p class="f">속도 = −60 × Σ(하락 %) ÷ Σ(시간 초)</p>
+    <p>배터리 %가 분당 얼마나 떨어지는지. <b>부하(얼마나 쓰는지) + 노화가 섞인 "체감 속도"</b>입니다. 같은 새 배터리라도 CPU를 많이 쓰면 빨라집니다. → "지금 왜 빨리 닳지?"에 답.</p>
+    <h3>노화 — <code>Wh/%</code> (낮을수록 노화)</h3>
+    <p class="k" style="font-size:15px">한마디로 — <b>Wh/% = "1%가 담고 있는 실제 에너지의 크기"</b> (≈ 만충용량 ÷ 100)</p>
+    <p class="f">Wh/% = Σ(에너지 Wh) ÷ Σ(하락 %)</p>
+    <p>1%를 빼는 데 실제로 든 <b>에너지</b>. 물리적으로 <code>1% ≈ (만충 에너지)/100</code>이고, 배터리가 노화하면 만충 용량(mAh)이 줄어 <b>1%에 담긴 에너지도 줄어듭니다</b>. 즉 Wh/%는 <span class="k">부하와 거의 무관</span>(많이 써서 빨리 닳아도 "1%당 에너지"는 그대로) → <b>부하를 제거한 순수 노화 지표</b>.</p>
+    <table>
+      <tr><th>관찰</th><th>해석</th></tr>
+      <tr><td>속도 ↑ 인데 Wh/% 그대로</td><td>배터리는 멀쩡, <b>부하(사용량)가 늘어</b> 빨라진 것</td></tr>
+      <tr><td>속도 ↑ 이고 Wh/% ↓</td><td><b>진짜 배터리 노화</b>가 진행 중</td></tr>
+    </table>
+    <p class="note">레벨 토글 <b>정수% ↔ mAh정밀</b>: <code>pct</code>는 1% 계단(거침), <code>rawCap/rawMax</code>는 약 0.02% 해상도(정밀). 정밀 모드에서 양자화 노이즈가 줄어 V4c·V5가 안정됩니다.</p>
+
+    <h2>2. 속도 계산 방법(버전): V4a · V0 · V1 · V4c · V5</h2>
+    <p>한 구간(예 <code>90~100%</code>)을 지나는 데이터는 시작/끝이 잘리거나(93%에서 시작, 78%에서 멈춤) 표본이 들쭉날쭉합니다. "그 구간의 평균 속도"를 <b>어떻게 추정하느냐</b>가 버전 차이입니다. 같은 데이터를 여러 방법으로 계산해 <b>추정 방법이 결과를 얼마나 바꾸는지</b> 비교합니다.</p>
+    <table>
+      <tr><th>버전</th><th>방법</th><th>성격 / 언제</th></tr>
+      <tr><td><span class="tag">V4a</span> 풀링 <span class="k">(기본)</span></td><td><span class="f">−Σ(하락) ÷ Σ(시간)</span> "구간에 머문 총시간 대비 총하락"</td><td>비율의 <b>합</b>이라 분절 방식에 <b>불변</b>, 짧은 잡음 구간이 안 튐. 통계적으로 가장 견고 → 기본값.</td></tr>
+      <tr><td><span class="tag">V0</span> 원시평균</td><td>각 방전 에피소드의 속도를 따로 구해 <b>단순 평균</b></td><td><span class="warn">비율 평균의 함정</span>: 짧고 노이즈 큰 에피소드가 긴 것과 같은 비중 → 편향. 대조/기준용.</td></tr>
+      <tr><td><span class="tag">V1</span> 완전구간만</td><td>정확히 10%↔10%를 다 지난 에피소드만 평균</td><td>깨끗하지만 <span class="warn">선택편향</span>: 길게 한 번에 쓴 세션만 남고 짧은 세션은 버림.</td></tr>
+      <tr><td><span class="tag">V4c</span> 1% 서브빈</td><td>구간을 1%씩 나눠 각 1% 속도를 구하고 <b>1%들을 동등 평균</b></td><td>"레벨 기준 표준화". 부분 커버리지(예: 93%에서만 시작)·데이터 쏠림 편향을 진단. 정수%에선 노이즈에 민감.</td></tr>
+      <tr><td><span class="tag">V5</span> 회귀</td><td>구간 내 모든 원본점에 직선 <b>회귀</b>(최소제곱) 기울기</td><td>정수%·자기상관·계단형엔 부적합(전문가 합의) → 진단용. mAh정밀에서 더 의미.</td></tr>
+    </table>
+    <p><b>읽는 법:</b> 평소엔 <span class="k">V4a</span>. V0/V1이 V4a와 크게 갈리면 "추정이 불안정"(짧은 세션 많음)하다는 신호. V4c가 V4a와 크게 다르면 "구간 안에서 데이터가 한쪽에 쏠림". (그래서 메인 표엔 V4a만, 나머지는 진단용으로 둡니다.)</p>
+
+    <h2>3. 델타(Δ)는 무엇을 기준으로 하나</h2>
+    <p>델타는 <b>각 구간을 "그 구간 자신의 초기 기준선" 대비 차이</b>로 바꿔 보여줍니다.</p>
+    <ul>
+      <li>기준선(baseline) = 그 구간의 데이터를 <b>시간순으로 정렬해 앞 20% 기간들의 중앙값</b>.</li>
+      <li>표시값 = <span class="f">(현재 값) − (그 구간의 baseline)</span></li>
+    </ul>
+    <p><b>왜:</b> 구간마다 절대 속도가 달라(밴드별 오프셋) 추세 비교가 어렵습니다. 델타는 그 오프셋을 빼고 <span class="k">"초기 대비 얼마나 변했나"</span>만 남깁니다. 0보다 아래로 내려가면 — 속도 지표에선 <b>초기보다 빨라짐</b>, Wh/% 지표에선 <b>초기보다 노화</b>. (델타 색은 0 기준 발산색: 빨강=악화, 파랑=개선.)</p>
+
+    <h2>4. 기간: 일 / 주 / 월</h2>
+    <p>같은 V4a 풀링을 더 넓은 기간으로 <b>원본부터 다시 누적</b>합니다(일별 값을 평균내는 게 아님 — 그러면 편향). 주·월로 갈수록 노이즈가 줄고 장기 노화 추세가 또렷해집니다. (게이트 분량 기준은 동일해서 넓은 기간일수록 통과가 쉬움.)</p>
+
+    <h2>5. 화면 읽는 법</h2>
+    <ul>
+      <li><b>히트맵</b>: 가로=날짜, 세로=구간, 색=값, <b>불투명도=관측 분량</b>(흐릴수록 데이터 적음), 청록선=건강도. 왼쪽 초록→오른쪽 빨강이면 점점 빨라짐/노화. 셀 클릭=그 날짜 단면.</li>
+      <li><b>3D</b>: 가로=날짜, 높이=값, 깊이=구간(잔량). 도형 <b>선</b>(구간별 시간추세) · <b>능선</b>(날짜별 프로파일) · <b>선+능선</b>(격자) · <b>면</b>(지형). <b>0선</b>=속도 0(무방전) 위치, <b>델타</b>·<b>확대</b> 토글.</li>
+      <li>좌하단 표: 행(구간) 클릭 → 그 구간 추세. 빈 날짜는 <b>메우지 않습니다</b>(보간 금지 — 없는 데이터를 지어내지 않음).</li>
+    </ul>
+
+    <p class="note" style="margin-top:24px">설계·검증: Codex × Claude × agy 교차 리뷰. 계산 코드는 <code>lib/bucketRates.js</code>, CLI 비교는 <code>node scripts/compare-rates.js [demo|real] [pct|rawcap] [day|week|month]</code>.</p>
+    <a class="back" href="/">← 뷰어로 돌아가기</a>
+  </div>
+</body>
+</html>

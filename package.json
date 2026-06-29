@@ -1,0 +1,14 @@
+{
+  "name": "3d-battery-life",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Track macOS battery discharge over time and explore it in 3D",
+  "scripts": {
+    "sample": "node bin/sampler.js",
+    "serve": "node server.js",
+    "demo": "node scripts/gen-demo.js",
+    "report": "node -e \"import('./lib/report.js').then(m=>console.log(JSON.stringify(m.buildReport(m.readSamples('data/samples.jsonl')),null,2)))\""
+  },
+  "engines": { "node": ">=18" }
+}
