@@ -4,7 +4,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { readSamples, buildReport } from './lib/report.js';
 import { analyzeRates } from './lib/bucketRates.js';
 
@@ -20,7 +20,12 @@ const fileFor = sp => sp === 'demo' ? 'demo.jsonl' : sp === 'demo2' ? 'demo2.jso
 function resolveRoot(root) {
   if (root) return root;
   const here = path.dirname(fileURLToPath(import.meta.url));
-  return fs.existsSync(path.join(here, 'web')) ? here : path.dirname(process.execPath);
+  const exe = path.dirname(process.execPath);
+  // dev (next to source) · compiled binary (next to exe) · Tauri .app (Contents/Resources) · cwd
+  for (const c of [here, exe, path.join(exe, '..', 'Resources'), process.cwd()]) {
+    try { if (fs.existsSync(path.join(c, 'web'))) return c; } catch { /* ignore */ }
+  }
+  return exe;
 }
 
 export function startServer({ root, port } = {}) {
@@ -67,5 +72,6 @@ export function startServer({ root, port } = {}) {
   return server;
 }
 
-// auto-start when run directly (node server.js), not when imported
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) startServer();
+// auto-start only for `node server.js` (NOT when imported by the CLI or compiled into the binary,
+// which would double-bind the port). The CLI's `serve` command calls startServer() itself.
+if ((process.argv[1] || '').endsWith('server.js')) startServer();

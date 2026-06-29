@@ -20,3 +20,7 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/binaries/
 src-tauri/icons/
+
+# bun --compile temp artifacts
+*.bun-build
+.*.bun-build
