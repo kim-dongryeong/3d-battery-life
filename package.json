@@ -4,10 +4,16 @@
   "private": true,
   "type": "module",
   "description": "Track macOS battery discharge over time and explore it in 3D",
+  "bin": {
+    "battery-life": "bin/cli.js"
+  },
   "scripts": {
-    "sample": "node bin/sampler.js",
+    "start": "node bin/cli.js serve",
     "serve": "node server.js",
+    "sample": "node bin/sampler.js",
     "demo": "node scripts/gen-demo.js",
+    "demo2": "node scripts/gen-demo2.js",
+    "build:binary": "bash scripts/build-binary.sh",
     "report": "node -e \"import('./lib/report.js').then(m=>console.log(JSON.stringify(m.buildReport(m.readSamples('data/samples.jsonl')),null,2)))\""
   },
   "engines": { "node": ">=18" }

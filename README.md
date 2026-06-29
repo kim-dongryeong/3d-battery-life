@@ -18,18 +18,32 @@ macOS 배터리의 **방전 속도를 시간에 따라 기록**하고, 브라우
 ## 빠른 시작
 
 ```bash
-# 1) 백그라운드 자동 기록 시작 (60초마다, launchd, sudo 불필요)
-./install.sh
-
-# 2) 데모 데이터 생성 (1년치 시뮬레이션 — 지금 바로 3D를 보려고)
-npm run demo
-
-# 3) 뷰어 실행
-npm run serve          # → http://localhost:4317
+node scripts/gen-demo2.js     # 쇼케이스 데모 생성 (지금 바로 3D 보기)
+npm start                     # 뷰어 → http://localhost:4317   (= node bin/cli.js serve)
+./install.sh                  # (선택) 백그라운드 자동 기록 시작 — 60초마다, launchd, sudo 불필요
 ```
 
-브라우저에서 우측 패널의 **데모(1년) ↔ 내 데이터**를 전환할 수 있다.
-내 데이터는 기록이 쌓일수록(하루~한 달) 점점 풍부해진다.
+우측 패널에서 **데모2 ✨(쇼케이스) ↔ 데모1 ↔ 내 데이터**를 전환. 내 데이터는 기록이 쌓일수록 풍부해진다.
+지표·버전·델타·노화(Wh/%) 설명은 화면 우상단 **?안내**(= `/help.html`).
+
+## 배포 / 패키징
+
+같은 코어 위에 포장만 다르게 — 셋 다 이 웹 뷰어를 재사용한다.
+
+```bash
+# ① npx / CLI  (Node 필요)
+npx battery-life serve        # serve · sample · demo · demo2 · install · uninstall
+node bin/cli.js help
+
+# ② 단일 실행파일  (Node 불필요, Bun으로 컴파일)
+npm run build:binary          # → dist/battery-life (+ dist/web/)
+./dist/battery-life serve
+
+# ③ 메뉴바 앱(.app/.dmg)  — Tauri v2 스캐폴드
+#   src-tauri/ + 빌드 가이드는 TAURI.md 참고 (Rust 툴체인 필요)
+```
+
+> 어떤 형태든 **배터리 기록(sample)** 은 `./install.sh`의 launchd 에이전트(또는 `battery-life sample`)가 1분마다 수행한다.
 
 ## 3D 화면 읽는 법
 
