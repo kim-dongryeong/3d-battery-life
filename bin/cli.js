@@ -8,12 +8,13 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sample } from '../lib/battery.js';
-import { startServer } from '../server.js';
+import { startServer, resolveRoot } from '../server.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));        // .../bin (dev) or virtual (compiled)
-const pkgRoot = path.dirname(here);
-const compiled = !fs.existsSync(path.join(pkgRoot, 'web'));      // bun-compiled: sources not on real fs
-const root = compiled ? path.dirname(process.execPath) : pkgRoot; // assets/data live next to the binary
+const pkgRoot = path.dirname(here);                              // for spawning dev scripts (Node/npx only)
+// Let server.js decide where web/ & data/ live: BATTERY_ROOT → exe dir → .app Resources → cwd.
+// (Don't force exe dir here — that would hide the Tauri Resources/ layout from resolveRoot.)
+const root = resolveRoot();
 const dataDir = path.join(root, 'data');
 const cmd = (process.argv[2] || 'serve').replace(/^-+/, '');
 const node = rel => spawnSync(process.execPath, [path.join(pkgRoot, rel)], { stdio: 'inherit' });

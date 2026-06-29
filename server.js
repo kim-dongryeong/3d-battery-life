@@ -17,13 +17,19 @@ const fileFor = sp => sp === 'demo' ? 'demo.jsonl' : sp === 'demo2' ? 'demo2.jso
 
 // In dev, assets sit next to this file. In a bun-compiled binary the source lives in a
 // virtual fs (no web/ there) → fall back to the directory of the executable.
-function resolveRoot(root) {
+export function resolveRoot(root) {
   if (root) return root;
-  const here = path.dirname(fileURLToPath(import.meta.url));
+  if (process.env.BATTERY_ROOT) return process.env.BATTERY_ROOT;   // explicit (Tauri sets this to its resource dir)
   const exe = path.dirname(process.execPath);
+  let here = exe;
+  try { here = path.dirname(fileURLToPath(import.meta.url)); } catch { /* compiled: import.meta.url not a file URL */ }
   // dev (next to source) · compiled binary (next to exe) · Tauri .app (Contents/Resources) · cwd
-  for (const c of [here, exe, path.join(exe, '..', 'Resources'), process.cwd()]) {
-    try { if (fs.existsSync(path.join(c, 'web'))) return c; } catch { /* ignore */ }
+  const cands = [here, exe, path.resolve(exe, '..', 'Resources'), process.cwd()];
+  for (const c of cands) {
+    let hit = false;
+    try { hit = fs.existsSync(path.join(c, 'web')); } catch { /* ignore */ }
+    if (process.env.BATTERY_DEBUG) console.error('[resolveRoot] try', JSON.stringify(c), '->', hit);
+    if (hit) return c;
   }
   return exe;
 }

@@ -39,8 +39,9 @@ node bin/cli.js help
 npm run build:binary          # → dist/battery-life (+ dist/web/)
 ./dist/battery-life serve
 
-# ③ 메뉴바 앱(.app/.dmg)  — Tauri v2 스캐폴드
-#   src-tauri/ + 빌드 가이드는 TAURI.md 참고 (Rust 툴체인 필요)
+# ③ 메뉴바 앱(.app/.dmg)  — Tauri v2  (빌드·실행 검증됨)
+npm run build:app             # 바이너리→사이드카→.app/.dmg  (Bun + Rust + @tauri-apps/cli 필요)
+#   더블클릭 → 메뉴바 아이콘 → "뷰어 열기".  자세한 건 TAURI.md
 ```
 
 > 어떤 형태든 **배터리 기록(sample)** 은 `./install.sh`의 launchd 에이전트(또는 `battery-life sample`)가 1분마다 수행한다.
