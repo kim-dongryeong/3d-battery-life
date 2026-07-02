@@ -223,6 +223,16 @@ function rebuild() {
 
 const avgRate = bs => { const v = (bs || []).filter(b => b.pctPerMin); return v.length ? v.reduce((a, b) => a + b.pctPerMin, 0) / v.length : null; };
 
+const fmtWhen = ms => {
+  const d = new Date(ms);
+  const t = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+  return new Date().toDateString() === d.toDateString() ? t : `${d.getMonth() + 1}/${d.getDate()} ${t}`;
+};
+const agoText = ms => {
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  return s < 90 ? '방금' : s < 3600 ? `${Math.round(s / 60)}분 전` : s < 86400 ? `${Math.round(s / 3600)}시간 전` : `${Math.round(s / 86400)}일 전`;
+};
+
 function updateHud(r) {
   const L = r.latest, stats = document.getElementById('stats');
 
@@ -242,14 +252,18 @@ function updateHud(r) {
 
   const rows = [];
   if (L) {
-    rows.push(['현재', `${L.pct}% · ${L.watts}W ${L.charging ? '⚡' : L.ac ? '🔌' : '🔋'}`]);
+    const ms = L.t ? L.t * 1000 : (L.iso ? Date.parse(L.iso) : NaN);
+    const live = state.source === 'real';
+    asofMs = Number.isFinite(ms) ? ms : null; asofLive = live;
+    rows.push([`현재${live ? ' 🟢' : ''}`, `${L.pct}% · ${L.watts}W ${L.charging ? '⚡' : L.ac ? '🔌' : '🔋'}`]);
+    if (Number.isFinite(ms)) rows.push(['기준 시각', live ? `${fmtWhen(ms)} · ${agoText(ms)}` : `${fmtWhen(ms)} (데모)`]);
     rows.push(['배터리 건강도', `${L.healthPct}%`]);
     rows.push(['사이클', `${L.cycles}회`]);
     rows.push(['만충 용량', `${L.rawMax} / ${L.design} mAh`]);
   }
   rows.push(['기록 기간', `${r.spanDays}일 · ${r.sessions.length}방전세션`]);
   rows.push(['샘플 수', `${r.sampleCount.toLocaleString()}개`]);
-  stats.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  stats.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd${k === '기준 시각' ? ' id="asof"' : ''}>${v}</dd>`).join('');
 
   renderRates();  // rigorous per-band discharge-rate panel (lib/bucketRates.js, /api/rates)
   if (typeof renderInsight === 'function') renderInsight();   // E 카드 레이아웃 값 갱신
@@ -713,6 +727,22 @@ function showTip(dayIndex, p, x, y) {
 
 // ---- data ---------------------------------------------------------------
 const emptyDefaultHTML = document.getElementById('empty').innerHTML;
+
+// The launchd sampler appends a new reading every 60s. Only '내 데이터' is live —
+// demos are fixed simulated logs — so poll only for source==='real', and only when the
+// tab is visible. A ticker also refreshes the "N분 전" label between fetches.
+let liveTimer = null, tickTimer = null, asofMs = null, asofLive = false;
+function refreshAsOf() {                                   // update just the "기준 시각" cell, not the whole HUD
+  const el = document.getElementById('asof');
+  if (el && asofMs && asofLive) el.textContent = `${fmtWhen(asofMs)} · ${agoText(asofMs)}`;
+}
+function scheduleLive() {
+  clearInterval(liveTimer); clearInterval(tickTimer); liveTimer = tickTimer = null;
+  if (state.source !== 'real') return;
+  liveTimer = setInterval(() => { if (!document.hidden) load(); }, 60000);    // pull new samples
+  tickTimer = setInterval(() => { if (!document.hidden) refreshAsOf(); }, 20000);  // tick the relative age
+}
+
 async function load() {
   try {
     const res = await fetch(`/api/report?source=${state.source}`);
@@ -729,6 +759,7 @@ async function load() {
   }
   rebuild();
   loadRates();                 // per-band rate panel (concurrent)
+  scheduleLive();              // (re)arm the 60s live refresh for '내 데이터'
 }
 
 // ---- UI wiring ----------------------------------------------------------
