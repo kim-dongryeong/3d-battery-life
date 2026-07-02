@@ -83,6 +83,51 @@ impl Reader {
     }
 }
 
+// ---- menu-bar battery GLYPH (like Stats): a battery outline filling proportional to charge,
+// colored by level (red <20% / orange <40% / green), teal + bolt while charging. Returns raw
+// RGBA + dims; main.rs wraps it in tauri::image::Image and calls tray.set_icon().
+pub fn battery_icon(l: &Live) -> (Vec<u8>, u32, u32) {
+    let (w, h) = (40u32, 20u32);
+    let mut buf = vec![0u8; (w * h * 4) as usize];
+    let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
+        if x < 0 || y < 0 || x as u32 >= w || y as u32 >= h { return; }
+        let i = ((y as u32 * w + x as u32) * 4) as usize;
+        buf[i] = c.0; buf[i + 1] = c.1; buf[i + 2] = c.2; buf[i + 3] = c.3;
+    };
+    let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
+        for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
+    };
+    let outline = (170u8, 176u8, 188u8, 255u8); // mid-gray: readable on light & dark menu bars
+    let pct = l.pct.clamp(0.0, 100.0);
+    let fill = if l.charging || l.full { (77, 208, 192, 255) }
+        else if pct <= 20.0 { (229, 72, 77, 255) }
+        else if pct <= 40.0 { (232, 133, 12, 255) }
+        else { (74, 200, 120, 255) };
+
+    // body outline (2px) from (1,3) to (33,17); nub cap at right
+    let (bx0, by0, bx1, by1) = (1i32, 3i32, 33i32, 17i32);
+    rect(&mut buf, bx0, by0, bx1, by0 + 2, outline);         // top
+    rect(&mut buf, bx0, by1 - 2, bx1, by1, outline);         // bottom
+    rect(&mut buf, bx0, by0, bx0 + 2, by1, outline);         // left
+    rect(&mut buf, bx1 - 2, by0, bx1, by1, outline);         // right
+    rect(&mut buf, bx1, 7, bx1 + 3, 13, outline);            // cap
+
+    // inner fill proportional to %
+    let (ix0, iy0, ix1, iy1) = (bx0 + 3, by0 + 3, bx1 - 3, by1 - 3);
+    let full_w = (ix1 - ix0) as f64;
+    let fw = (full_w * pct / 100.0).round() as i32;
+    rect(&mut buf, ix0, iy0, ix0 + fw.max(1), iy1, fill);
+
+    // charging bolt (dark, over the fill) — a tiny lightning
+    if l.charging {
+        let bolt = (20u8, 24u8, 30u8, 255u8);
+        for &(x, y) in &[(18, 6), (17, 7), (16, 8), (18, 8), (17, 9), (16, 10), (15, 11), (18, 10), (19, 9), (20, 8)] {
+            px(&mut buf, x, y, bolt); px(&mut buf, x, y + 1, bolt);
+        }
+    }
+    (buf, w, h)
+}
+
 // The compact tray-title text macOS shows next to the icon.
 pub fn tray_title(l: &Live) -> String {
     if !l.ok {

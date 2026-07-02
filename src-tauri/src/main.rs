@@ -134,10 +134,19 @@ fn main() {
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut reader = live::Reader::new();
+                let mut last_key = String::new();
                 loop {
-                    let title = live::tray_title(&reader.read());
+                    let l = reader.read();
                     if let Some(tray) = handle.tray_by_id("tray") {
+                        let title = live::tray_title(&l);
                         let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
+                        // redraw the battery glyph only when the visible state changes (level/charging)
+                        let key = format!("{}-{}-{}", l.pct.round() as i64, l.charging, l.full);
+                        if l.ok && key != last_key {
+                            last_key = key;
+                            let (rgba, w, h) = live::battery_icon(&l);
+                            let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h)));
+                        }
                     }
                     std::thread::sleep(std::time::Duration::from_secs(2));
                 }
