@@ -3,7 +3,9 @@
 `src-tauri/`는 **빌드·실행이 검증된** 메뉴바(트레이) 앱입니다. (Apple Silicon에서 `.app`+`.dmg` 생성 → 실행 → 사이드카가 번들된 뷰어를 `localhost:4317`에 서빙하는 것까지 확인.)
 
 ## 동작 개념
-앱을 켜면 → 번들된 **`battery-life serve` 사이드카**(로컬 서버)가 실행되고 → 트레이(메뉴바) 아이콘의 **"뷰어 열기"** 로 `http://localhost:4317`을 띄우는 네이티브 창이 나옵니다. 이미 만든 웹 뷰어를 그대로 재사용합니다.
+앱을 켜면 → 번들된 **`battery-life serve` 사이드카**(로컬 서버)가 실행되고 → 트레이(메뉴바) 아이콘 메뉴로 **뷰어 열기 / 배터리 기록 시작 / 배터리 기록 중지 / 종료**. "뷰어 열기"는 `http://localhost:4317`을 띄우는 네이티브 창. 이미 만든 웹 뷰어를 그대로 재사용합니다.
+
+**첫 실행 동의**: 기록이 아직 설정 안 됐고 물어본 적 없으면, 첫 실행 때 osascript 네이티브 다이얼로그로 "배터리 기록을 켤까요?"를 한 번 묻고, 승낙하면 `record on`을 실행(launchd 등록). 이후엔 메뉴바 토글로 켜고 끕니다. (기록 명령은 번들 안 `Contents/MacOS/battery-life` 바이너리를 직접 호출 → 별도 플러그인/권한 불필요.)
 
 자산 위치는 `server.js`의 `resolveRoot()`가 자동으로 찾습니다: **`BATTERY_ROOT` 환경변수 → 실행파일 옆 → `.app`의 `Contents/Resources` → cwd** 순. 그래서 사이드카가 `Contents/MacOS/`에 있어도 `Contents/Resources/web`·`Contents/Resources/data/demo2.jsonl`을 찾아냅니다(`tauri.conf.json`의 `bundle.resources`로 번들됨).
 
@@ -33,6 +35,6 @@ npm run build:app      # ① 바이너리 → ② 사이드카(타깃 트리플�
 - **다른 칩**: Intel 맥은 `build-app.sh`가 자동으로 `-x86_64-apple-darwin` 트리플로 사이드카를 복사합니다(그 맥에서 빌드 시).
 
 ## 구조
-- `src-tauri/src/main.rs` — 사이드카 spawn + 트레이 메뉴(+창 표시)
+- `src-tauri/src/main.rs` — 사이드카 spawn + 첫 실행 동의(osascript) + 트레이 메뉴(뷰어 열기·기록 시작/중지·종료)
 - `src-tauri/tauri.conf.json` — 창/번들 설정, `externalBin`(사이드카), `resources`(web·데모)
 - `src-tauri/capabilities/default.json` — 사이드카 실행 권한

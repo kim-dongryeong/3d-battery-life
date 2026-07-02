@@ -53,10 +53,10 @@ npm run build:binary          # → dist/battery-life (+ dist/web/)
 
 # ③ 메뉴바 앱(.app/.dmg)  — Tauri v2  (빌드·실행 검증됨)
 npm run build:app             # 바이너리→사이드카→.app/.dmg  (Bun + Rust + @tauri-apps/cli 필요)
-#   더블클릭 → 메뉴바 아이콘 → "뷰어 열기".  자세한 건 TAURI.md
+#   더블클릭 → 첫 실행 때 "기록 켤까요?" 동의 → 메뉴바에서 뷰어 열기 / 기록 시작·중지.  자세한 건 TAURI.md
 ```
 
-> 어떤 형태든 **배터리 기록(sample)** 은 `./install.sh`의 launchd 에이전트(또는 `battery-life sample`)가 1분마다 수행한다.
+> **배터리 기록**은 launchd 에이전트가 1분마다 수행(로그인 시 자동 시작). 켜는 법: **③ 앱**은 첫 실행 동의/메뉴바 토글, **CLI**는 `battery-life record on/off/status`(= `./install.sh`/`./uninstall.sh`).
 
 ## 3D 화면 읽는 법
 
