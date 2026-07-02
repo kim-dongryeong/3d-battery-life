@@ -257,6 +257,7 @@ function updateHud(r) {
     asofMs = Number.isFinite(ms) ? ms : null; asofLive = live;
     rows.push([`현재${live ? ' 🟢' : ''}`, `${L.pct}% · ${L.watts}W ${L.charging ? '⚡' : L.ac ? '🔌' : '🔋'}`]);
     if (Number.isFinite(ms)) rows.push(['기준 시각', live ? `${fmtWhen(ms)} · ${agoText(ms)}` : `${fmtWhen(ms)} (데모)`]);
+    if (L.lowPower != null) rows.push(['저전력 모드', L.lowPower ? '🟡 켜짐' : '꺼짐']);   // pmset lowpowermode
     rows.push(['배터리 건강도', `${L.healthPct}%`]);
     rows.push(['사이클', `${L.cycles}회`]);
     rows.push(['만충 용량', `${L.rawMax} / ${L.design} mAh`]);
