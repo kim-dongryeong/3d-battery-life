@@ -188,6 +188,7 @@ fn main() {
             std::thread::spawn(move || {
                 let mut reader = live::Reader::new();
                 let smc = smc::Smc::open();   // live temp/system-power (real-time; ioreg is 60s-quantized)
+                if smc.is_some() { let _ = std::fs::create_dir_all(data_dir()); }   // so the bridge write can't silently fail
                 let mut last_key = String::new();
                 let (mut low, mut crit, mut high) = (false, false, false);
                 loop {

@@ -57,22 +57,27 @@ impl Smc {
             let r = IOConnectCallStructMethod(self.conn, KERNEL_INDEX_SMC,
                 inp as *const _ as *const c_void, std::mem::size_of::<KeyData>(),
                 &mut out as *mut _ as *mut c_void, &mut sz);
-            if r != 0 || out.result != 0 { None } else { Some(out) }
+            // Reject a short/truncated reply: the driver must return the full SMCKeyData_t or we
+            // could act on a structurally-incomplete response across the unsafe FFI boundary.
+            if r != 0 || sz != std::mem::size_of::<KeyData>() || out.result != 0 { None } else { Some(out) }
         }
     }
 
     pub fn read_f64(&self, key: &str) -> Option<f64> {
+        if key.len() != 4 { return None; }   // fourcc indexes b[0..4]; guard so a bad key can't panic the ticker
         let mut i = KeyData::default(); i.key = fourcc(key); i.data8 = READ_KEYINFO;
         let info = self.call(&i)?;
         let (size, dtype) = (info.keyInfo.dataSize, info.keyInfo.dataType);
+        if size == 0 || size > 32 { return None; }   // SMC payload is SMCBytes_t[32] — reject a bogus width
         let mut i2 = KeyData::default(); i2.key = fourcc(key); i2.data8 = READ_BYTES; i2.keyInfo.dataSize = size;
         let out = self.call(&i2)?;
         let b = &out.bytes;
+        // Require the declared type's byte width so a misreported key can't decode zero-padding as a real value.
         let v = match &typ(dtype) {
-            b"flt " => f32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64,
-            b"sp78" => (i16::from_be_bytes([b[0], b[1]]) as f64) / 256.0,
-            b"sp87" => (i16::from_be_bytes([b[0], b[1]]) as f64) / 128.0,
-            b"fp88" => (u16::from_be_bytes([b[0], b[1]]) as f64) / 256.0,
+            b"flt " if size >= 4 => f32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64,
+            b"sp78" if size >= 2 => (i16::from_be_bytes([b[0], b[1]]) as f64) / 256.0,
+            b"sp87" if size >= 2 => (i16::from_be_bytes([b[0], b[1]]) as f64) / 128.0,
+            b"fp88" if size >= 2 => (u16::from_be_bytes([b[0], b[1]]) as f64) / 256.0,
             _ if size == 4 => f32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64,
             _ if size == 2 => u16::from_be_bytes([b[0], b[1]]) as f64,
             _ => return None,
