@@ -5,7 +5,7 @@ const $ = id => document.getElementById(id);
 // and CSP is disabled in the popover window, so unescaped innerHTML would execute.
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let pv = (() => { try { return new URLSearchParams(location.search).get('pv') || localStorage.getItem('battPV') || 'list'; } catch { return 'list'; } })();
-let theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
+let theme = (() => { try { return new URLSearchParams(location.search).get('theme') || localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 let unit = (() => { try { return localStorage.getItem('battUnit') || 'c'; } catch { return 'c'; } })();
 let live = null, procs = [], detail = {}, lastLiveAt = 0;
 
@@ -15,6 +15,9 @@ const stateOf = s => s.charging ? '충전 중' : s.full ? '완충' : s.ac ? 'AC 
 const stateIcon = s => s.charging ? '⚡' : s.ac ? '🔌' : '🔋';
 const ago = ms => { const t = (Date.now() - ms) / 1000; return t < 3 ? '방금' : `${Math.round(t)}초 전`; };
 const barColor = pct => pct <= 20 ? '#e5484d' : pct <= 40 ? '#e8850c' : 'var(--accent)';
+// the whole popover tints to this: teal when healthy/charging, amber low, red critical
+const stateColor = (s, pct) => s.charging ? 'var(--accent)' : barColor(pct);
+const LIVE = `<span class="livet"><i class="ld"></i><span class="livew">LIVE</span></span>`;  // own literal, safe HTML
 
 async function pull() {
   try {
@@ -33,21 +36,26 @@ async function pullDetail() {
 }
 
 function batterySVG(pct, s) {
-  const w = 46, fill = Math.max(3, pct / 100 * (w - 6));
-  const glyph = s.charging ? '⚡' : '';
-  return `<svg viewBox="0 0 60 28" width="60" height="28" aria-hidden="true">
-    <rect x="1" y="4" width="${w}" height="20" rx="4" fill="none" stroke="var(--fg)" stroke-width="2" opacity=".8"/>
-    <rect x="${w + 2}" y="10" width="4" height="8" rx="1.5" fill="var(--fg)" opacity=".8"/>
-    <rect x="4" y="7" width="${fill}" height="14" rx="2" fill="${barColor(pct)}"/>
-    ${glyph ? `<text x="${1 + w / 2}" y="19" text-anchor="middle" font-size="13" fill="#0a0c12">${glyph}</text>` : ''}
+  const w = 46, fill = Math.max(4, pct / 100 * (w - 7));
+  const bolt = s.charging
+    ? `<path d="M23.6 6.3 L16.4 15.8 H21 L19.4 21.7 L27.2 11.7 H22.4 L24.6 6.3 Z" fill="var(--onfg)"/>`
+    : '';
+  return `<svg viewBox="0 0 60 28" width="58" height="27" aria-hidden="true">
+    <defs><linearGradient id="bf" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--state)" stop-opacity="1"/>
+      <stop offset="1" stop-color="var(--state)" stop-opacity=".8"/></linearGradient></defs>
+    <rect x="1" y="4" width="${w}" height="20" rx="5.5" fill="none" stroke="var(--fg)" stroke-width="1.8" opacity=".5"/>
+    <rect x="${w + 2.5}" y="10" width="4" height="8" rx="2" fill="var(--fg)" opacity=".5"/>
+    <rect x="3.5" y="6.5" width="${fill}" height="15" rx="3.5" fill="url(#bf)"/>
+    ${bolt}
   </svg>`;
 }
 
 function rowsCore(s) {
   const amp = s.amperage != null ? `${s.amperage} mA` : '–';
   const r = [['전력', `${s.watts != null ? s.watts.toFixed(2) : '–'} W`]];
-  if (s.systemW != null) r.push(['시스템 전력', `${s.systemW.toFixed(1)} W · 🔴라이브`]);   // SMC (moves every 2s)
-  r.push(['전류', amp], ['전압', `${s.voltage != null ? s.voltage.toFixed(2) : '–'} V`], ['온도', fmtTemp(s.tempC) + (s.smc ? ' · 🔴' : '')]);
+  if (s.systemW != null) r.push(['시스템 전력', `${s.systemW.toFixed(1)} W&nbsp; ${LIVE}`]);   // SMC (moves every 2s)
+  r.push(['전류', amp], ['전압', `${s.voltage != null ? s.voltage.toFixed(2) : '–'} V`], ['온도', fmtTemp(s.tempC) + (s.smc ? ' <i class="ld"></i>' : '')]);
   return r;
 }
 function rowsHealth(s) {
@@ -92,6 +100,7 @@ function render() {
   const known = s.pct != null;
   const pct = known ? Math.round(s.pct) : 0;   // unknown → gauge shows 0 fill but label reads "?"
   const pctLbl = known ? `${pct}%` : '?';
+  document.documentElement.style.setProperty('--state', stateColor(s, pct));   // tint whole UI to battery state
   const timeLbl = s.charging ? '완충까지' : '남은 시간';
   const lpm = s.lowPower ? `<span class="lpm">🟡 저전력 모드</span>` : '';
 
@@ -100,18 +109,21 @@ function render() {
     el.innerHTML =
       `<div class="gauge">
         <svg viewBox="0 0 140 140" width="150" height="150">
-          <circle cx="70" cy="70" r="${R}" fill="none" stroke="var(--line)" stroke-width="12"/>
-          <circle cx="70" cy="70" r="${R}" fill="none" stroke="${barColor(pct)}" stroke-width="12"
+          <defs><linearGradient id="gg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="var(--state)" stop-opacity="1"/>
+            <stop offset="1" stop-color="var(--state)" stop-opacity=".68"/></linearGradient></defs>
+          <circle cx="70" cy="70" r="${R}" fill="none" stroke="var(--line)" stroke-width="11"/>
+          <circle cx="70" cy="70" r="${R}" fill="none" stroke="url(#gg)" stroke-width="11"
             stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${off}" transform="rotate(-90 70 70)"/>
           <text x="70" y="66" text-anchor="middle" class="gpct">${pctLbl}</text>
           <text x="70" y="88" text-anchor="middle" class="gsub">${stateIcon(s)} ${s.watts != null ? s.watts.toFixed(1) + 'W' : ''}</text>
         </svg>
-        <div class="gstate">${stateOf(s)} ${lpm}</div>
+        <div class="gstate">${stateOf(s)}</div> ${lpm ? `<div style="margin-top:6px">${lpm}</div>` : ''}
         <div class="gtime">${timeLbl} <b>${fmtTime(s.timeRemain)}</b></div>
       </div>
-      <div class="grid2">${kvHTML(rowsCore(s))}</div>
+      ${kvHTML(rowsCore(s))}
       <div class="hbar"><i style="width:${s.healthPct != null ? Math.min(100, s.healthPct) : 0}%"></i></div>
-      <div class="grid2">${kvHTML(rowsHealth(s))}</div>${tailHTML(s)}`;
+      ${kvHTML(rowsHealth(s))}${tailHTML(s)}`;
   } else if (pv === 'cards') {
     el.innerHTML =
       `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pctLbl}</div>
@@ -123,7 +135,8 @@ function render() {
         <div class="card"><div class="ct">건강</div><div class="cv">${s.healthPct != null ? Math.min(100, Math.round(s.healthPct)) : '–'}<small>%</small></div></div>
         <div class="card"><div class="ct">사이클</div><div class="cv">${s.cycles ?? '–'}</div></div>
       </div>
-      <div class="grid2">${kvHTML([['전류', s.amperage != null ? s.amperage + ' mA' : '–'], ['전압', (s.voltage != null ? s.voltage.toFixed(2) : '–') + ' V'], ['만충/설계', (s.rawMax != null ? s.rawMax + '/' + s.design : '–') + ' mAh']])}</div>
+      <div class="grid2">${kvHTML([['전류', s.amperage != null ? s.amperage + ' mA' : '–'], ['전압', (s.voltage != null ? s.voltage.toFixed(2) : '–') + ' V']])}</div>
+      ${kvHTML([['만충 / 설계', (s.rawMax != null && s.design != null ? s.rawMax + ' / ' + s.design : '–') + ' mAh']])}
       ${tailHTML(s)}`;
   } else { // list (Stats-like dense)
     el.innerHTML =
@@ -136,7 +149,7 @@ function render() {
       ${kvHTML(rowsHealth(s))}
       ${tailHTML(s)}`;
   }
-  $('live').textContent = `🟢 라이브 · ${ago(lastLiveAt)}`;
+  $('live').textContent = `라이브 · ${ago(lastLiveAt)}`;
 }
 
 // controls
@@ -152,4 +165,4 @@ pull(); pullProcs(); pullDetail();
 setInterval(() => { if (!document.hidden) pull(); }, 2000);
 setInterval(() => { if (!document.hidden) pullProcs(); }, 5000);
 setInterval(() => { if (!document.hidden) pullDetail(); }, 12000);
-setInterval(() => { if (live && !document.hidden) $('live').textContent = `🟢 라이브 · ${ago(lastLiveAt)}`; }, 1000);
+setInterval(() => { if (live && !document.hidden) $('live').textContent = `라이브 · ${ago(lastLiveAt)}`; }, 1000);
