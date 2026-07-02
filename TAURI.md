@@ -7,7 +7,7 @@
 
 **첫 실행 동의**: 기록이 아직 설정 안 됐고 물어본 적 없으면, 첫 실행 때 osascript 네이티브 다이얼로그로 "배터리 기록을 켤까요?"를 한 번 묻고, 승낙하면 `record on`을 실행(launchd 등록). 이후엔 메뉴바 토글로 켜고 끕니다. (기록 명령은 번들 안 `Contents/MacOS/battery-life` 바이너리를 직접 호출 → 별도 플러그인/권한 불필요.)
 
-자산 위치는 `server.js`의 `resolveRoot()`가 자동으로 찾습니다: **`BATTERY_ROOT` 환경변수 → 실행파일 옆 → `.app`의 `Contents/Resources` → cwd** 순. 그래서 사이드카가 `Contents/MacOS/`에 있어도 `Contents/Resources/web`·`Contents/Resources/data/demo2.jsonl`을 찾아냅니다(`tauri.conf.json`의 `bundle.resources`로 번들됨).
+자산 위치는 `server.js`의 `resolveRoot()`가 자동으로 찾습니다: **`BATTERY_ROOT` 환경변수 → 실행파일 옆 → `.app`의 `Contents/Resources` → cwd** 순. 그래서 사이드카가 `Contents/MacOS/`에 있어도 `Contents/Resources/web`을 찾아냅니다(`tauri.conf.json`의 `bundle.resources`로 `web/`만 번들). **데모 데이터는 번들하지 않고** 첫 요청 때 온디맨드 생성해 `~/Library/Application Support/3d-battery-life/demo-cache/`에 캐시합니다.
 
 ## 사전 준비 (한 번)
 ```bash

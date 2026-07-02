@@ -9,7 +9,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sample } from '../lib/battery.js';
-import { startServer, resolveRoot } from '../server.js';
+import { startServer, resolveRoot, DEMO_VER } from '../server.js';
 import { userDataDir, samplesFile } from '../lib/paths.js';
 import { generateDemoLines } from '../scripts/gen-demo.js';
 import { generateDemo2Lines } from '../scripts/gen-demo2.js';
@@ -25,12 +25,15 @@ const LABEL = 'com.kdr.3d-battery-life.sampler';
 const AGENT = path.join(os.homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
 const xml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
-// What launchd runs each interval: node cli (dev) or the compiled binary (app).
+// What launchd runs each interval: node cli (dev/npm) or the compiled binary (app).
+// Detect "compiled" via the Bun global, NOT by argv[1] extension — an npm-installed bin
+// shim has no .js suffix, and the old check produced a broken `node sample` plist there.
+const COMPILED = typeof Bun !== 'undefined';
 function samplerArgv() {
+  if (COMPILED) return [process.execPath, 'sample'];             // the single binary itself
   const argv1 = process.argv[1] || '';
-  return argv1.endsWith('.js')
-    ? [process.execPath, path.join(pkgRoot, 'bin', 'cli.js'), 'sample']
-    : [process.execPath, 'sample'];
+  const script = fs.existsSync(argv1) ? argv1 : path.join(pkgRoot, 'bin', 'cli.js');
+  return [process.execPath, script, 'sample'];                   // node + this script (works for npm shims too)
 }
 function plistXML(interval) {
   const data = userDataDir();
@@ -80,7 +83,13 @@ function recordOn(interval) {
   const uid = process.getuid();
   spawnSync('launchctl', ['bootout', `gui/${uid}/${LABEL}`], { stdio: 'ignore' }); // idempotent: drop any old one first
   const r = spawnSync('launchctl', ['bootstrap', `gui/${uid}`, AGENT], { stdio: 'ignore' });
-  if (r.status !== 0) spawnSync('launchctl', ['load', '-w', AGENT], { stdio: 'ignore' });
+  const r2 = r.status !== 0 ? spawnSync('launchctl', ['load', '-w', AGENT], { stdio: 'ignore' }) : null;
+  if (r.status !== 0 && (!r2 || r2.status !== 0)) {              // don't claim ON when both launchctl paths failed
+    console.error(`❌ launchd 등록 실패 (bootstrap/load 모두 실패) — plist는 ${AGENT}에 생성됨`);
+    console.error(`   수동 시도: launchctl bootstrap gui/${uid} "${AGENT}"`);
+    process.exitCode = 1;
+    return;
+  }
   console.log(`✅ recording ON — every ${interval}s → ${samplesFile()}`);
   console.log(`   auto-starts at login (survives reboot).  status: battery-life record status   stop: battery-life record off`);
 }
@@ -130,9 +139,11 @@ switch (cmd) {
   case 'demo':
   case 'demo2': {
     const l = cmd === 'demo2' ? generateDemo2Lines() : generateDemoLines();
-    const dir = path.join(pkgRoot, 'data');
+    // compiled binary: pkgRoot is the read-only virtual /$bunfs → write to the shared cache
+    // (which the server's demoFile() also reads); dev/npm: write into the repo's data/.
+    const dir = COMPILED ? path.join(userDataDir(), 'demo-cache') : path.join(pkgRoot, 'data');
     fs.mkdirSync(dir, { recursive: true });
-    const f = path.join(dir, `${cmd}.jsonl`);
+    const f = path.join(dir, COMPILED ? `${cmd}.v${DEMO_VER}.jsonl` : `${cmd}.jsonl`);   // match server's cache name
     fs.writeFileSync(f, l.join('\n') + '\n');
     console.log(`${cmd}: ${l.length} samples → ${f}`);
     break;

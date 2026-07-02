@@ -5,10 +5,11 @@
   --line: #232838;
   --accent: #4dd0c0;
   --panel: rgba(16, 19, 28, 0.82);
-  --btn: var(--btn);
-  --th: var(--th);
+  /* self-referencing var() is a cycle → guaranteed-invalid → these were transparent in dark mode */
+  --btn: #1b2232;
+  --th: #161c2a;
   --tip: rgba(10, 12, 18, 0.94);
-  --onfg: var(--onfg);
+  --onfg: #0a0c12;
 }
 html.light {
   --bg: #eef1f6;
@@ -94,7 +95,12 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #buckets th:first-child { text-align: left; }
 #buckets td { padding: 1px 0; text-align: right; }
 #buckets td:first-child { text-align: left; color: var(--dim); }
-#buckets .spd { display: inline-block; height: 6px; border-radius: 3px; vertical-align: middle; }
+#buckets .spd { display: inline-block; height: 6px; border-radius: 3px; vertical-align: middle; background: var(--accent); }
+#buckets tr[data-band] { cursor: pointer; }
+#buckets tr[data-band]:hover td { background: color-mix(in srgb, var(--fg) 7%, transparent); }
+#buckets tr.sel td { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+#buckets tr.sel td:first-child { color: var(--accent); font-weight: 600; box-shadow: inset 2px 0 0 var(--accent); }
+#buckets td { padding: 2px 0 2px 4px; }
 #buckets .note { color: var(--dim); font-size: 10px; margin-top: 7px; max-width: 230px; }
 #buckets h2 small { color: var(--dim); font-weight: 400; font-size: 10px; }
 #buckets td.rt { text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums; }
@@ -104,11 +110,6 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   border-radius: 6px; padding: 3px 7px; font-size: 11px; cursor: pointer; }
 #buckets .rseg button:hover { color: var(--fg); }
 #buckets .rseg button.on { background: var(--accent); color: var(--onfg); border-color: var(--accent); font-weight: 600; }
-#buckets tr[data-band] { cursor: pointer; }
-#buckets tr[data-band]:hover td { color: var(--fg); }
-#buckets tr.sel td { background: rgba(77,208,192,.12); }
-#buckets tr.sel td:first-child { color: var(--accent); font-weight: 600; }
-
 #trendchart { position: fixed; z-index: 10; left: 284px; bottom: 16px; width: 478px; padding: 12px 14px;
   background: var(--panel); backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: 14px; }
 #trendchart h2 { margin: 0 0 6px; font-size: 12px; font-weight: 600; }
@@ -142,9 +143,8 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #trendchart .hwrap { line-height: 0; }
 #trendchart rect[data-period] { cursor: pointer; }
 #trendchart .hlegend { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--dim); margin-top: 5px; flex-wrap: wrap; line-height: 1.4; }
-#trendchart .hlegend .hbar { width: 84px; height: 8px; border-radius: 3px; display: inline-block;
-  background: linear-gradient(90deg, hsl(0,75%,52%), hsl(60,75%,52%), hsl(120,75%,52%)); }
-#trendchart .hlegend .hbar.div { background: linear-gradient(90deg, hsl(8,75%,50%), #33373f, hsl(205,70%,50%)); }
+#trendchart .hlegend .hbar { width: 84px; height: 8px; border-radius: 3px; display: inline-block; }
+/* gradient is set inline from heatColor() so it always matches the cells & metric direction */
 #trendchart .hinset { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; font-size: 11px; line-height: 1.4; }
 #trendchart .hinset table { border-collapse: collapse; width: 100%; }
 #trendchart .hinset td { padding: 1px 0; }
@@ -154,6 +154,29 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #empty { position: fixed; z-index: 15; left: 50%; top: 52%; transform: translate(-50%,-50%);
   text-align: center; color: var(--dim); background: var(--panel); border: 1px solid var(--line);
   border-radius: 12px; padding: 20px 26px; line-height: 1.7; }
+
+/* ---- fold (접기): panels collapse to a slim header pill ---- */
+.fold { border: none; background: none; color: var(--dim); cursor: pointer; font-size: 11px;
+  padding: 0 5px 0 0; line-height: 1; vertical-align: baseline; }
+.fold:hover { color: var(--accent); }
+#buckets.folded { width: auto; min-width: 0; }
+#buckets.folded > :not(h2) { display: none; }
+#buckets.folded h2 { margin: 0; }
+#buckets.folded h2 small, #buckets.folded h2 .info { display: none; }
+#trendchart.folded { width: auto; }
+#trendchart.folded #trend-body, #trendchart.folded .trow, #trendchart.folded .slope { display: none; }
+#trendchart.folded h2 { margin: 0; }
+#trendchart.folded h2 small { display: none; }
+#trendchart.folded .tbtns button:not(.fold) { display: none; }
+
+/* ---- 3D가 주인공: 빈 3D 영역에 포인터가 있으면 패널이 은은해짐 (패널로 오면 즉시 복귀) ---- */
+@media (hover: hover) {
+  #hud, #panel, #buckets, #trendchart { transition: opacity .2s ease; }
+  body:has(#scene:hover) #hud, body:has(#scene:hover) #panel,
+  body:has(#scene:hover) #buckets, body:has(#scene:hover) #trendchart:not(.big) {
+    opacity: .3; transition: opacity .45s ease .3s;
+  }
+}
 
 /* prominent Maximum Capacity (macOS 배터리 성능 대응) */
 .healthBig { margin: 0 0 6px; font-size: 12px; color: var(--dim); display: flex; align-items: baseline; gap: 6px; }

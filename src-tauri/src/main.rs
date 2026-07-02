@@ -1,23 +1,28 @@
 // Menu-bar (tray) desktop wrapper for 3D Battery Life.
 // On launch it: spawns the bundled `battery-life serve` sidecar (local web server),
 // on first run asks (once) whether to enable auto-recording, and shows a tray icon
-// with "뷰어 열기 / 기록 시작 / 기록 중지 / 종료". Build: see TAURI.md. Tauri v2.
+// with "뷰어 열기 / 기록 시작 / 기록 중지 / 앱 종료". Build: see TAURI.md. Tauri v2.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
 use std::process::Command as Sh;
+use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager,
+    AppHandle, Manager, RunEvent, WindowEvent,
 };
-use tauri_plugin_shell::{process::CommandEvent, ShellExt};
+use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
 
 const LABEL: &str = "com.kdr.3d-battery-life.sampler";
 
 fn home() -> PathBuf { PathBuf::from(std::env::var("HOME").unwrap_or_default()) }
 fn plist_path() -> PathBuf { home().join("Library/LaunchAgents").join(format!("{LABEL}.plist")) }
 fn data_dir() -> PathBuf { home().join("Library/Application Support/3d-battery-life") }
+
+fn status_text(on: bool) -> &'static str {
+    if on { "● 배터리 기록: 켜짐 (백그라운드 · 앱과 무관)" } else { "○ 배터리 기록: 꺼짐" }
+}
 
 // The sidecar binary sits next to this executable inside the .app (Contents/MacOS/battery-life).
 fn sidecar_bin() -> Option<PathBuf> {
@@ -40,12 +45,18 @@ fn ask_consent() -> bool {
 }
 
 fn main() {
-    tauri::Builder::default()
+    // keep the serve sidecar's handle so quitting the app kills it (otherwise it's orphaned
+    // and the next launch fails on the busy port)
+    let sidecar: Arc<Mutex<Option<CommandChild>>> = Arc::new(Mutex::new(None));
+    let sidecar_for_exit = sidecar.clone();
+
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .setup(|app| {
+        .setup(move |app| {
             // 1) start the local server (bundled single binary) as a sidecar
             let cmd = app.shell().sidecar("battery-life").expect("sidecar 'battery-life' missing").args(["serve"]);
-            let (mut rx, _child) = cmd.spawn().expect("failed to spawn battery-life serve");
+            let (mut rx, child) = cmd.spawn().expect("failed to spawn battery-life serve");
+            *sidecar.lock().unwrap() = Some(child);
             tauri::async_runtime::spawn(async move {
                 while let Some(ev) = rx.recv().await {
                     if let CommandEvent::Stdout(b) | CommandEvent::Stderr(b) = ev {
@@ -54,45 +65,71 @@ fn main() {
                 }
             });
 
-            // 2) first-run consent (only if recording isn't set up yet and we haven't asked before).
-            //    Runs off-thread so the tray/window appear immediately; the dialog pops right after.
-            let marker = data_dir().join(".consent-asked");
-            if !plist_path().exists() && !marker.exists() {
-                let _ = std::fs::create_dir_all(data_dir());
-                let _ = std::fs::write(&marker, "asked\n");
-                std::thread::spawn(|| { if ask_consent() { run_record("on"); } });
-            }
-
-            // 3) tray menu (menu-bar item).
+            // 2) tray menu (menu-bar item).
             // Recording (launchd) is INDEPENDENT of the app — quitting the app never stops it.
-            // Make that explicit: a (disabled) status line + a quit label that says so.
             let recording = plist_path().exists();
-            let status = MenuItem::with_id(
-                app, "status",
-                if recording { "● 배터리 기록: 켜짐 (백그라운드 · 앱과 무관)" } else { "○ 배터리 기록: 꺼짐" },
-                false, None::<&str>,
-            )?;
+            let status = MenuItem::with_id(app, "status", status_text(recording), false, None::<&str>)?;
             let open = MenuItem::with_id(app, "open", "뷰어 열기", true, None::<&str>)?;
             let rec_on = MenuItem::with_id(app, "rec_on", "배터리 기록 시작", true, None::<&str>)?;
             let rec_off = MenuItem::with_id(app, "rec_off", "배터리 기록 중지", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "앱 종료 (기록은 계속됨)", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&status, &open, &rec_on, &rec_off, &quit])?;
+            let status_for_menu = status.clone();
             TrayIconBuilder::with_id("tray")
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("3D Battery Life")
                 .menu(&menu)
-                .on_menu_event(|app, event| match event.id().as_ref() {
+                .on_menu_event(move |app, event| match event.id().as_ref() {
                     "open" => show_main(app),
-                    "rec_on" => { std::thread::spawn(|| run_record("on")); }
-                    "rec_off" => { std::thread::spawn(|| run_record("off")); }
+                    "rec_on" => {
+                        let _ = status_for_menu.set_text(status_text(true));
+                        std::thread::spawn(|| run_record("on"));
+                    }
+                    "rec_off" => {
+                        let _ = status_for_menu.set_text(status_text(false));
+                        std::thread::spawn(|| run_record("off"));
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
                 .build(app)?;
+
+            // 3) first-run consent — only if recording isn't set up and we haven't asked before.
+            //    The marker is written AFTER the dialog resolves: writing it up-front meant a
+            //    quit/crash while the dialog was open suppressed consent forever.
+            let marker = data_dir().join(".consent-asked");
+            if !plist_path().exists() && !marker.exists() {
+                let status_for_consent = status.clone();
+                std::thread::spawn(move || {
+                    let yes = ask_consent();
+                    let _ = std::fs::create_dir_all(data_dir());
+                    let _ = std::fs::write(&marker, if yes { "yes\n" } else { "later\n" });
+                    if yes {
+                        run_record("on");
+                        let _ = status_for_consent.set_text(status_text(true));
+                    }
+                });
+            }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .on_window_event(|window, event| {
+            // closing the viewer window must not quit the tray app — hide it instead
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(move |_app, event| {
+        if let RunEvent::Exit = event {
+            // covers menu quit AND Cmd+Q / logout: take the sidecar and kill it
+            if let Some(child) = sidecar_for_exit.lock().unwrap().take() {
+                let _ = child.kill();
+            }
+        }
+    });
 }
 
 fn show_main(app: &AppHandle) {

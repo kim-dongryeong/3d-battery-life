@@ -13,6 +13,9 @@ state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark';
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
 state.tab = '3d';
+state.showTicks = false;   // 추세 눈금 밀도 조절 줄 — 기본 숨김(헤더 소음 감소), '눈금' 버튼으로 토글
+state.foldBuckets = (() => { try { return localStorage.getItem('battFoldB') === '1'; } catch { return false; } })();
+state.foldTrend = (() => { try { return localStorage.getItem('battFoldT') === '1'; } catch { return false; } })();
 
 // ---- color themes (dark / light) for WebGL scenes + SVG charts -----------
 const THEMES = {
@@ -53,7 +56,9 @@ const percentile = (arr, p) => { if (!arr.length) return 1; const s = [...arr].s
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // perceptual-ish ramp: blue -> cyan -> green -> yellow -> red
-function ramp(t) { t = clamp(t, 0, 1); return new THREE.Color().setHSL((1 - t) * 0.66, 0.85, 0.55); }
+// magnitude ramp: cold(dim blue) → hot(bright orange) via violet — no green leg, so it
+// stays ordered under red-green CVD (a full rainbow doesn't)
+function ramp(t) { t = clamp(t, 0, 1); return new THREE.Color().setHSL(((215 + 180 * t) % 360) / 360, 0.45 + 0.5 * t, 0.45 + 0.15 * t); }
 
 function makeLabel(text, { size = 38, color = '#cfd6e6' } = {}) {
   const pad = 6, c = document.createElement('canvas'), g = c.getContext('2d');
@@ -137,9 +142,14 @@ function buildLines(report) {
   const runs = report.runs || [];
   if (!runs.length) return { yMax: 100, maxDay: 1, cMin: null, cMax: null };
 
-  const t0 = report.firstT || 0;
-  const dayOfT = t => Math.floor((t - t0) / 86400);          // per-point day (handles midnight-crossing runs)
-  const maxDay = Math.max(1, report.spanDays || 0, ...runs.map(r => r.dayIndex));
+  // anchor day slices at LOCAL MIDNIGHT (not the first sample's clock time) — otherwise a run
+  // crossing midnight isn't split there and draws a full-width wrap line across the scene
+  const d0 = new Date((report.firstT || 0) * 1000); d0.setHours(0, 0, 0, 0);
+  const t0 = d0.getTime() / 1000;
+  const dayOfT = t => Math.floor((t - t0) / 86400);
+  // midnight anchor can push the last slice to spanDays+1 — include it so Z never overshoots the grid
+  const lastDay = runs.length ? dayOfT(runs[runs.length - 1].points[runs[runs.length - 1].points.length - 1].t) : 0;
+  const maxDay = Math.max(1, report.spanDays || 0, lastDay, ...runs.map(r => r.dayIndex));
   const numeric = state.color !== 'state';
   let cMin = null, cMax = null;
   if (numeric) {
@@ -186,7 +196,7 @@ function buildLines(report) {
 
 // ---- rebuild everything for current state -------------------------------
 const COLOR_META = { state: { label: '상태', unit: '' }, tempC: { label: '온도', unit: '°C' }, loadPct: { label: 'CPU 부하(load avg)', unit: '%' }, watts: { label: '전력', unit: 'W' } };
-const GRAD_NUM = 'linear-gradient(90deg, hsl(240,85%,55%), hsl(180,85%,55%), hsl(120,85%,55%), hsl(60,85%,55%), hsl(0,85%,55%))';
+const GRAD_NUM = 'linear-gradient(90deg, hsl(215,45%,45%), hsl(260,56%,49%), hsl(305,68%,52%), hsl(350,80%,56%), hsl(35,95%,60%))';
 const GRAD_STATE = 'linear-gradient(90deg, hsl(7,85%,55%) 0 33%, hsl(198,45%,50%) 50%, hsl(119,80%,50%) 66% 100%)';
 
 function rebuild() {
@@ -250,12 +260,13 @@ const RATE_VERS = [['v4a_pooled', 'V4a'], ['v0_rawMean', 'V0'], ['v1_fullOnly', 
 const PERIODS = [['day', '일'], ['week', '주'], ['month', '월']];
 const med = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 const METRICS = {
-  rate:  { label: '속도',     unit: '%/min', pos: false, hint: '음수=방전. 부하+노화 섞인 체감속도' },
-  wh:    { label: '노화Wh/%', unit: 'Wh/%',  pos: true,  hint: '낮을수록 노화(부하와 무관)' },
-  watts: { label: '전력',     unit: 'W',     pos: true,  hint: '방전 중 평균 소비전력 = 순수 부하' },
-  temp:  { label: '온도',     unit: '°C',    pos: true,  hint: '방전 중 평균 온도 = 발열/스트레스' },
+  rate:  { label: '속도',     unit: '%/min', pos: false, dec: 3, hot: 'lo', hint: '음수=방전' },
+  wh:    { label: '노화Wh/%', unit: 'Wh/%',  pos: true,  dec: 3, hot: 'lo', hint: '낮을수록 노화' },
+  watts: { label: '전력',     unit: 'W',     pos: true,  dec: 1, hot: 'hi', hint: '순수 부하' },
+  temp:  { label: '온도',     unit: '°C',    pos: true,  dec: 1, hot: 'hi', hint: '발열' },
 };
 const M = () => METRICS[state.metric] || METRICS.rate;
+const fmtVal = v => v == null ? '–' : (+v).toFixed(M().dec);   // per-metric decimals (W·°C don't need 3)
 const isWh = () => state.metric === 'wh';
 const isRate = () => state.metric === 'rate';
 const posMetric = () => !!M().pos;                    // positive-only (wh/watts/temp) vs rate (straddles 0)
@@ -280,7 +291,13 @@ const zPlaneOn = () => state.zeroMode === 'plane' || state.zeroMode === 'both';
 function renderRates() {
   const el = document.getElementById('buckets');
   const rt = state.rates;
-  if (!rt || !rt.byBand) { el.innerHTML = '<h2>구간별 방전 속도</h2><div class="note">불러오는 중…</div>'; return; }
+  el.classList.toggle('folded', !!state.foldBuckets);
+  if (!rt || !rt.byBand) {
+    el.innerHTML = '<h2>구간별 방전 속도</h2><div class="note">불러오는 중…</div>';
+    disposeTrend3D();                                          // stop the 3D trend rAF loop — it would spin forever if rates never arrive
+    document.getElementById('trendchart').hidden = true;
+    return;
+  }
   const vals = rt.byBand.map(bandVal).filter(v => v != null).map(Math.abs);
   const maxV = vals.length ? Math.max(...vals) : 0.001;
   const metBtns = [['rate', '속도'], ['wh', '노화Wh/%'], ['watts', '전력W'], ['temp', '온도°C']].map(([k, l]) => `<button data-rm="${k}" class="${k === state.metric ? 'on' : ''}">${l}</button>`).join('');
@@ -290,9 +307,8 @@ function renderRates() {
   const body = rt.byBand.map(b => {
     const v = bandVal(b), sel = b.band === state.selectedBand ? ' class="sel"' : '';
     if (v == null) return `<tr data-band="${b.band}"${sel}><td>${b.label}</td><td class="rt">–</td><td></td></tr>`;
-    const w = Math.round(Math.abs(v) / maxV * 44);
-    const col = `hsl(${Math.round((1 - Math.abs(v) / maxV) * 120)},80%,55%)`;
-    return `<tr data-band="${b.band}"${sel}><td>${b.label}</td><td class="rt">${v.toFixed(3)}</td><td><span class="spd" style="width:${w}px;background:${col}"></span></td></tr>`;
+    const w = Math.round(Math.abs(v) / maxV * 44);   // one measure → one color (length carries the value; red→green ramp was CVD-unsafe)
+    return `<tr data-band="${b.band}"${sel}><td>${b.label}</td><td class="rt">${fmtVal(v)}</td><td><span class="spd" style="width:${w}px"></span></td></tr>`;
   }).join('');
   const infoTip = isWh()
     ? `<b>Wh/% = "1%가 담고 있는 실제 에너지의 크기"</b><br>≈ 만충용량 ÷ 100. 측정 전력을 시간 적분한 소비 에너지 ÷ 그동안 빠진 %. 부하와 무관해서 <b>낮을수록 배터리 노화</b>.`
@@ -302,8 +318,9 @@ function renderRates() {
     ? `<b>온도(°C) = 방전 중 평균 배터리 온도</b><br>발열/스트레스 지표. 높은 온도가 지속되면 노화를 가속.`
     : `<b>%/min = 분당 떨어지는 배터리 %</b><br>음수 = 방전. 부하 + 노화가 섞인 "체감 속도".`;
   const infoBadge = `<span class="info">i<span class="ftip">${infoTip}</span></span>`;
+  const bFold = `<button class="fold" data-bfold title="${state.foldBuckets ? '펼치기' : '접기'}">${state.foldBuckets ? '▸' : '▾'}</button>`;
   el.innerHTML =
-    `<h2>구간별 ${isRate() ? '방전 속도' : M().label} <small>${metricUnit()} · ${M().hint}</small>${infoBadge}</h2>` +
+    `<h2>${bFold}구간별 ${isRate() ? '방전 속도' : M().label} <small>${metricUnit()} · ${M().hint}</small>${infoBadge}</h2>` +
     `<div class="rseg" data-rgroup="rm">${metBtns}</div>` +
     `<div class="rseg" data-rgroup="rp"><span class="rlbl">기간</span>${perBtns}</div>` +
     (isRate() ? `<div class="rseg" data-rgroup="rv">${verBtns}</div>` : '') +
@@ -314,7 +331,9 @@ function renderRates() {
 }
 
 // ---- trend over time: single/all bands · 2D line · heatmap · 3D · metric/period/delta ----
-const bandColor = band => `hsl(${Math.round((100 - band) / 10 * 32)},70%,56%)`;
+// band identity = battery level → the universal battery semantic: full=green → empty=red
+// (ordered warm sweep, no blue/purple leg; legend + hover carry exact identity)
+const bandColor = band => `hsl(${Math.round((band - 10) / 90 * 125)},62%,${state.theme === 'light' ? 40 : 55}%)`;
 function trendSeries() {
   const rt = state.rates;
   const bands = state.trendAll ? [100, 90, 80, 70, 60, 50, 40, 30, 20, 10] : (state.selectedBand == null ? [] : [state.selectedBand]);
@@ -336,19 +355,22 @@ function renderTrend() {
   if (!rt || !rt.perCell) { disposeTrend3D(); el.hidden = true; return; }
   el.hidden = false;
   el.classList.toggle('big', !!state.trendBig);
+  el.classList.toggle('folded', !!state.foldTrend);
   const series = trendSeries();
   const view = state.trendAll ? state.trendView : 'line';
   const ctrls = `<span class="tbtns">` +
+    `<button class="fold" data-tfold title="${state.foldTrend ? '펼치기' : '접기'}">${state.foldTrend ? '▸' : '▾'}</button>` +
     `<button data-tall class="${state.trendAll ? 'on' : ''}">전체구간</button>` +
     (state.trendAll ? Object.keys(VIEWS).map(v => `<button data-tview="${v}" class="${view === v ? 'on' : ''}">${VIEWS[v]}</button>`).join('') : '') +
     (view === '3d' ? Object.keys(GEOMS).map(g => `<button data-tgeom="${g}" class="${state.trendGeom === g ? 'on' : ''}">${GEOMS[g]}</button>`).join('') : '') +
     ((view !== 'heat' && (!posMetric() || state.delta)) ? `<span class="zg">0:${(view === '3d' ? [['off', '끔'], ['line', '선'], ['plane', '면'], ['both', '선+면']] : [['off', '끔'], ['line', '선']]).map(([m, l]) => `<button data-tzero="${m}" class="${state.zeroMode === m ? 'on' : ''}">${l}</button>`).join('')}</span>` : '') +
     `<button data-tdelta class="${state.delta ? 'on' : ''}">델타</button>` +
+    `<button data-tticks class="${state.showTicks ? 'on' : ''}" title="축 눈금 밀도 조절">눈금</button>` +
     `<button data-tbig class="${state.trendBig ? 'on' : ''}">${state.trendBig ? '축소' : '확대'}</button></span>`;
   const what = isRate() ? '방전속도' : M().label;
   const sub = `${metricUnit()}${state.delta ? ' · Δ기준대비' : ''} · ${VIEWS[view]}`;
   const tg = (g, gl, label) => `<span class="tickg">${label}<span class="seg2">${[1, 2, 3].map(v => `<button data-tick="${g}" data-v="${v}" class="${state[gl] === v ? 'on' : ''}">${['적', '중', '촘'][v - 1]}</button>`).join('')}</span></span>`;
-  const tickRow = `<div class="trow">눈금 ${tg('date', 'tickDate', '날짜')} ${tg('band', 'tickBand', '잔량')}${view !== 'heat' ? ' ' + tg('val', 'tickVal', '속도') : ''}</div>`;
+  const tickRow = state.showTicks ? `<div class="trow">눈금 ${tg('date', 'tickDate', '날짜')} ${tg('band', 'tickBand', '잔량')}${view !== 'heat' ? ' ' + tg('val', 'tickVal', '속도') : ''}</div>` : '';
   const title = state.trendAll
     ? `<h2>구간별 ${what} 추세 <small>${sub}</small>${ctrls}</h2>`
     : `<h2>${series[0]?.label ?? ''} ${what} 추세 <small>${metricUnit()}${state.delta ? ' · Δ' : ''}${series[0] ? ' · ' + series[0].pts.length + periodLabel() : ''}</small>${ctrls}</h2>`;
@@ -357,6 +379,7 @@ function renderTrend() {
   el.querySelector('#trend-head').innerHTML = head;
   const body = el.querySelector('#trend-body');
 
+  if (state.foldTrend) { disposeTrend3D(); body.innerHTML = ''; return; }   // folded → slim header only
   if (view === 'heat') { disposeTrend3D(); body.innerHTML = renderHeatmap(); return; }
   if (series.flatMap(s => s.pts).length < 2) { disposeTrend3D(); body.innerHTML = `<div class="note">충분한 데이터가 없습니다.</div>`; return; }
   if (view === '3d') { renderTrend3D(series, body); return; }
@@ -376,10 +399,12 @@ function renderTrend2D(series) {
   const dfmt = x => { const d = new Date(x * 86400000); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
   let grid = '', ylab = '';
   const ny = nVal();
+  const span = ymax - ymin;
+  const decY = span >= 20 ? 0 : span >= 2 ? 1 : span >= 0.2 ? 2 : 3;   // adaptive tick decimals (W doesn't need .000)
   for (let i = 0; i <= ny; i++) {
     const yy = ymin + (ymax - ymin) * i / ny, py = Y(yy);
     grid += `<line x1="${pL}" y1="${py.toFixed(1)}" x2="${W - pR}" y2="${py.toFixed(1)}" stroke="${Math.abs(yy) < 1e-9 ? TH().svgGrid0 : TH().svgGrid}"/>`;
-    ylab += `<text x="${pL - 6}" y="${(py + 3).toFixed(1)}" text-anchor="end" fill="${TH().svgText}" font-size="${fs}">${yy.toFixed(3)}</text>`;
+    ylab += `<text x="${pL - 6}" y="${(py + 3).toFixed(1)}" text-anchor="end" fill="${TH().svgText}" font-size="${fs}">${yy.toFixed(decY)}</text>`;
   }
   const xt = nDate(big); let xgrid = '', xlab = '';
   for (let i = 0; i <= xt; i++) {
@@ -409,7 +434,7 @@ function renderTrend2D(series) {
       if (isRate()) dir = per30 < 0 ? '↘ 점점 빨라짐(노화/부하↑)' : '↗ 안정/개선';
       else if (isWh()) dir = per30 < 0 ? '↘ Wh/% 하락 = 노화 진행' : '↗ 안정';
       else dir = per30 > 0 ? `↗ 평균 ${M().label} 증가` : per30 < 0 ? `↘ 평균 ${M().label} 감소` : '– 변화 없음';
-      footer = `<div class="slope">추세: 30일당 <b>${per30 >= 0 ? '+' : ''}${per30.toFixed(4)}</b> ${metricUnit()} ${dir}</div>`;
+      footer = `<div class="slope">추세: 30일당 <b>${per30 >= 0 ? '+' : ''}${per30.toFixed(Math.min(4, M().dec + 1))}</b> ${metricUnit()} ${dir}</div>`;
     } else {                                                // too little data → don't extrapolate a misleading 30-day slope
       footer = `<div class="slope note">추세선은 데이터가 더 쌓이면 표시돼요 (현재 ${n}${periodLabel()}치 · 최소 4${periodLabel()} 필요)</div>`;
     }
@@ -424,8 +449,14 @@ function renderTrend2D(series) {
 // ---- heatmap: period(date) × band grid, color=metric, opacity=coverage, click=date slice ----
 function heatColor(v, lo, hi, diverging) {
   if (v == null) return TH().miss;
-  if (diverging) { const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1, t = Math.max(-1, Math.min(1, v / m)); return t < 0 ? `hsl(8,75%,${(42 - t * 16).toFixed(0)}%)` : `hsl(205,70%,${(42 + t * 16).toFixed(0)}%)`; }
-  const t = Math.max(0, Math.min(1, hi === lo ? 0.5 : (v - lo) / (hi - lo))); return `hsl(${Math.round(t * 120)},75%,52%)`;
+  if (diverging) {   // warm ↔ cool with a NEUTRAL midpoint (Δ≈0 must read as "nothing", not a hue)
+    const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1, t = Math.max(-1, Math.min(1, v / m)), a = Math.abs(t);
+    return `hsl(${t < 0 ? 18 : 212},${Math.round(74 * a)}%,${Math.round(60 - 22 * a)}%)`;
+  }
+  // sequential: ONE hue, light→dark (red→green ramp was CVD-unsafe); dark end = "intense" per metric
+  let t = Math.max(0, Math.min(1, hi === lo ? 0.5 : (v - lo) / (hi - lo)));
+  if (M().hot === 'lo') t = 1 - t;   // rate/Wh%: lower(-) = faster/older = darker; W/°C: higher = darker
+  return `hsl(212,66%,${Math.round(72 - 46 * t)}%)`;
 }
 function renderHeatmap() {
   const rt = state.rates, big = !!state.trendBig;
@@ -449,7 +480,7 @@ function renderHeatmap() {
     const sel = p.key === state.selectedPeriod ? ' stroke="#e8e9ef" stroke-width="1.1"' : '';
     if (v == null) { cells += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${cw.toFixed(2)}" height="${chh.toFixed(2)}" fill="${TH().miss}" data-period="${p.key}"${sel}/>`; return; }
     const alpha = Math.max(0.35, Math.min(1, (c.minutes || 0) / (maxMin * 0.6)));
-    cells += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${cw.toFixed(2)}" height="${chh.toFixed(2)}" fill="${heatColor(v, lo, hi, state.delta)}" fill-opacity="${alpha.toFixed(2)}" data-period="${p.key}"${sel}><title>${p.key} (${b - 10},${b}]\n${metricUnit()}: ${v.toFixed(3)}${state.delta ? ' Δ' : ''}\n관측 ${c.minutes}분 · 평균 ${c.avgW}W</title></rect>`;
+    cells += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${cw.toFixed(2)}" height="${chh.toFixed(2)}" fill="${heatColor(v, lo, hi, state.delta)}" fill-opacity="${alpha.toFixed(2)}" data-period="${p.key}"${sel}><title>${p.key} (${b - 10},${b}]\n${metricUnit()}: ${fmtVal(v)}${state.delta ? ' Δ' : ''}\n관측 ${c.minutes}분 · 평균 ${c.avgW}W</title></rect>`;
   }));
   let ylab = ''; bands.forEach((b, ri) => { if (ri % bandEvery() !== 0) return; ylab += `<text x="${pL - 5}" y="${(gy + ri * chh + chh / 2 + 3).toFixed(1)}" text-anchor="end" fill="${TH().svgText}" font-size="${big ? 11 : 9}">${b - 10}-${b}</text>`; });
   let xlab = ''; const nx = Math.min(periods.length, nDate(big));
@@ -462,13 +493,15 @@ function renderHeatmap() {
     const poly = periods.map((p, ci) => p.healthPct == null ? null : `${(gx + (ci + 0.5) * cw).toFixed(1)},${HY(p.healthPct).toFixed(1)}`).filter(Boolean).join(' ');
     health = `<polyline points="${poly}" fill="none" stroke="#4dd0c0" stroke-width="1.3"/><text x="${pL - 5}" y="${(hy0 + 7).toFixed(1)}" text-anchor="end" fill="#4dd0c0" font-size="${big ? 10 : 8}">건강 ${hhi.toFixed(0)}%</text><text x="${pL - 5}" y="${(hy0 + hh).toFixed(1)}" text-anchor="end" fill="#4dd0c0" font-size="${big ? 10 : 8}">${hlo.toFixed(0)}%</text>`;
   }
-  const legend = `<div class="hlegend"><span>${lo.toFixed(3)}</span><i class="hbar${state.delta ? ' div' : ''}"></i><span>${hi.toFixed(3)} ${metricUnit()}${state.delta ? ' Δ' : ''}</span><span class="hcov">불투명도=관측분량 · 셀 클릭=날짜 선택 · 청록선=건강도</span></div>`;
+  const mid = (lo + hi) / 2;   // legend gradient sampled from heatColor itself → always matches cells & metric direction
+  const hgrad = `linear-gradient(90deg, ${heatColor(lo, lo, hi, state.delta)}, ${heatColor(mid, lo, hi, state.delta)}, ${heatColor(hi, lo, hi, state.delta)})`;
+  const legend = `<div class="hlegend"><span>${fmtVal(lo)}</span><i class="hbar" style="background:${hgrad}"></i><span>${fmtVal(hi)} ${metricUnit()}${state.delta ? ' Δ' : ''}</span><span class="hcov">불투명도=관측분량 · 셀 클릭=날짜 선택 · 청록선=건강도</span></div>`;
   let inset = '';
   if (state.selectedPeriod) {
     const rows = bands.map(b => ({ b, v: valOf(byPB.get(state.selectedPeriod + '|' + b)) }));
     const mv = Math.max(...rows.map(r => r.v != null ? Math.abs(r.v) : 0), 0.001);
     inset = `<div class="hinset"><b>${state.selectedPeriod}</b> 날짜 단면 · 구간별 ${metricUnit()}<table>` +
-      rows.map(r => r.v == null ? `<tr><td>${r.b - 10}-${r.b}</td><td class="rt">–</td><td></td></tr>` : `<tr><td>${r.b - 10}-${r.b}</td><td class="rt">${r.v.toFixed(3)}</td><td><span class="spd" style="width:${Math.round(Math.abs(r.v) / mv * 40)}px;background:${heatColor(r.v, lo, hi, state.delta)}"></span></td></tr>`).join('') +
+      rows.map(r => r.v == null ? `<tr><td>${r.b - 10}-${r.b}</td><td class="rt">–</td><td></td></tr>` : `<tr><td>${r.b - 10}-${r.b}</td><td class="rt">${fmtVal(r.v)}</td><td><span class="spd" style="width:${Math.round(Math.abs(r.v) / mv * 40)}px;background:${heatColor(r.v, lo, hi, state.delta)}"></span></td></tr>`).join('') +
       `</table></div>`;
   }
   return `<div class="hwrap"><svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">${cells}${ylab}${xlab}${health}</svg>${legend}</div>${inset}`;
@@ -538,7 +571,8 @@ function buildTrend3D(series) {
   g.add(axisLine([x0, 0, zf], [x0, 0, zb], TH().axis));
   const dfmt = x => { const d = new Date(x * 86400000); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
   const nd = nDate(big); for (let i = 0; i < nd; i++) { const f = nd > 1 ? i / (nd - 1) : 0.5, xx = xmin + (xmax - xmin) * f, l = makeLabel(dfmt(xx), { size: 22, color: TH().tickC }); l.position.set(X(xx), -1.6, zf); g.add(l); }
-  const nv = nVal(); for (let i = 0; i <= nv; i++) { const rr = rmin + (rmax - rmin) * i / nv, l = makeLabel(rr.toFixed(2), { size: 22, color: TH().tickC }); l.position.set(x0 - 3.2, Y(rr), zf); g.add(l); }
+  const decR = (rmax - rmin) >= 20 ? 0 : (rmax - rmin) >= 2 ? 1 : 2;
+  const nv = nVal(); for (let i = 0; i <= nv; i++) { const rr = rmin + (rmax - rmin) * i / nv, l = makeLabel(rr.toFixed(decR), { size: 22, color: TH().tickC }); l.position.set(x0 - 3.2, Y(rr), zf); g.add(l); }
   const L = (t, o, x, y, z) => { const l = makeLabel(t, o); l.position.set(x, y, z); return l; };  // (Sprite.position is read-only — must .set, not reassign)
   g.add(L('날짜 →', { color: TH().titleC }, 0, -3.4, zf));
   g.add(L((state.delta ? 'Δ ' : '') + metricUnit(), { color: TH().titleC }, x0 - 5.5, Yh + 1.5, zf));
@@ -631,6 +665,11 @@ let hovered = null;
 const HI = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1 });
 
 addEventListener('pointermove', e => {
+  if (e.target !== renderer.domElement) {                       // pointer is over a panel — don't raycast through it
+    if (hovered) { hovered.material = hovered.userData.base; hovered = null; }
+    tip.hidden = true;
+    return;
+  }
   mouse.x = (e.clientX / innerWidth) * 2 - 1;
   mouse.y = -(e.clientY / innerHeight) * 2 + 1;
   ray.setFromCamera(mouse, camera);
@@ -673,9 +712,21 @@ function showTip(dayIndex, p, x, y) {
 }
 
 // ---- data ---------------------------------------------------------------
+const emptyDefaultHTML = document.getElementById('empty').innerHTML;
 async function load() {
-  const res = await fetch(`/api/report?source=${state.source}`);
-  state.report = await res.json();
+  try {
+    const res = await fetch(`/api/report?source=${state.source}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    state.report = await res.json();
+    document.getElementById('empty').innerHTML = emptyDefaultHTML;
+  } catch (e) {
+    // keep the previous report on screen (don't clobber state with an error body);
+    // surface the failure instead of silently showing the old source's data
+    const el = document.getElementById('empty');
+    el.hidden = false;
+    el.innerHTML = `데이터를 불러오지 못했습니다 (${e.message}).<br/>서버가 실행 중인지 확인하고 다시 선택해 주세요.`;
+    return;
+  }
   rebuild();
   loadRates();                 // per-band rate panel (concurrent)
 }
@@ -687,7 +738,7 @@ document.querySelectorAll('.seg').forEach(seg => {
     seg.querySelectorAll('button').forEach(x => x.classList.remove('on'));
     b.classList.add('on');
     const group = seg.dataset.group, val = b.dataset.val;
-    if (group === 'source') { state.source = val; load(); }
+    if (group === 'source') { state.source = val; state.selectedPeriod = null; load(); }   // stale period keys don't cross sources
     else if (group === 'ui') { applyUI(val); }
     else if (group === 'layout') { applyLayout(val); }
     else { state[group] = val; rebuild(); }
@@ -773,7 +824,12 @@ applyLayout(state.layout);   // apply persisted layout
 document.getElementById('buckets').addEventListener('click', e => {
   const btn = e.target.closest('button');
   if (btn) {
-    if (btn.dataset.rm) { state.metric = btn.dataset.rm; renderRates(); }
+    if (btn.hasAttribute('data-bfold')) {
+      state.foldBuckets = !state.foldBuckets;
+      try { localStorage.setItem('battFoldB', state.foldBuckets ? '1' : '0'); } catch { /* ignore */ }
+      renderRates();
+    }
+    else if (btn.dataset.rm) { state.metric = btn.dataset.rm; renderRates(); }
     else if (btn.dataset.rp) { state.period = btn.dataset.rp; state.selectedPeriod = null; loadRates(); }
     else if (btn.dataset.rv) { state.rateVersion = btn.dataset.rv; renderRates(); }
     else if (btn.dataset.rl) { state.rateLevel = btn.dataset.rl; loadRates(); }
@@ -792,6 +848,11 @@ document.getElementById('trendchart').addEventListener('click', e => {
   else if (b.hasAttribute('data-tzero')) state.zeroMode = b.getAttribute('data-tzero');
   else if (b.hasAttribute('data-tick')) { const g = b.getAttribute('data-tick'); state['tick' + g[0].toUpperCase() + g.slice(1)] = +b.getAttribute('data-v'); }
   else if (b.hasAttribute('data-tdelta')) state.delta = !state.delta;
+  else if (b.hasAttribute('data-tticks')) state.showTicks = !state.showTicks;
+  else if (b.hasAttribute('data-tfold')) {
+    state.foldTrend = !state.foldTrend;
+    try { localStorage.setItem('battFoldT', state.foldTrend ? '1' : '0'); } catch { /* ignore */ }
+  }
   else if (b.hasAttribute('data-tbig')) state.trendBig = !state.trendBig;
   renderTrend();
 });
@@ -799,6 +860,7 @@ document.getElementById('trendchart').addEventListener('click', e => {
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  if (t3 && state.trendAll && state.trendView === '3d' && !state.foldTrend) renderTrend();   // 3D trend canvas resizes too
 });
 
 // keep labels readable (face camera handled by Sprite; nothing extra needed)

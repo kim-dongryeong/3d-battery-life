@@ -18,17 +18,27 @@ const MIME = {
 };
 // Demos are GENERATED on demand (deterministic) and cached — not shipped (keeps the app small).
 // If an older bundle still ships one next to the app, prefer that.
+// DEMO_VER busts the cache when the generators change — otherwise a stale cached demo
+// would silently mask generator updates forever.
+export const DEMO_VER = 2;
 function demoFile(sp, assetDir) {
   const name = sp === 'demo2' ? 'demo2.jsonl' : 'demo.jsonl';
   const bundled = path.join(assetDir, name);
   if (fs.existsSync(bundled)) return bundled;
-  const cached = path.join(cacheDir(), name);
+  const cached = path.join(cacheDir(), `${sp === 'demo2' ? 'demo2' : 'demo'}.v${DEMO_VER}.jsonl`);
   if (!fs.existsSync(cached)) {
     fs.mkdirSync(cacheDir(), { recursive: true });
     const lines = sp === 'demo2' ? generateDemo2Lines() : generateDemoLines();
     fs.writeFileSync(cached, lines.join('\n') + '\n');
   }
   return cached;
+}
+
+// Only serve requests addressed to localhost — a malicious website using DNS rebinding
+// (its hostname re-pointed at 127.0.0.1) would otherwise read the battery/usage log.
+function hostAllowed(req) {
+  const h = String(req.headers.host || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '';
 }
 // The user's real samples live in the shared, writable user data dir — so every
 // packaging form (CLI · binary · app) shows the same report.
@@ -64,6 +74,12 @@ export function startServer({ root, port } = {}) {
   const assetDir = path.join(base, 'data');            // shipped demo .jsonl
 
   const server = http.createServer((req, res) => {
+    try { handle(req, res); }                                  // a malformed request must not crash the server
+    catch (e) { try { res.writeHead(400); res.end('bad request'); } catch { /* already sent */ } }
+  });
+
+  function handle(req, res) {
+    if (!hostAllowed(req)) { res.writeHead(403); res.end('forbidden'); return; }
     const url = new URL(req.url, `http://localhost:${PORT}`);
 
     if (url.pathname === '/api/report') {
@@ -96,6 +112,13 @@ export function startServer({ root, port } = {}) {
         res.end(buf);
       });
     });
+  }
+
+  server.on('error', e => {   // EADDRINUSE etc. — say what happened instead of an unhandled crash
+    console.error(e.code === 'EADDRINUSE'
+      ? `error: port ${PORT} is already in use — another viewer running? (PORT=<n> to change)`
+      : `server error: ${e.message}`);
+    process.exit(1);
   });
   server.listen(PORT, '127.0.0.1', () => console.log(`3d-battery-life ▶  http://localhost:${PORT}   (samples: ${path.join(userDataDir(), 'samples.jsonl')})`));
   return server;
