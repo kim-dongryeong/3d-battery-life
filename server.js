@@ -38,6 +38,9 @@ function demoFile(sp, assetDir) {
 
 // Only serve requests addressed to localhost — a malicious website using DNS rebinding
 // (its hostname re-pointed at 127.0.0.1) would otherwise read the battery/usage log.
+let procsCache = { at: 0, data: [] };   // /api/procs cache (shared across requests)
+let procsInflight = false;
+
 function hostAllowed(req) {
   const h = String(req.headers.host || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
   return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '';
@@ -114,21 +117,25 @@ export function startServer({ root, port } = {}) {
     }
 
     // top battery-consuming processes (like Stats): `top -o power`. Async so `top -l 2` (~1-2s)
-    // doesn't block the whole event loop / freeze the viewer.
+    // doesn't block the event loop; cached ~4s + in-flight-coalesced so overlapping polls don't
+    // each spawn a `top` (client polls at ~5s, each top takes ~2s).
     if (url.pathname === '/api/procs') {
       const n = Math.max(1, Math.min(20, +url.searchParams.get('n') || 8));
-      execFile('top', ['-l', '2', '-o', 'power', '-n', String(n), '-stats', 'pid,command,power'], { timeout: 5000 }, (err, stdout) => {
-        if (err) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('[]'); return; }
-        // parse the SECOND sample block (top -l 2), rows: "PID COMMAND POWER"
-        const blocks = stdout.split(/^Processes:/m);
-        const last = blocks[blocks.length - 1] || stdout;
-        const rows = [];
-        for (const line of last.split('\n')) {
-          const m = line.trim().match(/^(\d+)\s+(.+?)\s+([\d.]+)\s*$/);
-          if (m && rows.length < n) rows.push({ pid: +m[1], name: m[2].trim(), power: +m[3] });
+      const sendCache = () => { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(procsCache.data.slice(0, n))); };
+      if (Date.now() - procsCache.at < 4000 || procsInflight) { sendCache(); return; }
+      procsInflight = true;
+      execFile('top', ['-l', '2', '-o', 'power', '-n', '20', '-stats', 'pid,command,power'], { timeout: 5000 }, (err, stdout) => {
+        procsInflight = false;
+        if (!err) {
+          const blocks = stdout.split(/^Processes:/m);           // 2nd sample = last block
+          const rows = [];
+          for (const line of (blocks[blocks.length - 1] || stdout).split('\n')) {
+            const m = line.trim().match(/^(\d+)\s+(.+?)\s+([\d.]+)\s*$/);
+            if (m) rows.push({ pid: +m[1], name: m[2].trim(), power: +m[3] });
+          }
+          procsCache = { at: Date.now(), data: rows };
         }
-        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-        res.end(JSON.stringify(rows));
+        sendCache();
       });
       return;
     }

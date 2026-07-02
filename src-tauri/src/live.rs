@@ -25,25 +25,32 @@ pub struct Live {
 }
 
 // A reusable reader — hold the Manager + Battery across ticks and just refresh().
+// Everything is fallible (no panics): this runs on a detached ticker thread, so a panic here
+// would freeze the tray title forever. On any failure it returns Live::default() and retries next tick.
 pub struct Reader {
-    manager: Manager,
+    manager: Option<Manager>,
     battery: Option<starship_battery::Battery>,
 }
 
 impl Reader {
     pub fn new() -> Self {
-        let manager = Manager::new().expect("battery manager");
-        let battery = manager.batteries().ok().and_then(|mut it| it.next().and_then(Result::ok));
+        let manager = Manager::new().ok();
+        let battery = manager
+            .as_ref()
+            .and_then(|m| m.batteries().ok().and_then(|mut it| it.next().and_then(Result::ok)));
         Reader { manager, battery }
     }
 
     pub fn read(&mut self) -> Live {
-        // (re)acquire the battery if we don't have one yet (e.g. transient IOKit hiccup)
+        if self.manager.is_none() {
+            self.manager = Manager::new().ok();
+        }
+        let Some(manager) = self.manager.as_ref() else { return Live::default() };
         if self.battery.is_none() {
-            self.battery = self.manager.batteries().ok().and_then(|mut it| it.next().and_then(Result::ok));
+            self.battery = manager.batteries().ok().and_then(|mut it| it.next().and_then(Result::ok));
         }
         let Some(b) = self.battery.as_mut() else { return Live::default() };
-        if self.manager.refresh(b).is_err() {
+        if manager.refresh(b).is_err() {
             self.battery = None;
             return Live::default();
         }

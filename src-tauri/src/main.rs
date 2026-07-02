@@ -8,7 +8,17 @@ mod live;
 
 use std::path::PathBuf;
 use std::process::Command as Sh;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::Instant;
+
+// When the popover loses focus we hide it. A tray click on an already-open popover fires
+// focus-loss (hide) BEFORE the click event, so remember when we last hid it and skip the
+// re-show if that was just now — otherwise clicking the icon to close would reopen it.
+static LAST_POPOVER_HIDE: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
+fn note_popover_hidden() { if let Ok(mut g) = LAST_POPOVER_HIDE.lock() { *g = Some(Instant::now()); } }
+fn hidden_just_now() -> bool {
+    LAST_POPOVER_HIDE.lock().ok().and_then(|g| *g).map_or(false, |t| t.elapsed().as_millis() < 300)
+}
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -143,6 +153,7 @@ fn main() {
                 }
                 // popover auto-hides when it loses focus (menu-bar popover convention)
                 WindowEvent::Focused(false) if window.label() == "popover" => {
+                    note_popover_hidden();   // so a tray click that caused this doesn't re-show it
                     let _ = window.hide();
                 }
                 _ => {}
@@ -174,7 +185,7 @@ fn toggle_popover(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("popover") {
         if w.is_visible().unwrap_or(false) {
             let _ = w.hide();
-        } else {
+        } else if !hidden_just_now() {   // this same click may have just hidden it via focus-loss
             place_popover(&w);
             let _ = w.show();
             let _ = w.set_focus();
@@ -201,11 +212,15 @@ fn toggle_popover(app: &AppHandle) {
     }
 }
 
-// Position the popover top-right, just under the menu bar (where macOS keeps tray items).
+// Position the popover top-right of the menu-bar monitor. Use the monitor's real origin
+// (not an assumed 0,0) so it lands correctly on multi-monitor / non-primary-origin setups.
 fn place_popover(w: &tauri::WebviewWindow) {
     if let Ok(Some(mon)) = w.primary_monitor() {
         let sf = mon.scale_factor();
-        let logical_w = mon.size().width as f64 / sf;
-        let _ = w.set_position(LogicalPosition::new((logical_w - 336.0).max(8.0), 30.0));
+        let ox = mon.position().x as f64 / sf;
+        let oy = mon.position().y as f64 / sf;
+        let mw = mon.size().width as f64 / sf;
+        let x = (ox + mw - 336.0).max(ox + 6.0);
+        let _ = w.set_position(LogicalPosition::new(x, oy + 32.0));
     }
 }
