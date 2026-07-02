@@ -10,13 +10,12 @@
 // long-term trends are preserved so the new->month->year story still holds:
 //   - battery ages   (full capacity 100% -> ~82% over the year)
 //   - load grows     (apps pile up: ~5W -> ~11W over the first month) + spikes
+//
+// Deterministic (seeded PRNG) so it can be generated ON DEMAND instead of shipped:
+// exports generateDemoLines(); only writes a file when run directly (dev).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-const dir = path.dirname(fileURLToPath(import.meta.url));
-const out = path.join(dir, '..', 'data', 'demo.jsonl');
-fs.mkdirSync(path.dirname(out), { recursive: true });
 
 let seed = 20260629;                                  // deterministic PRNG
 const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
@@ -73,41 +72,51 @@ function chooseEpisode(hour, plugged, pct, mobility) {
   return { state: 'BATT', plugged: false, durMin: rng(25, 150) };
 }
 
-for (let day = 0; day <= 365; day += 5) {
-  const rawMax = rawMaxAt(day);
-  const ctx = { rawMax, fullWh: rawMax * NOMINAL_V / 1000, cycles: cyclesAt(day), health: +(rawMax / DESIGN * 100).toFixed(1) };
-  const dayBase = baseWattsAt(day) * rng(0.8, 1.4);       // some days heavier than others
-  const mobility = rng(0.2, 0.95);                        // how often used away from charger
-  let pct = chance(0.8) ? rng(96, 100) : rng(55, 85);     // usually charged overnight
-  let plugged = chance(0.3);
-  let t = startMs + day * DAY + 6 * HOUR + rng(0, 1.5 * HOUR);     // wake ~06:00-07:30
-  const dayEnd = startMs + day * DAY + 23 * HOUR + rng(0, 1.5 * HOUR); // sleep ~23:00-00:30
+export function generateDemoLines() {
+  seed = 20260629; lines.length = 0;                 // reset → deterministic re-run
+  for (let day = 0; day <= 365; day += 5) {
+    const rawMax = rawMaxAt(day);
+    const ctx = { rawMax, fullWh: rawMax * NOMINAL_V / 1000, cycles: cyclesAt(day), health: +(rawMax / DESIGN * 100).toFixed(1) };
+    const dayBase = baseWattsAt(day) * rng(0.8, 1.4);       // some days heavier than others
+    const mobility = rng(0.2, 0.95);                        // how often used away from charger
+    let pct = chance(0.8) ? rng(96, 100) : rng(55, 85);     // usually charged overnight
+    let plugged = chance(0.3);
+    let t = startMs + day * DAY + 6 * HOUR + rng(0, 1.5 * HOUR);     // wake ~06:00-07:30
+    const dayEnd = startMs + day * DAY + 23 * HOUR + rng(0, 1.5 * HOUR); // sleep ~23:00-00:30
 
-  while (t < dayEnd) {
-    const hour = (t - (startMs + day * DAY)) / HOUR;
-    const ep = chooseEpisode(hour, plugged, pct, mobility);
-    plugged = ep.plugged;
-    const steps = Math.max(1, Math.round(ep.durMin * 60 / STEP));
-    for (let s = 0; s < steps && t < dayEnd; s++) {
-      if (ep.state === 'SLEEP') {
-        pct = plugged ? Math.min(100, pct + 0.4 * (STEP / 60)) : Math.max(0, pct - 0.015 * (STEP / 60)); // drift, no sample
-      } else if (ep.state === 'BATT') {
-        const watts = Math.max(2.5, dayBase + 2 * Math.sin(t / 6e5) + (chance(0.06) ? rng(8, 18) : 0) + noise(1.2));
-        pct = Math.max(0, pct - watts * (STEP / 3600) / ctx.fullWh * 100);
-        emit('BATT', t, pct, watts, ctx);
-      } else if (ep.state === 'CHARGE') {
-        const rate = pct < 80 ? 0.55 : pct < 95 ? 0.35 : 0.12;       // %/min, tapers near full
-        const chargeW = rate / 100 * ctx.fullWh * 60;                 // power into battery
-        pct = Math.min(100, pct + rate * (STEP / 60));
-        emit(pct >= 100 ? 'ACIDLE' : 'CHARGE', t, pct, chargeW, ctx);
-      } else { // ACIDLE
-        pct = 100;
-        emit('ACIDLE', t, pct, 0, ctx);
+    while (t < dayEnd) {
+      const hour = (t - (startMs + day * DAY)) / HOUR;
+      const ep = chooseEpisode(hour, plugged, pct, mobility);
+      plugged = ep.plugged;
+      const steps = Math.max(1, Math.round(ep.durMin * 60 / STEP));
+      for (let s = 0; s < steps && t < dayEnd; s++) {
+        if (ep.state === 'SLEEP') {
+          pct = plugged ? Math.min(100, pct + 0.4 * (STEP / 60)) : Math.max(0, pct - 0.015 * (STEP / 60)); // drift, no sample
+        } else if (ep.state === 'BATT') {
+          const watts = Math.max(2.5, dayBase + 2 * Math.sin(t / 6e5) + (chance(0.06) ? rng(8, 18) : 0) + noise(1.2));
+          pct = Math.max(0, pct - watts * (STEP / 3600) / ctx.fullWh * 100);
+          emit('BATT', t, pct, watts, ctx);
+        } else if (ep.state === 'CHARGE') {
+          const rate = pct < 80 ? 0.55 : pct < 95 ? 0.35 : 0.12;       // %/min, tapers near full
+          const chargeW = rate / 100 * ctx.fullWh * 60;                 // power into battery
+          pct = Math.min(100, pct + rate * (STEP / 60));
+          emit(pct >= 100 ? 'ACIDLE' : 'CHARGE', t, pct, chargeW, ctx);
+        } else { // ACIDLE
+          pct = 100;
+          emit('ACIDLE', t, pct, 0, ctx);
+        }
+        t += STEP * 1000;
       }
-      t += STEP * 1000;
     }
   }
+  return lines;
 }
 
-fs.writeFileSync(out, lines.join('\n') + '\n');
-console.log(`demo written: ${lines.length} samples across ~${Math.round(365 / 5)} days -> ${out}`);
+// run directly (node scripts/gen-demo.js) → write the file for dev
+if ((process.argv[1] || '').endsWith('gen-demo.js')) {
+  const out = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data', 'demo.jsonl');
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  const l = generateDemoLines();
+  fs.writeFileSync(out, l.join('\n') + '\n');
+  console.log(`demo written: ${l.length} samples -> ${out}`);
+}

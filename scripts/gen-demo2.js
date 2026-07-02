@@ -8,13 +8,12 @@
 // Plus weekday/weekend rhythm (heatmap striping) and per-band intensity (3D relief).
 // Physics kept honest (same as the live tool): %-drop integrated from watts & capacity;
 // Wh/% = fullWh/100 falls ONLY with aging (load cancels) — that's what sells it.
+//
+// Deterministic (seeded PRNG) so it can be generated ON DEMAND instead of shipped:
+// exports generateDemo2Lines(); only writes a file when run directly (dev).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-const dir = path.dirname(fileURLToPath(import.meta.url));
-const out = path.join(dir, '..', 'data', 'demo2.jsonl');
-fs.mkdirSync(path.dirname(out), { recursive: true });
 
 let seed = 7770001;
 const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
@@ -77,40 +76,50 @@ function chooseEpisode(hour, plugged, pct, mobility) {
   return { state: 'BATT', plugged: false, durMin: rng(25, 150) };
 }
 
-for (let day = 0; day <= 365; day += 2) {
-  const dow = new Date(startMs + day * DAY).getDay();              // 0=Sun..6=Sat
-  const weekend = dow === 0 || dow === 6;
-  const useMul = weekend ? 0.55 : 1.0;
-  const rawMax = rawMaxAt(day);
-  const ctx = { rawMax, fullWh: rawMax * NOMINAL_V / 1000, cycles: cyclesAt(day), health: +(rawMax / DESIGN * 100).toFixed(1) };
-  const dayBase = baseWattsAt(day) * useMul * rng(0.9, 1.1);
-  const mobility = weekend ? rng(0.15, 0.4) : rng(0.45, 0.85);     // weekdays unplugged/mobile more
-  let pct = chance(0.85) ? rng(97, 100) : rng(60, 88);
-  let plugged = chance(0.25);
-  let t = startMs + day * DAY + 7 * HOUR + rng(0, 1 * HOUR);
-  const dayEnd = startMs + day * DAY + 23 * HOUR + rng(0, 1.2 * HOUR);
+export function generateDemo2Lines() {
+  seed = 7770001; lines.length = 0;                 // reset → deterministic re-run
+  for (let day = 0; day <= 365; day += 2) {
+    const dow = new Date(startMs + day * DAY).getDay();              // 0=Sun..6=Sat
+    const weekend = dow === 0 || dow === 6;
+    const useMul = weekend ? 0.55 : 1.0;
+    const rawMax = rawMaxAt(day);
+    const ctx = { rawMax, fullWh: rawMax * NOMINAL_V / 1000, cycles: cyclesAt(day), health: +(rawMax / DESIGN * 100).toFixed(1) };
+    const dayBase = baseWattsAt(day) * useMul * rng(0.9, 1.1);
+    const mobility = weekend ? rng(0.15, 0.4) : rng(0.45, 0.85);     // weekdays unplugged/mobile more
+    let pct = chance(0.85) ? rng(97, 100) : rng(60, 88);
+    let plugged = chance(0.25);
+    let t = startMs + day * DAY + 7 * HOUR + rng(0, 1 * HOUR);
+    const dayEnd = startMs + day * DAY + 23 * HOUR + rng(0, 1.2 * HOUR);
 
-  while (t < dayEnd) {
-    const hour = (t - (startMs + day * DAY)) / HOUR;
-    const ep = chooseEpisode(hour, plugged, pct, mobility);
-    plugged = ep.plugged;
-    const steps = Math.max(1, Math.round(ep.durMin * 60 / STEP));
-    for (let s = 0; s < steps && t < dayEnd; s++) {
-      if (ep.state === 'SLEEP') {
-        pct = plugged ? Math.min(100, pct + 0.45 * (STEP / 60)) : Math.max(0, pct - 0.012 * (STEP / 60));
-      } else if (ep.state === 'BATT') {
-        const watts = Math.max(2, dayBase * bandFactor(pct) + 1.5 * Math.sin(t / 7e5) + (chance(0.04) ? rng(6, 14) : 0) + noise(0.8));
-        pct = Math.max(0, pct - watts * (STEP / 3600) / ctx.fullWh * 100);
-        emit('BATT', t, pct, watts, ctx);
-      } else if (ep.state === 'CHARGE') {
-        const rate = pct < 80 ? 0.6 : pct < 95 ? 0.35 : 0.12;
-        pct = Math.min(100, pct + rate * (STEP / 60));
-        emit(pct >= 100 ? 'ACIDLE' : 'CHARGE', t, pct, rate / 100 * ctx.fullWh * 60, ctx);
-      } else { pct = 100; emit('ACIDLE', t, pct, 0, ctx); }
-      t += STEP * 1000;
+    while (t < dayEnd) {
+      const hour = (t - (startMs + day * DAY)) / HOUR;
+      const ep = chooseEpisode(hour, plugged, pct, mobility);
+      plugged = ep.plugged;
+      const steps = Math.max(1, Math.round(ep.durMin * 60 / STEP));
+      for (let s = 0; s < steps && t < dayEnd; s++) {
+        if (ep.state === 'SLEEP') {
+          pct = plugged ? Math.min(100, pct + 0.45 * (STEP / 60)) : Math.max(0, pct - 0.012 * (STEP / 60));
+        } else if (ep.state === 'BATT') {
+          const watts = Math.max(2, dayBase * bandFactor(pct) + 1.5 * Math.sin(t / 7e5) + (chance(0.04) ? rng(6, 14) : 0) + noise(0.8));
+          pct = Math.max(0, pct - watts * (STEP / 3600) / ctx.fullWh * 100);
+          emit('BATT', t, pct, watts, ctx);
+        } else if (ep.state === 'CHARGE') {
+          const rate = pct < 80 ? 0.6 : pct < 95 ? 0.35 : 0.12;
+          pct = Math.min(100, pct + rate * (STEP / 60));
+          emit(pct >= 100 ? 'ACIDLE' : 'CHARGE', t, pct, rate / 100 * ctx.fullWh * 60, ctx);
+        } else { pct = 100; emit('ACIDLE', t, pct, 0, ctx); }
+        t += STEP * 1000;
+      }
     }
   }
+  return lines;
 }
 
-fs.writeFileSync(out, lines.join('\n') + '\n');
-console.log(`demo2 written: ${lines.length} samples across ~${Math.round(365 / 2)} days -> ${out}`);
+// run directly (node scripts/gen-demo2.js) → write the file for dev
+if ((process.argv[1] || '').endsWith('gen-demo2.js')) {
+  const out = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data', 'demo2.jsonl');
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  const l = generateDemo2Lines();
+  fs.writeFileSync(out, l.join('\n') + '\n');
+  console.log(`demo2 written: ${l.length} samples -> ${out}`);
+}

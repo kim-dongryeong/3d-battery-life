@@ -7,19 +7,34 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readSamples, buildReport } from './lib/report.js';
 import { analyzeRates } from './lib/bucketRates.js';
-import { userDataDir } from './lib/paths.js';
+import { userDataDir, cacheDir } from './lib/paths.js';
+import { generateDemoLines } from './scripts/gen-demo.js';
+import { generateDemo2Lines } from './scripts/gen-demo2.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json',
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
 };
-// Demos are shipped assets (next to the app); the user's real samples live in the
-// shared, writable user data dir — so every packaging form shows the same report.
+// Demos are GENERATED on demand (deterministic) and cached — not shipped (keeps the app small).
+// If an older bundle still ships one next to the app, prefer that.
+function demoFile(sp, assetDir) {
+  const name = sp === 'demo2' ? 'demo2.jsonl' : 'demo.jsonl';
+  const bundled = path.join(assetDir, name);
+  if (fs.existsSync(bundled)) return bundled;
+  const cached = path.join(cacheDir(), name);
+  if (!fs.existsSync(cached)) {
+    fs.mkdirSync(cacheDir(), { recursive: true });
+    const lines = sp === 'demo2' ? generateDemo2Lines() : generateDemoLines();
+    fs.writeFileSync(cached, lines.join('\n') + '\n');
+  }
+  return cached;
+}
+// The user's real samples live in the shared, writable user data dir — so every
+// packaging form (CLI · binary · app) shows the same report.
 const readSource = (sp, assetDir) => {
-  const f = sp === 'demo' ? path.join(assetDir, 'demo.jsonl')
-    : sp === 'demo2' ? path.join(assetDir, 'demo2.jsonl')
-    : path.join(userDataDir(), 'samples.jsonl');
+  if (sp === 'demo' || sp === 'demo2') return readSamples(demoFile(sp, assetDir));
+  const f = path.join(userDataDir(), 'samples.jsonl');
   return fs.existsSync(f) ? readSamples(f) : [];
 };
 

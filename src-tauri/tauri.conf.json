@@ -25,8 +25,7 @@
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.icns"],
     "externalBin": ["binaries/battery-life"],
     "resources": {
-      "../web": "web",
-      "../data/demo2.jsonl": "data/demo2.jsonl"
+      "../web": "web"
     }
   }
 }

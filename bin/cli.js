@@ -11,13 +11,14 @@ import { spawnSync } from 'node:child_process';
 import { sample } from '../lib/battery.js';
 import { startServer, resolveRoot } from '../server.js';
 import { userDataDir, samplesFile } from '../lib/paths.js';
+import { generateDemoLines } from '../scripts/gen-demo.js';
+import { generateDemo2Lines } from '../scripts/gen-demo2.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));        // .../bin (dev) or virtual (compiled)
 const pkgRoot = path.dirname(here);                              // for spawning dev scripts (Node/npx only)
 // Let server.js decide where web/ lives: BATTERY_ROOT → exe dir → .app Resources → cwd.
 const root = resolveRoot();
 const cmd = (process.argv[2] || 'serve').replace(/^-+/, '');
-const node = rel => spawnSync(process.execPath, [path.join(pkgRoot, rel)], { stdio: 'inherit' });
 
 // ── launchd auto-recording ──────────────────────────────────────────────────
 const LABEL = 'com.kdr.3d-battery-life.sampler';
@@ -126,8 +127,16 @@ switch (cmd) {
   }
   case 'install': recordOn(parseInt(process.argv[3] || '60', 10) || 60); break;   // aliases
   case 'uninstall': recordOff(); break;
-  case 'demo': node('scripts/gen-demo.js'); break;
-  case 'demo2': node('scripts/gen-demo2.js'); break;
+  case 'demo':
+  case 'demo2': {
+    const l = cmd === 'demo2' ? generateDemo2Lines() : generateDemoLines();
+    const dir = path.join(pkgRoot, 'data');
+    fs.mkdirSync(dir, { recursive: true });
+    const f = path.join(dir, `${cmd}.jsonl`);
+    fs.writeFileSync(f, l.join('\n') + '\n');
+    console.log(`${cmd}: ${l.length} samples → ${f}`);
+    break;
+  }
   default:
     console.log(`battery-life <command>
 
