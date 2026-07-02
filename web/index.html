@@ -52,8 +52,18 @@
       </div>
     </div>
     <div class="grp">
-      <span class="lbl">화면 스타일 (테스트용)</span>
-      <div class="seg" data-group="ui">
+      <span class="lbl">레이아웃 (배치·플로우)</span>
+      <div class="seg wrap" data-group="layout">
+        <button data-val="a" class="on">대시보드</button>
+        <button data-val="b">탭바</button>
+        <button data-val="c">사이드바</button>
+        <button data-val="d">도크</button>
+        <button data-val="e">카드</button>
+      </div>
+    </div>
+    <div class="grp">
+      <span class="lbl">테마 스킨 (색·여백)</span>
+      <div class="seg wrap" data-group="ui">
         <button data-val="1" class="on">기본</button>
         <button data-val="2">컴팩트</button>
         <button data-val="3">널찍</button>
@@ -80,6 +90,8 @@
   <section id="trendchart" hidden></section>
 
   <!-- hover detail -->
+  <nav id="lnav"></nav>            <!-- layout nav (tabs / dock / sidebar list) — filled per layout -->
+  <div id="insight" hidden></div>  <!-- E 카드 레이아웃: 결론 카드 -->
   <aside id="tip" hidden></aside>
   <div id="empty" hidden>아직 배터리 세션 데이터가 충분하지 않습니다.<br/>백그라운드 기록이 쌓이면 여기에 나타납니다. 지금은 <b>데모(1년)</b>를 보세요.</div>
 

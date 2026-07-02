@@ -11,6 +11,8 @@ const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -12, 24시 -
 const state = { source: 'demo2', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'pct', selectedBand: null, selectedPeriod: null, trendAll: false, trendBig: false, trendView: 'line', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = (() => { try { return localStorage.getItem('battUI') || '1'; } catch { return '1'; } })();
+state.layout = (() => { try { return localStorage.getItem('battLayout') || 'a'; } catch { return 'a'; } })();
+state.tab = '3d';   // active view for single-view layouts (B 탭바 / C 사이드바 / D 도크)
 
 // ---- color themes (dark / light) for WebGL scenes + SVG charts -----------
 const THEMES = {
@@ -240,6 +242,7 @@ function updateHud(r) {
   stats.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
 
   renderRates();  // rigorous per-band discharge-rate panel (lib/bucketRates.js, /api/rates)
+  if (typeof renderInsight === 'function') renderInsight();   // E 카드 레이아웃 값 갱신
 }
 
 // ---- per-band panel: metric (rate %/min ↔ aging Wh/%), period, version/level ----
@@ -686,6 +689,7 @@ document.querySelectorAll('.seg').forEach(seg => {
     const group = seg.dataset.group, val = b.dataset.val;
     if (group === 'source') { state.source = val; load(); }
     else if (group === 'ui') { applyUI(val); }
+    else if (group === 'layout') { applyLayout(val); }
     else { state[group] = val; rebuild(); }
   });
 });
@@ -714,6 +718,56 @@ function applyUI(v) {
   document.querySelectorAll('.seg[data-group="ui"] button').forEach(x => x.classList.toggle('on', x.dataset.val === v));
 }
 applyUI(state.ui);   // apply persisted preset + mark button
+
+// ===== Layout / flow presets: A 대시보드 · B 탭바 · C 사이드바 · D 도크 · E 카드 =====
+// Reuses the existing panels (#hud/#panel/#buckets/#trendchart/#scene); layout classes on <html>
+// reposition/show-hide them, and a shared nav (#lnav) + insight cards (#insight) provide the flow.
+const LTABS = [['3d', '🧊 3D'], ['speed', '📊 속도'], ['trend', '📈 추세'], ['health', '🔋 건강'], ['settings', '⚙ 설정']];
+const SINGLE_VIEW = { b: 1, c: 1, d: 1 };
+function renderLnav() {
+  const nav = document.getElementById('lnav');
+  if (!SINGLE_VIEW[state.layout]) { nav.innerHTML = ''; return; }
+  nav.innerHTML = LTABS.map(([k, l]) => `<button data-tab="${k}" class="${state.tab === k ? 'on' : ''}">${l}</button>`).join('');
+}
+function setTab(t) {
+  state.tab = t;
+  const h = document.documentElement;
+  ['3d', 'speed', 'trend', 'health', 'settings'].forEach(x => h.classList.remove('tab-' + x));
+  h.classList.add('tab-' + t);
+  if (t === 'trend' && state.selectedBand == null && !state.trendAll) { state.trendAll = true; renderRates(); }
+  renderLnav();
+}
+function renderInsight() {
+  const el = document.getElementById('insight');
+  if (state.layout !== 'e') { el.hidden = true; return; }
+  el.hidden = false;
+  const r = state.report;
+  if (!r) { el.innerHTML = '<div class="icard">불러오는 중…</div>'; return; }
+  const L = r.latest;
+  const cap = L && L.healthPct != null ? Math.min(100, Math.round(L.healthPct)) : null;
+  const aged = cap != null ? 100 - cap : null;
+  const e = avgRate(r.bucketsEarly), n = avgRate(r.bucketsRecent);
+  const early = e ? (10 / e).toFixed(0) : null, recent = n ? (10 / n).toFixed(0) : null;
+  el.innerHTML =
+    `<div class="icard big"><span class="ik">배터리 최대 용량</span><span class="iv">${cap != null ? cap + '%' : '–'}</span><span class="isub">노화 ${aged != null ? aged + '%p' : '–'}${L ? ' · ' + L.cycles + '사이클' : ''}</span></div>` +
+    `<div class="icard"><span class="ik">10% 소모 시간 (초기→최근)</span><span class="iv">${early && recent ? `${early}→${recent}분` : '–'}</span><span class="isub">${early && recent ? (recent < early ? '점점 빨라짐' : '안정') : '데이터 더 필요'}</span></div>` +
+    `<div class="icard drill" data-tab="trend"><span class="ik">왜 빨라졌나?</span><span class="iv">추세로 확인 →</span><span class="isub">부하(W) vs 노화(Wh/%) 분리해서 보기</span></div>` +
+    `<div class="idrill"><button data-tab="3d">🧊 3D</button><button data-tab="speed">📊 속도</button><button data-tab="trend">📈 추세</button><button data-tab="settings">⚙ 설정</button></div>`;
+}
+function applyLayout(l) {
+  const h = document.documentElement;
+  ['a', 'b', 'c', 'd', 'e'].forEach(x => h.classList.remove('lay-' + x));
+  h.classList.remove('single-view');
+  state.layout = l; h.classList.add('lay-' + l);
+  if (SINGLE_VIEW[l]) h.classList.add('single-view');
+  try { localStorage.setItem('battLayout', l); } catch { /* ignore */ }
+  document.querySelectorAll('.seg[data-group="layout"] button').forEach(x => x.classList.toggle('on', x.dataset.val === l));
+  renderInsight();
+  if (SINGLE_VIEW[l]) setTab(state.tab); else renderLnav();
+}
+document.getElementById('lnav').addEventListener('click', e => { const b = e.target.closest('button'); if (b && b.dataset.tab) setTab(b.dataset.tab); });
+document.getElementById('insight').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (b) { applyLayout('b'); setTab(b.dataset.tab); } });
+applyLayout(state.layout);   // apply persisted layout
 
 // rate panel: version toggle (re-render) / level toggle (re-fetch)
 document.getElementById('buckets').addEventListener('click', e => {
