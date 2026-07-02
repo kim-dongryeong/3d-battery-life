@@ -1,6 +1,9 @@
 // Live battery popover (Stats-parity). Loaded in a small Tauri window from the node server,
 // so /api/live & /api/procs are same-origin. Three selectable layouts: list · cards · gauge.
 const $ = id => document.getElementById(id);
+// escape ALL server-derived strings — process names / serial / adapter name are attacker-influenceable
+// and CSP is disabled in the popover window, so unescaped innerHTML would execute.
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let pv = (() => { try { return new URLSearchParams(location.search).get('pv') || localStorage.getItem('battPV') || 'list'; } catch { return 'list'; } })();
 let theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 let live = null, procs = [], detail = {}, lastLiveAt = 0;
@@ -59,11 +62,11 @@ const kvHTML = rows => rows.map(([k, v]) => `<div class="kv"><span>${k}</span><b
 
 function detailHTML(s) {
   const rows = [];
-  if (detail.condition) rows.push(['상태(컨디션)', detail.condition]);
-  if (detail.designCycleCount) rows.push(['설계 사이클 한도', `${detail.designCycleCount}회`]);
-  if (s.ac && detail.adapterWatts) rows.push(['전원 어댑터', `${detail.adapterWatts} W${detail.adapterName ? ' · ' + detail.adapterName : ''}`]);
+  if (detail.condition) rows.push(['상태(컨디션)', esc(detail.condition)]);
+  if (detail.designCycleCount) rows.push(['설계 사이클 한도', `${+detail.designCycleCount}회`]);
+  if (s.ac && detail.adapterWatts) rows.push(['전원 어댑터', `${+detail.adapterWatts} W${detail.adapterName ? ' · ' + esc(detail.adapterName) : ''}`]);
   if (detail.onHold) rows.push(['충전 상태', '🔵 최적화 충전(대기 중)']);
-  if (detail.serial) rows.push(['배터리 시리얼', detail.serial]);
+  if (detail.serial) rows.push(['배터리 시리얼', esc(detail.serial)]);
   return rows.length ? `<div class="sec">상세</div>${kvHTML(rows)}` : '';
 }
 function tailHTML(s) { return detailHTML(s) + procsHTML(); }
@@ -72,9 +75,9 @@ function procsHTML() {
   if (!procs.length) return '';
   const max = Math.max(...procs.map(p => p.power), 1);
   return `<div class="sec">배터리 소모 상위 (power)</div>` + procs.map(p =>
-    `<div class="proc"><span class="pn" title="${p.name}">${p.name}</span>` +
-    `<span class="pbarwrap"><i class="pbar" style="width:${Math.round(p.power / max * 100)}%"></i></span>` +
-    `<b>${p.power.toFixed(1)}</b></div>`).join('');
+    `<div class="proc"><span class="pn" title="${esc(p.name)}">${esc(p.name)}</span>` +
+    `<span class="pbarwrap"><i class="pbar" style="width:${Math.round((+p.power || 0) / max * 100)}%"></i></span>` +
+    `<b>${(+p.power || 0).toFixed(1)}</b></div>`).join('');
 }
 
 function render() {
@@ -83,9 +86,11 @@ function render() {
   document.body.dataset.pv = pv;
   document.querySelectorAll('.vsel button').forEach(b => b.classList.toggle('on', b.dataset.pv === pv));
   $('themeBtn').textContent = theme === 'light' ? '☀️' : '🌙';
-  if (!live || live.error) { el.innerHTML = `<div class="err">배터리 정보를 읽을 수 없습니다${live && live.error ? ` (${live.error})` : ''}.</div>`; $('live').textContent = ''; return; }
+  if (!live || live.error) { el.innerHTML = `<div class="err">배터리 정보를 읽을 수 없습니다${live && live.error ? ` (${esc(live.error)})` : ''}.</div>`; $('live').textContent = ''; return; }
   const s = live;
-  const pct = s.pct != null ? Math.round(s.pct) : 0;
+  const known = s.pct != null;
+  const pct = known ? Math.round(s.pct) : 0;   // unknown → gauge shows 0 fill but label reads "?"
+  const pctLbl = known ? `${pct}%` : '?';
   const timeLbl = s.charging ? '완충까지' : '남은 시간';
   const lpm = s.lowPower ? `<span class="lpm">🟡 저전력 모드</span>` : '';
 
@@ -97,7 +102,7 @@ function render() {
           <circle cx="70" cy="70" r="${R}" fill="none" stroke="var(--line)" stroke-width="12"/>
           <circle cx="70" cy="70" r="${R}" fill="none" stroke="${barColor(pct)}" stroke-width="12"
             stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${off}" transform="rotate(-90 70 70)"/>
-          <text x="70" y="66" text-anchor="middle" class="gpct">${pct}%</text>
+          <text x="70" y="66" text-anchor="middle" class="gpct">${pctLbl}</text>
           <text x="70" y="88" text-anchor="middle" class="gsub">${stateIcon(s)} ${s.watts != null ? s.watts.toFixed(1) + 'W' : ''}</text>
         </svg>
         <div class="gstate">${stateOf(s)} ${lpm}</div>
@@ -108,7 +113,7 @@ function render() {
       <div class="grid2">${kvHTML(rowsHealth(s))}</div>${tailHTML(s)}`;
   } else if (pv === 'cards') {
     el.innerHTML =
-      `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pct}%</div>
+      `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pctLbl}</div>
         <div class="st">${stateOf(s)} ${lpm}</div></div></div>
       <div class="card"><div class="ct">${timeLbl}</div><div class="cv">${fmtTime(s.timeRemain)}</div></div>
       <div class="cards2">
@@ -121,7 +126,7 @@ function render() {
       ${tailHTML(s)}`;
   } else { // list (Stats-like dense)
     el.innerHTML =
-      `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pct}%</div>
+      `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pctLbl}</div>
         <div class="st">${stateOf(s)} ${lpm}</div></div></div>
       <div class="sec">상태</div>
       <div class="kv"><span>${timeLbl}</span><b>${fmtTime(s.timeRemain)}</b></div>

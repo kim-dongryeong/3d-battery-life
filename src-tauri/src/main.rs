@@ -58,9 +58,10 @@ fn ask_consent() -> bool {
 
 // macOS notification via osascript (no plugin / entitlement). Quotes sanitized.
 fn notify(title: &str, body: &str) {
+    let clean = |s: &str| s.replace('\\', "").replace('"', "'").replace(['\n', '\r'], " ");
     let script = format!(
         "display notification \"{}\" with title \"{}\" sound name \"Ping\"",
-        body.replace('"', "'"), title.replace('"', "'")
+        clean(body), clean(title)
     );
     let _ = Sh::new("osascript").args(["-e", &script]).status();
 }
@@ -77,7 +78,10 @@ fn notify_check(l: &live::Live, low: &mut bool, crit: &mut bool, high: &mut bool
         if l.pct >= 80.0 && !*high { notify("충전 80% 도달", "배터리 수명을 위해 뽑아도 좋아요"); *high = true; }
         if l.pct < 75.0 { *high = false; }
     } else {
-        *low = false; *crit = false; *high = false;
+        // AC idle / full / on-hold — reset the LOW side (we're plugged) but keep HIGH sticky so
+        // optimized-charging flapping between Charging↔AC-idle can't re-fire the 80% alert.
+        *low = false; *crit = false;
+        if l.pct < 75.0 { *high = false; }
     }
 }
 

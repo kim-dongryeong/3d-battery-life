@@ -137,6 +137,7 @@ export function startServer({ root, port } = {}) {
       procsInflight = true;
       execFile('top', ['-l', '2', '-o', 'power', '-n', '20', '-stats', 'pid,command,power'], { timeout: 5000 }, (err, stdout) => {
         procsInflight = false;
+        if (err) procsCache.at = Date.now();   // back off on failure — don't respawn `top` every poll
         if (!err) {
           const blocks = stdout.split(/^Processes:/m);           // 2nd sample = last block
           const rows = [];

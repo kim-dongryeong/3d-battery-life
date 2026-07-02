@@ -61,11 +61,10 @@ impl Reader {
         let full_wh = b.energy_full().get::<watt_hour>() as f64;
         let design_wh = b.energy_full_design().get::<watt_hour>() as f64;
         let health = if design_wh > 0.0 { Some((full_wh / design_wh * 100.0 * 10.0).round() / 10.0) } else { None };
-        let secs = if charging {
-            b.time_to_full().map(|t| t.get::<second>() as f64)
-        } else {
-            b.time_to_empty().map(|t| t.get::<second>() as f64)
-        };
+        // only a meaningful time while actively charging/discharging (full/AC-idle → no countdown)
+        let secs = if charging { b.time_to_full().map(|t| t.get::<second>() as f64) }
+            else if discharging { b.time_to_empty().map(|t| t.get::<second>() as f64) }
+            else { None };
         Live {
             ok: true,
             pct: (b.state_of_charge().get::<percent>() as f64 * 10.0).round() / 10.0,
@@ -97,7 +96,9 @@ pub fn cfg_path() -> std::path::PathBuf {
         .join("Library/Application Support/3d-battery-life/tray.json")
 }
 pub fn load_cfg() -> Cfg {
-    std::fs::read_to_string(cfg_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    let mut c: Cfg = std::fs::read_to_string(cfg_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    if c.info > 5 { c.info = 4; }   // clamp so `(info + 1) % 6` never overflows u8
+    c
 }
 pub fn save_cfg(c: &Cfg) {
     if let Ok(s) = serde_json::to_string(c) {
