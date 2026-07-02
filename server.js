@@ -7,13 +7,21 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readSamples, buildReport } from './lib/report.js';
 import { analyzeRates } from './lib/bucketRates.js';
+import { userDataDir } from './lib/paths.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json',
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
 };
-const fileFor = sp => sp === 'demo' ? 'demo.jsonl' : sp === 'demo2' ? 'demo2.jsonl' : 'samples.jsonl';
+// Demos are shipped assets (next to the app); the user's real samples live in the
+// shared, writable user data dir — so every packaging form shows the same report.
+const readSource = (sp, assetDir) => {
+  const f = sp === 'demo' ? path.join(assetDir, 'demo.jsonl')
+    : sp === 'demo2' ? path.join(assetDir, 'demo2.jsonl')
+    : path.join(userDataDir(), 'samples.jsonl');
+  return fs.existsSync(f) ? readSamples(f) : [];
+};
 
 // In dev, assets sit next to this file. In a bun-compiled binary the source lives in a
 // virtual fs (no web/ there) → fall back to the directory of the executable.
@@ -38,14 +46,14 @@ export function startServer({ root, port } = {}) {
   const base = resolveRoot(root);
   const PORT = port || process.env.PORT || 4317;
   const webDir = fs.realpathSync(path.join(base, 'web'));
-  const dataDir = path.join(base, 'data');
+  const assetDir = path.join(base, 'data');            // shipped demo .jsonl
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
 
     if (url.pathname === '/api/report') {
       try {
-        const report = buildReport(readSamples(path.join(dataDir, fileFor(url.searchParams.get('source')))));
+        const report = buildReport(readSource(url.searchParams.get('source'), assetDir));
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify(report));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
@@ -56,7 +64,7 @@ export function startServer({ root, port } = {}) {
       const level = url.searchParams.get('level') === 'rawcap' ? 'rawcap' : 'pct';
       const period = url.searchParams.get('period');
       try {
-        const r = analyzeRates(readSamples(path.join(dataDir, fileFor(url.searchParams.get('source')))), { level, period });
+        const r = analyzeRates(readSource(url.searchParams.get('source'), assetDir), { level, period });
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ opt: r.opt, spans: r.spans, atoms: r.atoms, byBand: r.byBand, periods: r.periods, perCell: r.perCell }));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
@@ -74,7 +82,7 @@ export function startServer({ root, port } = {}) {
       });
     });
   });
-  server.listen(PORT, '127.0.0.1', () => console.log(`3d-battery-life ▶  http://localhost:${PORT}   (data: ${dataDir})`));
+  server.listen(PORT, '127.0.0.1', () => console.log(`3d-battery-life ▶  http://localhost:${PORT}   (samples: ${path.join(userDataDir(), 'samples.jsonl')})`));
   return server;
 }
 

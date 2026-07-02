@@ -20,11 +20,23 @@ macOS 배터리의 **방전 속도를 시간에 따라 기록**하고, 브라우
 ```bash
 node scripts/gen-demo2.js     # 쇼케이스 데모 생성 (지금 바로 3D 보기)
 npm start                     # 뷰어 → http://localhost:4317   (= node bin/cli.js serve)
-./install.sh                  # (선택) 백그라운드 자동 기록 시작 — 60초마다, launchd, sudo 불필요
 ```
 
 우측 패널에서 **데모2 ✨(쇼케이스) ↔ 데모1 ↔ 내 데이터**를 전환. 내 데이터는 기록이 쌓일수록 풍부해진다.
 지표·버전·델타·노화(Wh/%) 설명은 화면 우상단 **?안내**(= `/help.html`).
+
+## 자동 기록 (on/off) & 데이터 위치
+
+배터리 기록은 launchd로 60초마다 백그라운드 수집(sudo 불필요, idle ~0% CPU). **로그인 시 자동 시작**(재부팅해도 유지).
+
+```bash
+node bin/cli.js record on       # 시작 (= ./install.sh).  주기 바꾸기: record on 120
+node bin/cli.js record status   # 켜짐 여부 + 수집 개수
+node bin/cli.js record off       # 중지 (= ./uninstall.sh, 수집한 데이터는 유지)
+```
+
+- **실데이터는 한 곳에 모인다**: `~/Library/Application Support/3d-battery-life/samples.jsonl` (`BATTERY_DATA`로 변경 가능). npx·단일 바이너리·Tauri 앱 **어느 걸로 봐도 같은 리포트**. (데모 `.jsonl`은 앱에 동봉되는 자산.)
+- 기록기는 항상 **하나만** 돌도록 idempotent — 세 방법을 다 써도 데이터가 중복되지 않는다.
 
 ## 배포 / 패키징
 

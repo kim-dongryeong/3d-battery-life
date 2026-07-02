@@ -27,7 +27,7 @@ npm run build:app      # ① 바이너리 → ② 사이드카(타깃 트리플�
 앱 더블클릭 → 메뉴바 아이콘 → "뷰어 열기".
 
 ## 알아둘 점
-- **배터리 기록(sample)**: `.app` 안 자산 경로는 읽기전용이라 라이브 기록은 **launchd 에이전트(`./install.sh`)** 를 쓰세요(앱과 독립적으로 1분마다 `data/`에 기록). 메뉴바 앱은 그 데이터를 보여주는 뷰어 역할.
+- **배터리 기록(sample)**: `battery-life record on`(= `./install.sh`)으로 launchd가 1분마다 **공유 데이터 폴더** `~/Library/Application Support/3d-battery-life/`에 기록. `.app`·바이너리·CLI 모두 그 폴더의 **같은 실데이터**를 읽으므로, 메뉴바 앱에서 "내 데이터"가 그대로 보입니다(데모는 앱에 동봉). 끄기 `record off`, 상태 `record status`.
 - **서명·공증 안 함**: 직접 빌드한 `.app`은 로컬 실행은 되지만, 남에게 배포하면 Gatekeeper가 막습니다 → Apple Developer 계정으로 codesign + notarize 필요.
 - **서버 준비 레이스**: 창이 서버보다 먼저 뜨면 잠깐 빈 화면일 수 있음 → 필요하면 `main.rs`에서 폴링 후 `show` 보완.
 - **다른 칩**: Intel 맥은 `build-app.sh`가 자동으로 `-x86_64-apple-darwin` 트리플로 사이드카를 복사합니다(그 맥에서 빌드 시).

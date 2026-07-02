@@ -1,8 +1,8 @@
 #!/bin/bash
-# Stops and removes the background sampler. Your collected data is left intact.
+# Stop background battery recording. Your collected data is left intact.
+# Thin wrapper around `battery-life record off`.
 set -euo pipefail
-LABEL="com.kdr.3d-battery-life.sampler"
-DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
-launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || launchctl unload "$DEST" 2>/dev/null || true
-rm -f "$DEST"
-echo "🛑 removed $LABEL (data/ kept)"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NODE="$(command -v node || true)"
+[ -z "$NODE" ] && { echo "error: node not found on PATH"; exit 1; }
+exec "$NODE" "$DIR/bin/cli.js" record off
