@@ -13,9 +13,17 @@ if ! command -v bun >/dev/null 2>&1; then
   exit 1
 fi
 
+# Per-arch: pass 'x64' or 'arm64' to cross-compile (bun cross-compiles fine). NOTE: you can NOT
+# lipo two bun --compile binaries into one universal file — bun appends the JS bundle as a trailer
+# that `lipo -create` drops, breaking the result. Ship per-arch binaries instead.
+case "${1:-host}" in
+  x64)   BT=bun-darwin-x64 ;;
+  arm64) BT=bun-darwin-arm64 ;;
+  *)     BT=bun ;;
+esac
 rm -rf "$OUT"; mkdir -p "$OUT/data"
-echo "▶ compiling bin/cli.js → $OUT/battery-life"
-bun build "$DIR/bin/cli.js" --compile --minify --target=bun --outfile "$OUT/battery-life"
+echo "▶ compiling bin/cli.js ($BT) → $OUT/battery-life"
+bun build "$DIR/bin/cli.js" --compile --minify --target="$BT" --outfile "$OUT/battery-life"
 cp -R "$DIR/web" "$OUT/web"     # static viewer assets, read next to the executable
 
 echo

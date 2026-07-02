@@ -1,28 +1,34 @@
 #!/bin/bash
-# Build the macOS menu-bar app end-to-end: single binary → sidecar → Tauri .app/.dmg.
-# Prereqs: bun, Rust (rustup), tauri-cli (npm i -g @tauri-apps/cli@^2), and icons generated once.
+# Build the macOS menu-bar app → per-arch .app/.dmg (Apple Silicon AND Intel).
+# We build SEPARATE per-arch bundles (not universal): bun --compile binaries can't be lipo'd into a
+# universal file (the appended JS trailer is dropped), so a universal app would ship a broken sidecar.
+# Prereqs: bun, Rust + `rustup target add x86_64-apple-darwin aarch64-apple-darwin`, tauri-cli, icons.
+#   ./build-app.sh            → both arches (two .dmgs)
+#   ./build-app.sh --native   → host arch only (fast, dev)
+#   ./build-app.sh --arm64 | --x86_64
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MODE="${1:-both}"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "error: '$1' not found — $2"; exit 1; }; }
-need bun   "install: brew install bun"
-need cargo "install Rust: https://rustup.rs"
-need tauri "install: npm i -g @tauri-apps/cli@^2"
+need bun "brew install bun"; need cargo "https://rustup.rs"; need tauri "npm i -g @tauri-apps/cli@^2"
+BINDIR="$DIR/src-tauri/binaries"; mkdir -p "$BINDIR"
+[ -f "$DIR/src-tauri/icons/icon.icns" ] || echo "  ! icons missing — (cd src-tauri && tauri icon /path/to/icon.png)"
 
-TRIPLE="$(rustc -Vv | sed -n 's/host: //p')"
+build_one() { # <triple> <bun-target>
+  local triple="$1" bt="$2"
+  echo "▶ [$triple] sidecar"
+  bun build "$DIR/bin/cli.js" --compile --minify --target="$bt" --outfile "$BINDIR/battery-life-$triple"
+  chmod +x "$BINDIR/battery-life-$triple"
+  echo "▶ [$triple] Tauri bundle"
+  ( cd "$DIR" && tauri build --target "$triple" )
+  echo "✅ [$triple] → src-tauri/target/$triple/release/bundle/"
+}
 
-echo "▶ 1/3  single binary (Bun)"
-bash "$DIR/scripts/build-binary.sh"
-
-echo "▶ 2/3  sidecar → src-tauri/binaries/battery-life-$TRIPLE"
-mkdir -p "$DIR/src-tauri/binaries"
-cp "$DIR/dist/battery-life" "$DIR/src-tauri/binaries/battery-life-$TRIPLE"
-
-if [ ! -f "$DIR/src-tauri/icons/icon.icns" ]; then
-  echo "  ! icons missing — generate once with a 512px+ PNG:  (cd src-tauri && tauri icon /path/to/icon.png)"
-fi
-
-echo "▶ 3/3  Tauri bundle"
-( cd "$DIR" && tauri build )
-
-echo "✅ done → src-tauri/target/release/bundle/  (macos/*.app, dmg/*.dmg)"
+case "$MODE" in
+  --native) t="$(rustc -Vv | sed -n 's/host: //p')"; [ "${t%%-*}" = x86_64 ] && b=bun-darwin-x64 || b=bun-darwin-arm64; build_one "$t" "$b" ;;
+  --arm64)  build_one aarch64-apple-darwin bun-darwin-arm64 ;;
+  --x86_64) build_one x86_64-apple-darwin  bun-darwin-x64 ;;
+  both|*)   build_one aarch64-apple-darwin bun-darwin-arm64; build_one x86_64-apple-darwin bun-darwin-x64
+            echo "✅ both: Apple Silicon .dmg + Intel .dmg (distribute the matching one, or both)" ;;
+esac
