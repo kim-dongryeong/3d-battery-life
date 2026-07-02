@@ -5,8 +5,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod live;
+mod smc;
 
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::process::Command as Sh;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Instant;
@@ -185,12 +187,21 @@ fn main() {
             let cfg_ticker = cfg.clone();
             std::thread::spawn(move || {
                 let mut reader = live::Reader::new();
+                let smc = smc::Smc::open();   // live temp/system-power (real-time; ioreg is 60s-quantized)
                 let mut last_key = String::new();
                 let (mut low, mut crit, mut high) = (false, false, false);
                 loop {
                     let l = reader.read();
                     let c = cfg_ticker.lock().map(|g| g.clone()).unwrap_or_default();
                     if l.ok { notify_check(&l, &mut low, &mut crit, &mut high); }
+                    // bridge SMC live values to a file the node server merges into /api/live
+                    if let Some(ref s) = smc {
+                        let f = |o: Option<f64>| o.map(|v| v.to_string()).unwrap_or_else(|| "null".into());
+                        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                        let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"at\":{}}}",
+                            f(s.battery_temp_c()), f(s.system_watts()), f(s.adapter_watts()), now);
+                        let _ = std::fs::write(data_dir().join("live-smc.json"), j);
+                    }
                     if let Some(tray) = handle.tray_by_id("tray") {
                         let title = live::tray_title(&l, c.info);
                         let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });

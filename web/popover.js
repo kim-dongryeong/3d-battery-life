@@ -6,8 +6,10 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let pv = (() => { try { return new URLSearchParams(location.search).get('pv') || localStorage.getItem('battPV') || 'list'; } catch { return 'list'; } })();
 let theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
+let unit = (() => { try { return localStorage.getItem('battUnit') || 'c'; } catch { return 'c'; } })();
 let live = null, procs = [], detail = {}, lastLiveAt = 0;
 
+const fmtTemp = c => c == null ? '–' : unit === 'f' ? `${(c * 9 / 5 + 32).toFixed(1)} °F` : `${c.toFixed(1)} °C`;
 const fmtTime = min => min == null ? '–' : min >= 60 ? `${Math.floor(min / 60)}시간 ${min % 60}분` : `${min}분`;
 const stateOf = s => s.charging ? '충전 중' : s.full ? '완충' : s.ac ? 'AC 연결(유휴)' : '배터리 사용';
 const stateIcon = s => s.charging ? '⚡' : s.ac ? '🔌' : '🔋';
@@ -43,12 +45,9 @@ function batterySVG(pct, s) {
 
 function rowsCore(s) {
   const amp = s.amperage != null ? `${s.amperage} mA` : '–';
-  const r = [
-    ['전력', `${s.watts != null ? s.watts.toFixed(2) : '–'} W`],
-    ['전류', amp],
-    ['전압', `${s.voltage != null ? s.voltage.toFixed(2) : '–'} V`],
-    ['온도', s.tempC != null ? `${s.tempC.toFixed(1)} °C` : '–'],
-  ];
+  const r = [['전력', `${s.watts != null ? s.watts.toFixed(2) : '–'} W`]];
+  if (s.systemW != null) r.push(['시스템 전력', `${s.systemW.toFixed(1)} W · 🔴라이브`]);   // SMC (moves every 2s)
+  r.push(['전류', amp], ['전압', `${s.voltage != null ? s.voltage.toFixed(2) : '–'} V`], ['온도', fmtTemp(s.tempC) + (s.smc ? ' · 🔴' : '')]);
   return r;
 }
 function rowsHealth(s) {
@@ -64,6 +63,7 @@ function detailHTML(s) {
   const rows = [];
   if (detail.condition) rows.push(['상태(컨디션)', esc(detail.condition)]);
   if (detail.designCycleCount) rows.push(['설계 사이클 한도', `${+detail.designCycleCount}회`]);
+  if (detail.manufactureDate) rows.push(['제조일', `${esc(detail.manufactureDate)}${detail.ageDays ? ` · ${Math.floor(detail.ageDays / 365)}년 ${Math.round((detail.ageDays % 365) / 30)}개월` : ''}`]);
   if (s.ac && detail.adapterWatts) rows.push(['전원 어댑터', `${+detail.adapterWatts} W${detail.adapterName ? ' · ' + esc(detail.adapterName) : ''}`]);
   if (detail.onHold) rows.push(['충전 상태', '🔵 최적화 충전(대기 중)']);
   if (detail.serial) rows.push(['배터리 시리얼', esc(detail.serial)]);
@@ -86,6 +86,7 @@ function render() {
   document.body.dataset.pv = pv;
   document.querySelectorAll('.vsel button').forEach(b => b.classList.toggle('on', b.dataset.pv === pv));
   $('themeBtn').textContent = theme === 'light' ? '☀️' : '🌙';
+  $('unitBtn').textContent = unit === 'f' ? '°F' : '°C';
   if (!live || live.error) { el.innerHTML = `<div class="err">배터리 정보를 읽을 수 없습니다${live && live.error ? ` (${esc(live.error)})` : ''}.</div>`; $('live').textContent = ''; return; }
   const s = live;
   const known = s.pct != null;
@@ -118,7 +119,7 @@ function render() {
       <div class="card"><div class="ct">${timeLbl}</div><div class="cv">${fmtTime(s.timeRemain)}</div></div>
       <div class="cards2">
         <div class="card"><div class="ct">전력</div><div class="cv">${s.watts != null ? s.watts.toFixed(1) : '–'}<small>W</small></div></div>
-        <div class="card"><div class="ct">온도</div><div class="cv">${s.tempC != null ? s.tempC.toFixed(1) : '–'}<small>°C</small></div></div>
+        <div class="card"><div class="ct">온도</div><div class="cv">${fmtTemp(s.tempC).replace(/ °[CF]/,'')}<small>°${unit==='f'?'F':'C'}</small></div></div>
         <div class="card"><div class="ct">건강</div><div class="cv">${s.healthPct != null ? Math.min(100, Math.round(s.healthPct)) : '–'}<small>%</small></div></div>
         <div class="card"><div class="ct">사이클</div><div class="cv">${s.cycles ?? '–'}</div></div>
       </div>
@@ -143,6 +144,7 @@ $('foot').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.pv) { pv = b.dataset.pv; try { localStorage.setItem('battPV', pv); } catch {} render(); }
   else if (b.id === 'themeBtn') { theme = theme === 'light' ? 'dark' : 'light'; try { localStorage.setItem('battTheme', theme); } catch {} render(); }
+  else if (b.id === 'unitBtn') { unit = unit === 'c' ? 'f' : 'c'; try { localStorage.setItem('battUnit', unit); } catch {} render(); }
 });
 
 render();

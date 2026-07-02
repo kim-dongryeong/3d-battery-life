@@ -108,11 +108,23 @@ export function startServer({ root, port } = {}) {
       return;
     }
 
-    // live: a fresh single reading (ioreg + pmset + top-proc) — the popover polls this every ~2s
+    // live: a fresh single reading (ioreg + pmset + top-proc) — the popover polls this every ~2s.
+    // When the tray app is running it writes live-smc.json (real-time SMC temp/system-power); merge
+    // that over ioreg's 60s-quantized temp so the live UI actually moves second-to-second.
     if (url.pathname === '/api/live') {
       try {
+        const s = sample();
+        try {
+          const smc = JSON.parse(fs.readFileSync(path.join(userDataDir(), 'live-smc.json'), 'utf8'));
+          if (smc && Date.now() / 1000 - smc.at < 6) {        // fresh (app running)
+            if (smc.tempC != null) s.tempC = smc.tempC;        // live battery temp
+            if (smc.systemW != null) s.systemW = smc.systemW;  // live system power draw
+            if (smc.adapterW != null) s.adapterW = smc.adapterW;
+            s.smc = true;
+          }
+        } catch { /* no bridge / app not running → ioreg only */ }
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-        res.end(JSON.stringify(sample()));
+        res.end(JSON.stringify(s));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
       return;
     }
