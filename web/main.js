@@ -10,6 +10,7 @@ const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -12, 24시 -
 // ---- state --------------------------------------------------------------
 const state = { source: 'demo2', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'pct', selectedBand: null, selectedPeriod: null, trendAll: false, trendBig: false, trendView: 'line', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
+state.ui = (() => { try { return localStorage.getItem('battUI') || '1'; } catch { return '1'; } })();
 
 // ---- color themes (dark / light) for WebGL scenes + SVG charts -----------
 const THEMES = {
@@ -395,15 +396,20 @@ function renderTrend2D(series) {
     if (!state.trendAll) paths += s.pts.map(p => `<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="${big ? 2.6 : 2}" fill="${s.color}" opacity=".85"/>`).join('');
   }
   if (!state.trendAll && series[0] && series[0].pts.length >= 2) {
-    const pts = series[0].pts, n = pts.length; let sx = 0, sy = 0; for (const o of pts) { sx += o.x; sy += o.y; }
-    const mx = sx / n, my = sy / n; let num = 0, den = 0; for (const o of pts) { num += (o.x - mx) * (o.y - my); den += (o.x - mx) ** 2; }
-    const slope = den ? num / den : 0, fit = x => my + slope * (x - mx), per30 = slope * 30;
-    paths += `<line x1="${X(xmin).toFixed(1)}" y1="${Y(fit(xmin)).toFixed(1)}" x2="${X(xmax).toFixed(1)}" y2="${Y(fit(xmax)).toFixed(1)}" stroke="#e8590c" stroke-width="${big ? 2.4 : 2}"/>`;
-    let dir;
-    if (isRate()) dir = per30 < 0 ? '↘ 점점 빨라짐(노화/부하↑)' : '↗ 안정/개선';
-    else if (isWh()) dir = per30 < 0 ? '↘ Wh/% 하락 = 노화 진행' : '↗ 안정';
-    else dir = per30 > 0 ? `↗ 평균 ${M().label} 증가` : per30 < 0 ? `↘ 평균 ${M().label} 감소` : '– 변화 없음';
-    footer = `<div class="slope">추세: 30일당 <b>${per30 >= 0 ? '+' : ''}${per30.toFixed(4)}</b> ${metricUnit()} ${dir}</div>`;
+    const pts = series[0].pts, n = pts.length, spanDays = xmax - xmin;
+    if (n >= 4 && spanDays >= 6) {                          // enough points & span for a meaningful 30-day trend
+      let sx = 0, sy = 0; for (const o of pts) { sx += o.x; sy += o.y; }
+      const mx = sx / n, my = sy / n; let num = 0, den = 0; for (const o of pts) { num += (o.x - mx) * (o.y - my); den += (o.x - mx) ** 2; }
+      const slope = den ? num / den : 0, fit = x => my + slope * (x - mx), per30 = slope * 30;
+      paths += `<line x1="${X(xmin).toFixed(1)}" y1="${Y(fit(xmin)).toFixed(1)}" x2="${X(xmax).toFixed(1)}" y2="${Y(fit(xmax)).toFixed(1)}" stroke="#e8590c" stroke-width="${big ? 2.4 : 2}"/>`;
+      let dir;
+      if (isRate()) dir = per30 < 0 ? '↘ 점점 빨라짐(노화/부하↑)' : '↗ 안정/개선';
+      else if (isWh()) dir = per30 < 0 ? '↘ Wh/% 하락 = 노화 진행' : '↗ 안정';
+      else dir = per30 > 0 ? `↗ 평균 ${M().label} 증가` : per30 < 0 ? `↘ 평균 ${M().label} 감소` : '– 변화 없음';
+      footer = `<div class="slope">추세: 30일당 <b>${per30 >= 0 ? '+' : ''}${per30.toFixed(4)}</b> ${metricUnit()} ${dir}</div>`;
+    } else {                                                // too little data → don't extrapolate a misleading 30-day slope
+      footer = `<div class="slope note">추세선은 데이터가 더 쌓이면 표시돼요 (현재 ${n}${periodLabel()}치 · 최소 4${periodLabel()} 필요)</div>`;
+    }
   }
   if (state.trendAll) legend = `<div class="tlegend">` + series.map(s => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('') + `</div>`;
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">` + grid + xgrid +
@@ -507,6 +513,7 @@ function renderTrend3D(series, body) {
       : state.trendGeom === 'grid' ? '격자 · 메인=능선(파랑=과거→빨강=최근)·구간선=회색 · "선+능선" 또 클릭→전환'
       : '능선 = 날짜별 구간 프로파일 (파랑=과거 → 빨강=최근)';
   }
+  note.classList.add('tl3d');   // fixed-height slot: geometry toggle (선/능선/면) must not resize the bottom-anchored panel
   body.appendChild(note);
 }
 function buildTrend3D(series) {
@@ -678,6 +685,7 @@ document.querySelectorAll('.seg').forEach(seg => {
     b.classList.add('on');
     const group = seg.dataset.group, val = b.dataset.val;
     if (group === 'source') { state.source = val; load(); }
+    else if (group === 'ui') { applyUI(val); }
     else { state[group] = val; rebuild(); }
   });
 });
@@ -697,6 +705,15 @@ function applyTheme() {
 }
 document.getElementById('theme').addEventListener('click', () => { state.theme = state.theme === 'light' ? 'dark' : 'light'; applyTheme(); });
 applyTheme();   // set initial button label / class
+
+// UI style presets (1 기본 · 2 컴팩트 · 3 널찍 · 4 글래스 · 5 카드) — CSS-only, persisted
+function applyUI(v) {
+  document.documentElement.classList.remove('ui-1', 'ui-2', 'ui-3', 'ui-4', 'ui-5');
+  state.ui = v; document.documentElement.classList.add('ui-' + v);
+  try { localStorage.setItem('battUI', v); } catch { /* ignore */ }
+  document.querySelectorAll('.seg[data-group="ui"] button').forEach(x => x.classList.toggle('on', x.dataset.val === v));
+}
+applyUI(state.ui);   // apply persisted preset + mark button
 
 // rate panel: version toggle (re-render) / level toggle (re-fetch)
 document.getElementById('buckets').addEventListener('click', e => {
