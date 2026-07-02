@@ -83,10 +83,41 @@ impl Reader {
     }
 }
 
+// ---- menu-bar display settings (persisted; changed from the tray menu) ----
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct Cfg {
+    pub info: u8,       // title next to icon: 0 icon-only · 1 % · 2 time · 3 W · 4 %+W · 5 %+time
+    pub colorize: bool, // color the glyph fill by level (else monochrome except red <20%)
+}
+impl Default for Cfg {
+    fn default() -> Self { Cfg { info: 4, colorize: true } }
+}
+pub fn cfg_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
+        .join("Library/Application Support/3d-battery-life/tray.json")
+}
+pub fn load_cfg() -> Cfg {
+    std::fs::read_to_string(cfg_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+pub fn save_cfg(c: &Cfg) {
+    if let Ok(s) = serde_json::to_string(c) {
+        let _ = std::fs::create_dir_all(cfg_path().parent().unwrap());
+        let _ = std::fs::write(cfg_path(), s);
+    }
+}
+pub const INFO_LABELS: [&str; 6] = ["아이콘만", "퍼센트", "남은 시간", "전력(W)", "퍼센트+전력", "퍼센트+시간"];
+
+fn time_str(l: &Live) -> String {
+    match l.time_min {
+        Some(m) if m > 0 => format!("{}:{:02}", m / 60, m % 60),
+        _ => "–".into(),
+    }
+}
+
 // ---- menu-bar battery GLYPH (like Stats): a battery outline filling proportional to charge,
 // colored by level (red <20% / orange <40% / green), teal + bolt while charging. Returns raw
 // RGBA + dims; main.rs wraps it in tauri::image::Image and calls tray.set_icon().
-pub fn battery_icon(l: &Live) -> (Vec<u8>, u32, u32) {
+pub fn battery_icon(l: &Live, colorize: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (40u32, 20u32);
     let mut buf = vec![0u8; (w * h * 4) as usize];
     let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
@@ -98,9 +129,11 @@ pub fn battery_icon(l: &Live) -> (Vec<u8>, u32, u32) {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
     let outline = (170u8, 176u8, 188u8, 255u8); // mid-gray: readable on light & dark menu bars
+    let mono = (170u8, 176u8, 188u8, 255u8);
     let pct = l.pct.clamp(0.0, 100.0);
-    let fill = if l.charging || l.full { (77, 208, 192, 255) }
-        else if pct <= 20.0 { (229, 72, 77, 255) }
+    let fill = if pct <= 20.0 { (229, 72, 77, 255) }   // red <20% regardless (Stats behavior)
+        else if !colorize { mono }
+        else if l.charging || l.full { (77, 208, 192, 255) }
         else if pct <= 40.0 { (232, 133, 12, 255) }
         else { (74, 200, 120, 255) };
 
@@ -128,17 +161,18 @@ pub fn battery_icon(l: &Live) -> (Vec<u8>, u32, u32) {
     (buf, w, h)
 }
 
-// The compact tray-title text macOS shows next to the icon.
-pub fn tray_title(l: &Live) -> String {
+// The compact tray-title text macOS shows next to the icon (per the chosen info mode).
+pub fn tray_title(l: &Live, info: u8) -> String {
     if !l.ok {
         return String::new();
     }
     let pct = l.pct.round() as i64;
-    if l.charging {
-        format!("{pct}% ⚡")
-    } else if l.full {
-        format!("{pct}% 🔌")
-    } else {
-        format!("{pct}% · {:.1}W", l.watts)
+    match info {
+        0 => String::new(),                                   // icon only
+        1 => format!("{pct}%"),
+        2 => time_str(l),
+        3 => format!("{:.1}W", l.watts),
+        5 => format!("{pct}% · {}", time_str(l)),
+        _ => format!("{pct}% · {:.1}W", l.watts),             // 4 = %+W (default)
     }
 }

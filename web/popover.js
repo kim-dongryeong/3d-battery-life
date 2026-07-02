@@ -3,7 +3,7 @@
 const $ = id => document.getElementById(id);
 let pv = (() => { try { return new URLSearchParams(location.search).get('pv') || localStorage.getItem('battPV') || 'list'; } catch { return 'list'; } })();
 let theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
-let live = null, procs = [], lastLiveAt = 0;
+let live = null, procs = [], detail = {}, lastLiveAt = 0;
 
 const fmtTime = min => min == null ? '–' : min >= 60 ? `${Math.floor(min / 60)}시간 ${min % 60}분` : `${min}분`;
 const stateOf = s => s.charging ? '충전 중' : s.full ? '완충' : s.ac ? 'AC 연결(유휴)' : '배터리 사용';
@@ -20,6 +20,10 @@ async function pull() {
 }
 async function pullProcs() {
   try { const r = await fetch('/api/procs?n=6', { cache: 'no-store' }); if (r.ok) procs = await r.json(); } catch { /* keep */ }
+  render();
+}
+async function pullDetail() {
+  try { const r = await fetch('/api/detail', { cache: 'no-store' }); if (r.ok) detail = await r.json(); } catch { /* keep */ }
   render();
 }
 
@@ -52,6 +56,17 @@ function rowsHealth(s) {
   ];
 }
 const kvHTML = rows => rows.map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('');
+
+function detailHTML(s) {
+  const rows = [];
+  if (detail.condition) rows.push(['상태(컨디션)', detail.condition]);
+  if (detail.designCycleCount) rows.push(['설계 사이클 한도', `${detail.designCycleCount}회`]);
+  if (s.ac && detail.adapterWatts) rows.push(['전원 어댑터', `${detail.adapterWatts} W${detail.adapterName ? ' · ' + detail.adapterName : ''}`]);
+  if (detail.onHold) rows.push(['충전 상태', '🔵 최적화 충전(대기 중)']);
+  if (detail.serial) rows.push(['배터리 시리얼', detail.serial]);
+  return rows.length ? `<div class="sec">상세</div>${kvHTML(rows)}` : '';
+}
+function tailHTML(s) { return detailHTML(s) + procsHTML(); }
 
 function procsHTML() {
   if (!procs.length) return '';
@@ -90,7 +105,7 @@ function render() {
       </div>
       <div class="grid2">${kvHTML(rowsCore(s))}</div>
       <div class="hbar"><i style="width:${s.healthPct != null ? Math.min(100, s.healthPct) : 0}%"></i></div>
-      <div class="grid2">${kvHTML(rowsHealth(s))}</div>${procsHTML()}`;
+      <div class="grid2">${kvHTML(rowsHealth(s))}</div>${tailHTML(s)}`;
   } else if (pv === 'cards') {
     el.innerHTML =
       `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pct}%</div>
@@ -103,7 +118,7 @@ function render() {
         <div class="card"><div class="ct">사이클</div><div class="cv">${s.cycles ?? '–'}</div></div>
       </div>
       <div class="grid2">${kvHTML([['전류', s.amperage != null ? s.amperage + ' mA' : '–'], ['전압', (s.voltage != null ? s.voltage.toFixed(2) : '–') + ' V'], ['만충/설계', (s.rawMax != null ? s.rawMax + '/' + s.design : '–') + ' mAh']])}</div>
-      ${procsHTML()}`;
+      ${tailHTML(s)}`;
   } else { // list (Stats-like dense)
     el.innerHTML =
       `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pct}%</div>
@@ -113,7 +128,7 @@ function render() {
       ${kvHTML(rowsCore(s))}
       <div class="sec">배터리</div>
       ${kvHTML(rowsHealth(s))}
-      ${procsHTML()}`;
+      ${tailHTML(s)}`;
   }
   $('live').textContent = `🟢 라이브 · ${ago(lastLiveAt)}`;
 }
@@ -126,7 +141,8 @@ $('foot').addEventListener('click', e => {
 });
 
 render();
-pull(); pullProcs();
+pull(); pullProcs(); pullDetail();
 setInterval(() => { if (!document.hidden) pull(); }, 2000);
 setInterval(() => { if (!document.hidden) pullProcs(); }, 5000);
+setInterval(() => { if (!document.hidden) pullDetail(); }, 12000);
 setInterval(() => { if (live && !document.hidden) $('live').textContent = `🟢 라이브 · ${ago(lastLiveAt)}`; }, 1000);

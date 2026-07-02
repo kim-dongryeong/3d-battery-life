@@ -56,6 +56,31 @@ fn ask_consent() -> bool {
     }
 }
 
+// macOS notification via osascript (no plugin / entitlement). Quotes sanitized.
+fn notify(title: &str, body: &str) {
+    let script = format!(
+        "display notification \"{}\" with title \"{}\" sound name \"Ping\"",
+        body.replace('"', "'"), title.replace('"', "'")
+    );
+    let _ = Sh::new("osascript").args(["-e", &script]).status();
+}
+// Low/high battery alerts (like Stats/iStat), with hysteresis so each crossing fires once.
+fn notify_check(l: &live::Live, low: &mut bool, crit: &mut bool, high: &mut bool) {
+    let pct = l.pct.round() as i64;
+    if l.discharging {
+        *high = false;
+        if l.pct <= 10.0 && !*crit { notify("배터리 매우 부족", &format!("{pct}% 남음 — 지금 충전하세요")); *crit = true; *low = true; }
+        else if l.pct <= 20.0 && !*low { notify("배터리 부족", &format!("{pct}% 남음 — 곧 충전하세요")); *low = true; }
+        if l.pct > 25.0 { *low = false; *crit = false; }
+    } else if l.charging {
+        *low = false; *crit = false;
+        if l.pct >= 80.0 && !*high { notify("충전 80% 도달", "배터리 수명을 위해 뽑아도 좋아요"); *high = true; }
+        if l.pct < 75.0 { *high = false; }
+    } else {
+        *low = false; *crit = false; *high = false;
+    }
+}
+
 fn main() {
     // keep the serve sidecar's handle so quitting the app kills it (otherwise it's orphaned
     // and the next launch fails on the busy port)
@@ -80,13 +105,20 @@ fn main() {
             // 2) tray menu (menu-bar item).
             // Recording (launchd) is INDEPENDENT of the app — quitting the app never stops it.
             let recording = plist_path().exists();
+            let cfg = Arc::new(Mutex::new(live::load_cfg()));
+            let c0 = cfg.lock().unwrap().clone();
             let status = MenuItem::with_id(app, "status", status_text(recording), false, None::<&str>)?;
             let open = MenuItem::with_id(app, "open", "뷰어 열기", true, None::<&str>)?;
+            let info_item = MenuItem::with_id(app, "info", format!("메뉴바 표시: {}", live::INFO_LABELS[c0.info as usize % 6]), true, None::<&str>)?;
+            let color_item = MenuItem::with_id(app, "color", format!("아이콘 색상: {}", if c0.colorize { "켜짐" } else { "꺼짐" }), true, None::<&str>)?;
             let rec_on = MenuItem::with_id(app, "rec_on", "배터리 기록 시작", true, None::<&str>)?;
             let rec_off = MenuItem::with_id(app, "rec_off", "배터리 기록 중지", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "앱 종료 (기록은 계속됨)", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&status, &open, &rec_on, &rec_off, &quit])?;
+            let menu = Menu::with_items(app, &[&status, &open, &info_item, &color_item, &rec_on, &rec_off, &quit])?;
             let status_for_menu = status.clone();
+            let cfg_menu = cfg.clone();
+            let info_for_menu = info_item.clone();
+            let color_for_menu = color_item.clone();
             TrayIconBuilder::with_id("tray")
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("3D Battery Life")
@@ -99,6 +131,20 @@ fn main() {
                 })
                 .on_menu_event(move |app, event| match event.id().as_ref() {
                     "open" => show_main(app),
+                    "info" => {
+                        if let Ok(mut g) = cfg_menu.lock() {
+                            g.info = (g.info + 1) % 6;
+                            live::save_cfg(&g);
+                            let _ = info_for_menu.set_text(format!("메뉴바 표시: {}", live::INFO_LABELS[g.info as usize]));
+                        }
+                    }
+                    "color" => {
+                        if let Ok(mut g) = cfg_menu.lock() {
+                            g.colorize = !g.colorize;
+                            live::save_cfg(&g);
+                            let _ = color_for_menu.set_text(format!("아이콘 색상: {}", if g.colorize { "켜짐" } else { "꺼짐" }));
+                        }
+                    }
                     "rec_on" => {
                         let _ = status_for_menu.set_text(status_text(true));
                         std::thread::spawn(|| run_record("on"));
@@ -132,19 +178,23 @@ fn main() {
             // 4) live tray title — a 2s ticker reads the battery natively and shows "87% · 5.2W" (or ⚡)
             //    next to the menu-bar icon, so the app earns its always-resident spot (Stats-parity).
             let handle = app.handle().clone();
+            let cfg_ticker = cfg.clone();
             std::thread::spawn(move || {
                 let mut reader = live::Reader::new();
                 let mut last_key = String::new();
+                let (mut low, mut crit, mut high) = (false, false, false);
                 loop {
                     let l = reader.read();
+                    let c = cfg_ticker.lock().map(|g| g.clone()).unwrap_or_default();
+                    if l.ok { notify_check(&l, &mut low, &mut crit, &mut high); }
                     if let Some(tray) = handle.tray_by_id("tray") {
-                        let title = live::tray_title(&l);
+                        let title = live::tray_title(&l, c.info);
                         let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
-                        // redraw the battery glyph only when the visible state changes (level/charging)
-                        let key = format!("{}-{}-{}", l.pct.round() as i64, l.charging, l.full);
+                        // redraw the glyph when the visible state changes (level / charging / colorize)
+                        let key = format!("{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize);
                         if l.ok && key != last_key {
                             last_key = key;
-                            let (rgba, w, h) = live::battery_icon(&l);
+                            let (rgba, w, h) = live::battery_icon(&l, c.colorize);
                             let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h)));
                         }
                     }

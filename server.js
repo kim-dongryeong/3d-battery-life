@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { readSamples, buildReport } from './lib/report.js';
 import { analyzeRates } from './lib/bucketRates.js';
-import { sample } from './lib/battery.js';
+import { sample, detail } from './lib/battery.js';
 import { userDataDir, cacheDir } from './lib/paths.js';
 import { generateDemoLines } from './scripts/gen-demo.js';
 import { generateDemo2Lines } from './scripts/gen-demo2.js';
@@ -40,6 +40,7 @@ function demoFile(sp, assetDir) {
 // (its hostname re-pointed at 127.0.0.1) would otherwise read the battery/usage log.
 let procsCache = { at: 0, data: [] };   // /api/procs cache (shared across requests)
 let procsInflight = false;
+let detailCache = { at: 0, data: {} };  // /api/detail cache (slow-changing fields)
 
 function hostAllowed(req) {
   const h = String(req.headers.host || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
@@ -112,6 +113,16 @@ export function startServer({ root, port } = {}) {
       try {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(JSON.stringify(sample()));
+      } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+
+    // slow-changing extras (condition, serial, design cycles, adapter, on-hold) — cached ~10s
+    if (url.pathname === '/api/detail') {
+      try {
+        if (Date.now() - detailCache.at > 10000) detailCache = { at: Date.now(), data: detail() };
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(detailCache.data));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
       return;
     }
