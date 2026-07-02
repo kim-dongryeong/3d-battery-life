@@ -140,11 +140,12 @@ function buildLines(report) {
   const numeric = state.color !== 'state';
   let cMin = null, cMax = null;
   if (numeric) {
-    cMin = Infinity; cMax = -Infinity;
-    for (const r of runs) for (const p of r.points) {
-      const v = p[state.color]; if (v != null) { if (v < cMin) cMin = v; if (v > cMax) cMax = v; }
+    const vals = [];
+    for (const r of runs) for (const p of r.points) { const v = p[state.color]; if (v != null) vals.push(v); }
+    if (vals.length) {                                   // percentile-clamp so one outlier (e.g. a load spike) doesn't wash out the ramp
+      cMin = percentile(vals, 0.02); cMax = percentile(vals, 0.98);
+      if (cMax <= cMin) cMax = cMin + 1e-6;
     }
-    if (cMin === Infinity) { cMin = null; cMax = null; }
   }
   const yMaxRaw = state.y === 'pct' ? 100 : percentile(runs.flatMap(r => r.points.map(p => p.watts ?? 0)), 0.98);
   const yMax = state.y === 'pct' ? 100 : Math.max(5, yMaxRaw);  // value (depth) max
@@ -181,7 +182,7 @@ function buildLines(report) {
 }
 
 // ---- rebuild everything for current state -------------------------------
-const COLOR_META = { state: { label: '상태', unit: '' }, tempC: { label: '온도', unit: '°C' }, loadPct: { label: 'CPU 부하', unit: '%' }, watts: { label: '전력', unit: 'W' } };
+const COLOR_META = { state: { label: '상태', unit: '' }, tempC: { label: '온도', unit: '°C' }, loadPct: { label: 'CPU 부하(load avg)', unit: '%' }, watts: { label: '전력', unit: 'W' } };
 const GRAD_NUM = 'linear-gradient(90deg, hsl(240,85%,55%), hsl(180,85%,55%), hsl(120,85%,55%), hsl(60,85%,55%), hsl(0,85%,55%))';
 const GRAD_STATE = 'linear-gradient(90deg, hsl(7,85%,55%) 0 33%, hsl(198,45%,50%) 50%, hsl(119,80%,50%) 66% 100%)';
 
@@ -212,6 +213,14 @@ const avgRate = bs => { const v = (bs || []).filter(b => b.pctPerMin); return v.
 function updateHud(r) {
   const L = r.latest, stats = document.getElementById('stats');
 
+  // prominent Maximum Capacity (like macOS 배터리 성능) — big number + precise value
+  const hb = document.getElementById('healthBig');
+  if (L && L.healthPct != null) {
+    const cap = Math.min(100, Math.round(L.healthPct));          // macOS caps display at 100%
+    hb.innerHTML = `🔋 최대 용량 <b>${cap}%</b><span class="hbsub">정밀 ${L.healthPct}% · ${L.cycles != null ? L.cycles + '사이클' : ''}</span>`;
+    hb.hidden = false;
+  } else { hb.hidden = true; }
+
   // trend: average 10%-drain time, early vs recent (robust to messy real data)
   const trend = document.getElementById('trend');
   const e = avgRate(r.bucketsEarly), n = avgRate(r.bucketsRecent);
@@ -236,10 +245,25 @@ function updateHud(r) {
 const RATE_VERS = [['v4a_pooled', 'V4a'], ['v0_rawMean', 'V0'], ['v1_fullOnly', 'V1'], ['v4c_subbin', 'V4c'], ['v5_ols', 'V5']];
 const PERIODS = [['day', '일'], ['week', '주'], ['month', '월']];
 const med = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const METRICS = {
+  rate:  { label: '속도',     unit: '%/min', pos: false, hint: '음수=방전. 부하+노화 섞인 체감속도' },
+  wh:    { label: '노화Wh/%', unit: 'Wh/%',  pos: true,  hint: '낮을수록 노화(부하와 무관)' },
+  watts: { label: '전력',     unit: 'W',     pos: true,  hint: '방전 중 평균 소비전력 = 순수 부하' },
+  temp:  { label: '온도',     unit: '°C',    pos: true,  hint: '방전 중 평균 온도 = 발열/스트레스' },
+};
+const M = () => METRICS[state.metric] || METRICS.rate;
 const isWh = () => state.metric === 'wh';
-const metricUnit = () => isWh() ? 'Wh/%' : '%/min';
-const cellVal = c => isWh() ? c.whPerPct : (c.versions ? c.versions[state.rateVersion] : null);
-const bandVal = b => isWh() ? b.whPerPct_median : b.versions[state.rateVersion];
+const isRate = () => state.metric === 'rate';
+const posMetric = () => !!M().pos;                    // positive-only (wh/watts/temp) vs rate (straddles 0)
+const metricUnit = () => M().unit;
+const cellVal = c => state.metric === 'wh' ? c.whPerPct
+  : state.metric === 'watts' ? c.avgW
+  : state.metric === 'temp' ? c.avgTempC
+  : (c.versions ? c.versions[state.rateVersion] : null);
+const bandVal = b => state.metric === 'wh' ? b.whPerPct_median
+  : state.metric === 'watts' ? b.avgW_median
+  : state.metric === 'temp' ? b.avgTempC_median
+  : b.versions[state.rateVersion];
 const periodLabel = () => (PERIODS.find(p => p[0] === state.period) || PERIODS[0])[1];
 // axis tick-density (적/중/촘) → tick counts
 const TICKN = { date: { 1: 3, 2: 5, 3: 9 }, val: { 1: 4, 2: 6, 3: 9 } };
@@ -255,7 +279,7 @@ function renderRates() {
   if (!rt || !rt.byBand) { el.innerHTML = '<h2>구간별 방전 속도</h2><div class="note">불러오는 중…</div>'; return; }
   const vals = rt.byBand.map(bandVal).filter(v => v != null).map(Math.abs);
   const maxV = vals.length ? Math.max(...vals) : 0.001;
-  const metBtns = [['rate', '속도'], ['wh', '노화Wh/%']].map(([k, l]) => `<button data-rm="${k}" class="${k === state.metric ? 'on' : ''}">${l}</button>`).join('');
+  const metBtns = [['rate', '속도'], ['wh', '노화Wh/%'], ['watts', '전력W'], ['temp', '온도°C']].map(([k, l]) => `<button data-rm="${k}" class="${k === state.metric ? 'on' : ''}">${l}</button>`).join('');
   const perBtns = PERIODS.map(([k, l]) => `<button data-rp="${k}" class="${k === state.period ? 'on' : ''}">${l}</button>`).join('');
   const verBtns = RATE_VERS.map(([k, lbl]) => `<button data-rv="${k}" class="${k === state.rateVersion ? 'on' : ''}">${lbl}</button>`).join('');
   const lvlBtns = [['pct', '정수%'], ['rawcap', 'mAh정밀']].map(([k, l]) => `<button data-rl="${k}" class="${k === state.rateLevel ? 'on' : ''}">${l}</button>`).join('');
@@ -268,16 +292,20 @@ function renderRates() {
   }).join('');
   const infoTip = isWh()
     ? `<b>Wh/% = "1%가 담고 있는 실제 에너지의 크기"</b><br>≈ 만충용량 ÷ 100. 측정 전력을 시간 적분한 소비 에너지 ÷ 그동안 빠진 %. 부하와 무관해서 <b>낮을수록 배터리 노화</b>.`
+    : state.metric === 'watts'
+    ? `<b>전력(W) = 방전 중 평균 소비전력</b><br>순수 <b>부하</b> 지표. 속도가 빨라졌는데 W도 올랐다면 노화가 아니라 부하 때문.`
+    : state.metric === 'temp'
+    ? `<b>온도(°C) = 방전 중 평균 배터리 온도</b><br>발열/스트레스 지표. 높은 온도가 지속되면 노화를 가속.`
     : `<b>%/min = 분당 떨어지는 배터리 %</b><br>음수 = 방전. 부하 + 노화가 섞인 "체감 속도".`;
   const infoBadge = `<span class="info">i<span class="ftip">${infoTip}</span></span>`;
   el.innerHTML =
-    `<h2>구간별 ${isWh() ? '에너지(노화)' : '방전 속도'} <small>${metricUnit()}${isWh() ? ' · 낮을수록 노화' : ' · 음수=방전'}</small>${infoBadge}</h2>` +
+    `<h2>구간별 ${isRate() ? '방전 속도' : M().label} <small>${metricUnit()} · ${M().hint}</small>${infoBadge}</h2>` +
     `<div class="rseg" data-rgroup="rm">${metBtns}</div>` +
     `<div class="rseg" data-rgroup="rp"><span class="rlbl">기간</span>${perBtns}</div>` +
-    (isWh() ? '' : `<div class="rseg" data-rgroup="rv">${verBtns}</div>`) +
+    (isRate() ? `<div class="rseg" data-rgroup="rv">${verBtns}</div>` : '') +
     `<div class="rseg" data-rgroup="rl"><span class="rlbl">레벨</span>${lvlBtns}</div>` +
-    `<table><tr><th>구간</th><th>${isWh() ? 'Wh/%' : '속도'}</th><th></th></tr>${body}</table>` +
-    `<div class="note">${periodLabel()}별 중앙값 · ${isWh() ? 'Wh/%(부하정규화 노화)' : (state.rateVersion === 'v4a_pooled' ? 'V4a' : state.rateVersion.split('_')[0].toUpperCase())} · ${rt.spans} spans · 행 클릭→추세</div>`;
+    `<table><tr><th>구간</th><th>${isRate() ? '속도' : metricUnit()}</th><th></th></tr>${body}</table>` +
+    `<div class="note">${periodLabel()}별 중앙값 · ${isRate() ? (state.rateVersion === 'v4a_pooled' ? 'V4a' : state.rateVersion.split('_')[0].toUpperCase()) : M().label} · ${rt.spans} spans · 행 클릭→추세</div>`;
   renderTrend();
 }
 
@@ -310,10 +338,10 @@ function renderTrend() {
     `<button data-tall class="${state.trendAll ? 'on' : ''}">전체구간</button>` +
     (state.trendAll ? Object.keys(VIEWS).map(v => `<button data-tview="${v}" class="${view === v ? 'on' : ''}">${VIEWS[v]}</button>`).join('') : '') +
     (view === '3d' ? Object.keys(GEOMS).map(g => `<button data-tgeom="${g}" class="${state.trendGeom === g ? 'on' : ''}">${GEOMS[g]}</button>`).join('') : '') +
-    ((view !== 'heat' && (!isWh() || state.delta)) ? `<span class="zg">0:${(view === '3d' ? [['off', '끔'], ['line', '선'], ['plane', '면'], ['both', '선+면']] : [['off', '끔'], ['line', '선']]).map(([m, l]) => `<button data-tzero="${m}" class="${state.zeroMode === m ? 'on' : ''}">${l}</button>`).join('')}</span>` : '') +
+    ((view !== 'heat' && (!posMetric() || state.delta)) ? `<span class="zg">0:${(view === '3d' ? [['off', '끔'], ['line', '선'], ['plane', '면'], ['both', '선+면']] : [['off', '끔'], ['line', '선']]).map(([m, l]) => `<button data-tzero="${m}" class="${state.zeroMode === m ? 'on' : ''}">${l}</button>`).join('')}</span>` : '') +
     `<button data-tdelta class="${state.delta ? 'on' : ''}">델타</button>` +
     `<button data-tbig class="${state.trendBig ? 'on' : ''}">${state.trendBig ? '축소' : '확대'}</button></span>`;
-  const what = isWh() ? 'Wh/%' : '방전속도';
+  const what = isRate() ? '방전속도' : M().label;
   const sub = `${metricUnit()}${state.delta ? ' · Δ기준대비' : ''} · ${VIEWS[view]}`;
   const tg = (g, gl, label) => `<span class="tickg">${label}<span class="seg2">${[1, 2, 3].map(v => `<button data-tick="${g}" data-v="${v}" class="${state[gl] === v ? 'on' : ''}">${['적', '중', '촘'][v - 1]}</button>`).join('')}</span></span>`;
   const tickRow = `<div class="trow">눈금 ${tg('date', 'tickDate', '날짜')} ${tg('band', 'tickBand', '잔량')}${view !== 'heat' ? ' ' + tg('val', 'tickVal', '속도') : ''}</div>`;
@@ -336,7 +364,7 @@ function renderTrend2D(series) {
   const big = !!state.trendBig, allPts = series.flatMap(s => s.pts);
   const W = big ? 1000 : 478, H = big ? 520 : 184, pL = 54, pR = 16, pT = 22, pB = 32, fs = big ? 12 : 10;
   const xs = allPts.map(p => p.x); const xmin = Math.min(...xs), xmax = Math.max(...xs);
-  const inc0 = !isWh() || state.delta;   // rate/delta straddle 0; Wh/% is positive — don't force 0
+  const inc0 = !posMetric() || state.delta;   // rate/delta straddle 0; Wh/%·W·°C are positive — don't force 0
   let ymin = Math.min(...allPts.map(p => p.y), inc0 ? 0 : Infinity), ymax = Math.max(...allPts.map(p => p.y), inc0 ? 0 : -Infinity);
   const pad = (ymax - ymin) * 0.08 || 0.02; ymin -= pad; ymax += pad;
   const X = x => pL + (xmax === xmin ? 0.5 : (x - xmin) / (xmax - xmin)) * (W - pL - pR);
@@ -371,8 +399,11 @@ function renderTrend2D(series) {
     const mx = sx / n, my = sy / n; let num = 0, den = 0; for (const o of pts) { num += (o.x - mx) * (o.y - my); den += (o.x - mx) ** 2; }
     const slope = den ? num / den : 0, fit = x => my + slope * (x - mx), per30 = slope * 30;
     paths += `<line x1="${X(xmin).toFixed(1)}" y1="${Y(fit(xmin)).toFixed(1)}" x2="${X(xmax).toFixed(1)}" y2="${Y(fit(xmax)).toFixed(1)}" stroke="#e8590c" stroke-width="${big ? 2.4 : 2}"/>`;
-    const worse = per30 < 0;   // negative slope = worse for both metrics (faster discharge OR shrinking Wh/% = aging)
-    footer = `<div class="slope">추세: 30일당 <b>${per30 >= 0 ? '+' : ''}${per30.toFixed(4)}</b> ${metricUnit()} ${worse ? '↘ ' + (isWh() ? 'Wh/% 하락 = 노화 진행' : '점점 빨라짐(노화/부하↑)') : '↗ 안정/개선'}</div>`;
+    let dir;
+    if (isRate()) dir = per30 < 0 ? '↘ 점점 빨라짐(노화/부하↑)' : '↗ 안정/개선';
+    else if (isWh()) dir = per30 < 0 ? '↘ Wh/% 하락 = 노화 진행' : '↗ 안정';
+    else dir = per30 > 0 ? `↗ 평균 ${M().label} 증가` : per30 < 0 ? `↘ 평균 ${M().label} 감소` : '– 변화 없음';
+    footer = `<div class="slope">추세: 30일당 <b>${per30 >= 0 ? '+' : ''}${per30.toFixed(4)}</b> ${metricUnit()} ${dir}</div>`;
   }
   if (state.trendAll) legend = `<div class="tlegend">` + series.map(s => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('') + `</div>`;
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">` + grid + xgrid +
@@ -483,7 +514,7 @@ function buildTrend3D(series) {
   const big = !!state.trendBig;
   const allPts = series.flatMap(s => s.pts); if (allPts.length < 2) return;
   const xs = allPts.map(p => p.x); const xmin = Math.min(...xs), xmax = Math.max(...xs);
-  const inc0 = !isWh() || state.delta;
+  const inc0 = !posMetric() || state.delta;
   let rmin = Math.min(...allPts.map(p => p.y), inc0 ? 0 : Infinity), rmax = Math.max(...allPts.map(p => p.y), inc0 ? 0 : -Infinity);
   const rpad = (rmax - rmin) * 0.08 || 0.02; rmin -= rpad; rmax += rpad;
   const Xs = 40, Yh = 18, Zs = 26, bmin = 10, bmax = 100;
@@ -500,7 +531,7 @@ function buildTrend3D(series) {
   const nv = nVal(); for (let i = 0; i <= nv; i++) { const rr = rmin + (rmax - rmin) * i / nv, l = makeLabel(rr.toFixed(2), { size: 22, color: TH().tickC }); l.position.set(x0 - 3.2, Y(rr), zf); g.add(l); }
   const L = (t, o, x, y, z) => { const l = makeLabel(t, o); l.position.set(x, y, z); return l; };  // (Sprite.position is read-only — must .set, not reassign)
   g.add(L('날짜 →', { color: TH().titleC }, 0, -3.4, zf));
-  g.add(L(isWh() ? 'Wh/%' : (state.delta ? 'Δ %/min' : '속도 %/min'), { color: TH().titleC }, x0 - 5.5, Yh + 1.5, zf));
+  g.add(L((state.delta ? 'Δ ' : '') + metricUnit(), { color: TH().titleC }, x0 - 5.5, Yh + 1.5, zf));
   g.add(L('구간(잔량) →', { color: TH().titleC }, x0 - 2, -1.6, zb - 5));
   if (0 > rmin && 0 < rmax) {                               // 0 (= no discharge) position on the value/speed axis
     g.add(L('0', { size: 22, color: '#4dd0c0' }, x0 - 3.2, Y(0), zf));
