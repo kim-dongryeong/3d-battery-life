@@ -4,13 +4,15 @@
 // with "뷰어 열기 / 기록 시작 / 기록 중지 / 앱 종료". Build: see TAURI.md. Tauri v2.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod live;
+
 use std::path::PathBuf;
 use std::process::Command as Sh;
 use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
-    AppHandle, Manager, RunEvent, WindowEvent,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, LogicalPosition, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
 
@@ -79,6 +81,12 @@ fn main() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("3D Battery Life")
                 .menu(&menu)
+                .show_menu_on_left_click(false)   // left-click = popover; right-click = menu
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                        toggle_popover(tray.app_handle());
+                    }
+                })
                 .on_menu_event(move |app, event| match event.id().as_ref() {
                     "open" => show_main(app),
                     "rec_on" => {
@@ -110,13 +118,34 @@ fn main() {
                     }
                 });
             }
+
+            // 4) live tray title — a 2s ticker reads the battery natively and shows "87% · 5.2W" (or ⚡)
+            //    next to the menu-bar icon, so the app earns its always-resident spot (Stats-parity).
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let mut reader = live::Reader::new();
+                loop {
+                    let title = live::tray_title(&reader.read());
+                    if let Some(tray) = handle.tray_by_id("tray") {
+                        let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
-            // closing the viewer window must not quit the tray app — hide it instead
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            match event {
+                // closing the viewer window must not quit the tray app — hide it instead
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                // popover auto-hides when it loses focus (menu-bar popover convention)
+                WindowEvent::Focused(false) if window.label() == "popover" => {
+                    let _ = window.hide();
+                }
+                _ => {}
             }
         })
         .build(tauri::generate_context!())
@@ -136,5 +165,47 @@ fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.set_focus();
+    }
+}
+
+// Left-click popover: a small borderless window loading the node server's /popover.html (pure web,
+// no Tauri commands → safe to load from localhost). Lazily created, then toggled.
+fn toggle_popover(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("popover") {
+        if w.is_visible().unwrap_or(false) {
+            let _ = w.hide();
+        } else {
+            place_popover(&w);
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        return;
+    }
+    let built = WebviewWindowBuilder::new(
+        app,
+        "popover",
+        WebviewUrl::External("http://localhost:4317/popover.html".parse().unwrap()),
+    )
+    .title("배터리")
+    .inner_size(320.0, 560.0)
+    .decorations(false)
+    .resizable(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .visible(false)
+    .build();
+    if let Ok(w) = built {
+        place_popover(&w);
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+// Position the popover top-right, just under the menu bar (where macOS keeps tray items).
+fn place_popover(w: &tauri::WebviewWindow) {
+    if let Ok(Some(mon)) = w.primary_monitor() {
+        let sf = mon.scale_factor();
+        let logical_w = mon.size().width as f64 / sf;
+        let _ = w.set_position(LogicalPosition::new((logical_w - 336.0).max(8.0), 30.0));
     }
 }

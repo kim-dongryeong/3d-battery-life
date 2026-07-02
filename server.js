@@ -5,8 +5,10 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
 import { readSamples, buildReport } from './lib/report.js';
 import { analyzeRates } from './lib/bucketRates.js';
+import { sample } from './lib/battery.js';
 import { userDataDir, cacheDir } from './lib/paths.js';
 import { generateDemoLines } from './scripts/gen-demo.js';
 import { generateDemo2Lines } from './scripts/gen-demo2.js';
@@ -99,6 +101,35 @@ export function startServer({ root, port } = {}) {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ opt: r.opt, spans: r.spans, atoms: r.atoms, byBand: r.byBand, periods: r.periods, perCell: r.perCell }));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+
+    // live: a fresh single reading (ioreg + pmset + top-proc) — the popover polls this every ~2s
+    if (url.pathname === '/api/live') {
+      try {
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(sample()));
+      } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+
+    // top battery-consuming processes (like Stats): `top -o power`. Async so `top -l 2` (~1-2s)
+    // doesn't block the whole event loop / freeze the viewer.
+    if (url.pathname === '/api/procs') {
+      const n = Math.max(1, Math.min(20, +url.searchParams.get('n') || 8));
+      execFile('top', ['-l', '2', '-o', 'power', '-n', String(n), '-stats', 'pid,command,power'], { timeout: 5000 }, (err, stdout) => {
+        if (err) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('[]'); return; }
+        // parse the SECOND sample block (top -l 2), rows: "PID COMMAND POWER"
+        const blocks = stdout.split(/^Processes:/m);
+        const last = blocks[blocks.length - 1] || stdout;
+        const rows = [];
+        for (const line of last.split('\n')) {
+          const m = line.trim().match(/^(\d+)\s+(.+?)\s+([\d.]+)\s*$/);
+          if (m && rows.length < n) rows.push({ pid: +m[1], name: m[2].trim(), power: +m[3] });
+        }
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(rows));
+      });
       return;
     }
 
