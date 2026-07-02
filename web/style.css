@@ -169,14 +169,6 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #trendchart.folded h2 small { display: none; }
 #trendchart.folded .tbtns button:not(.fold) { display: none; }
 
-/* ---- 3D가 주인공: 빈 3D 영역에 포인터가 있으면 패널이 은은해짐 (패널로 오면 즉시 복귀) ---- */
-@media (hover: hover) {
-  #hud, #panel, #buckets, #trendchart { transition: opacity .2s ease; }
-  body:has(#scene:hover) #hud, body:has(#scene:hover) #panel,
-  body:has(#scene:hover) #buckets, body:has(#scene:hover) #trendchart:not(.big) {
-    opacity: .3; transition: opacity .45s ease .3s;
-  }
-}
 
 /* prominent Maximum Capacity (macOS 배터리 성능 대응) */
 .healthBig { margin: 0 0 6px; font-size: 12px; color: var(--dim); display: flex; align-items: baseline; gap: 6px; }
