@@ -63,12 +63,20 @@ fn main() {
                 std::thread::spawn(|| { if ask_consent() { run_record("on"); } });
             }
 
-            // 3) tray menu (menu-bar item)
+            // 3) tray menu (menu-bar item).
+            // Recording (launchd) is INDEPENDENT of the app — quitting the app never stops it.
+            // Make that explicit: a (disabled) status line + a quit label that says so.
+            let recording = plist_path().exists();
+            let status = MenuItem::with_id(
+                app, "status",
+                if recording { "● 배터리 기록: 켜짐 (백그라운드 · 앱과 무관)" } else { "○ 배터리 기록: 꺼짐" },
+                false, None::<&str>,
+            )?;
             let open = MenuItem::with_id(app, "open", "뷰어 열기", true, None::<&str>)?;
             let rec_on = MenuItem::with_id(app, "rec_on", "배터리 기록 시작", true, None::<&str>)?;
             let rec_off = MenuItem::with_id(app, "rec_off", "배터리 기록 중지", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &rec_on, &rec_off, &quit])?;
+            let quit = MenuItem::with_id(app, "quit", "앱 종료 (기록은 계속됨)", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&status, &open, &rec_on, &rec_off, &quit])?;
             TrayIconBuilder::with_id("tray")
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("3D Battery Life")
