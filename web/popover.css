@@ -11,9 +11,9 @@
   --rec: #ff5a4d;                   /* red = "battery recording" (launchd sampler) */
 }
 html.light {
-  --bg: #eef1f7; --fg: #131926; --dim: #59637a; --faint: #8b95a9;
-  --line: #e1e6ef; --accent: #57ad0d; --card: #ffffff; --onfg: #ffffff;
-  --acclite: #a9e84c;
+  --bg: #f6faff; --fg: #131926; --dim: #5a6478; --faint: #8b95a9;   /* brighter, less gray */
+  --line: #e7edf5; --accent: #83e00f; --card: #ffffff; --onfg: #163609;   /* 봄 싱그러운 밝은 연두 + dark text on it */
+  --acclite: #c4f27a;
   --rec: #e5342a;
 }
 * { box-sizing: border-box; }
