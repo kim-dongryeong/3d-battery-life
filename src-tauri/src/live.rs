@@ -186,7 +186,9 @@ pub fn battery_icon(l: &Live, colorize: bool) -> (Vec<u8>, u32, u32) {
 }
 
 // The compact tray-title text macOS shows next to the icon (per the chosen info mode).
-pub fn tray_title(l: &Live, info: u8) -> String {
+// `watts` is the figure to show in the W modes — the ticker passes live SMC system power
+// (the real draw) when available, falling back to the battery-rail watts (0 while plugged/holding).
+pub fn tray_title(l: &Live, info: u8, watts: f64) -> String {
     if !l.ok {
         return String::new();
     }
@@ -195,8 +197,8 @@ pub fn tray_title(l: &Live, info: u8) -> String {
         0 => String::new(),                                   // icon only
         1 => format!("{pct}%"),
         2 => time_str(l),
-        3 => format!("{:.1}W", l.watts),
+        3 => format!("{watts:.1}W"),
         5 => format!("{pct}% · {}", time_str(l)),
-        _ => format!("{pct}% · {:.1}W", l.watts),             // 4 = %+W (default)
+        _ => format!("{pct}% · {watts:.1}W"),                 // 4 = %+W (default)
     }
 }
