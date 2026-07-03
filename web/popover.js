@@ -37,9 +37,12 @@ async function pullDetail() {
 
 function batterySVG(pct, s) {
   const w = 46, fill = Math.max(4, pct / 100 * (w - 7));
-  const bolt = s.charging
+  // charging → bolt · plugged-but-not-charging → plug · on battery → nothing (like Stats)
+  const glyph = s.charging
     ? `<path d="M23.6 6.3 L16.4 15.8 H21 L19.4 21.7 L27.2 11.7 H22.4 L24.6 6.3 Z" fill="var(--onfg)"/>`
-    : '';
+    : s.ac
+      ? `<g fill="var(--onfg)"><rect x="18.5" y="6" width="1.7" height="3.4" rx=".8"/><rect x="23.8" y="6" width="1.7" height="3.4" rx=".8"/><rect x="16.5" y="9" width="11" height="6.2" rx="1.6"/><rect x="20.4" y="15.2" width="3.2" height="4" rx="1"/></g>`
+      : '';
   return `<svg viewBox="0 0 60 28" width="58" height="27" aria-hidden="true">
     <defs><linearGradient id="bf" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="var(--state)" stop-opacity="1"/>
@@ -47,7 +50,7 @@ function batterySVG(pct, s) {
     <rect x="1" y="4" width="${w}" height="20" rx="5.5" fill="none" stroke="var(--fg)" stroke-width="1.8" opacity=".5"/>
     <rect x="${w + 2.5}" y="10" width="4" height="8" rx="2" fill="var(--fg)" opacity=".5"/>
     <rect x="3.5" y="6.5" width="${fill}" height="15" rx="3.5" fill="url(#bf)"/>
-    ${bolt}
+    ${glyph}
   </svg>`;
 }
 

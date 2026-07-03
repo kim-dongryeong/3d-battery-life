@@ -68,22 +68,40 @@ fn notify(title: &str, body: &str) {
     let _ = Sh::new("osascript").args(["-e", &script]).status();
 }
 // Low/high battery alerts (like Stats/iStat), with hysteresis so each crossing fires once.
-fn notify_check(l: &live::Live, low: &mut bool, crit: &mut bool, high: &mut bool) {
+// Long-form ETA for notification bodies, e.g. "1시간 20분" / "45분"; "" when unknown.
+fn fmt_eta(min: Option<i64>) -> String {
+    match min {
+        Some(m) if m > 0 && m >= 60 => format!("{}시간 {}분", m / 60, m % 60),
+        Some(m) if m > 0 => format!("{m}분"),
+        _ => String::new(),
+    }
+}
+
+fn notify_check(l: &live::Live, cfg: &live::Cfg, low: &mut bool, crit: &mut bool, high: &mut bool) {
     let pct = l.pct.round() as i64;
+    let eta = fmt_eta(l.time_min);
+    let low_t = cfg.low_pct as f64;    // 0 = off
+    let high_t = cfg.high_pct as f64;  // 0 = off
     if l.discharging {
         *high = false;
-        if l.pct <= 10.0 && !*crit { notify("배터리 매우 부족", &format!("{pct}% 남음 — 지금 충전하세요")); *crit = true; *low = true; }
-        else if l.pct <= 20.0 && !*low { notify("배터리 부족", &format!("{pct}% 남음 — 곧 충전하세요")); *low = true; }
-        if l.pct > 25.0 { *low = false; *crit = false; }
+        let left = if eta.is_empty() { String::new() } else { format!(" (약 {eta} 남음)") };
+        // "매우 부족" is a hard floor at 10% (or the user's low threshold if they set it below 10).
+        let crit_t = low_t.min(10.0);
+        if low_t > 0.0 {
+            if l.pct <= crit_t && !*crit { notify("배터리 매우 부족", &format!("{pct}% 남음{left} — 지금 충전하세요")); *crit = true; *low = true; }
+            else if l.pct <= low_t && !*low { notify("배터리 부족", &format!("{pct}% 남음{left} — 곧 충전하세요")); *low = true; }
+        }
+        if l.pct > low_t + 5.0 { *low = false; *crit = false; }   // hysteresis: re-arm above threshold
     } else if l.charging {
         *low = false; *crit = false;
-        if l.pct >= 80.0 && !*high { notify("충전 80% 도달", "배터리 수명을 위해 뽑아도 좋아요"); *high = true; }
-        if l.pct < 75.0 { *high = false; }
+        let full = if eta.is_empty() { String::new() } else { format!(" (완충까지 약 {eta})") };
+        if high_t > 0.0 && l.pct >= high_t && !*high { notify(&format!("충전 {}% 도달", high_t as i64), &format!("배터리 수명을 위해 뽑아도 좋아요{full}")); *high = true; }
+        if l.pct < high_t - 5.0 { *high = false; }
     } else {
         // AC idle / full / on-hold — reset the LOW side (we're plugged) but keep HIGH sticky so
-        // optimized-charging flapping between Charging↔AC-idle can't re-fire the 80% alert.
+        // optimized-charging flapping between Charging↔AC-idle can't re-fire the high alert.
         *low = false; *crit = false;
-        if l.pct < 75.0 { *high = false; }
+        if l.pct < high_t - 5.0 { *high = false; }
     }
 }
 
@@ -117,14 +135,18 @@ fn main() {
             let open = MenuItem::with_id(app, "open", "뷰어 열기", true, None::<&str>)?;
             let info_item = MenuItem::with_id(app, "info", format!("메뉴바 표시: {}", live::INFO_LABELS[c0.info as usize % 6]), true, None::<&str>)?;
             let color_item = MenuItem::with_id(app, "color", format!("아이콘 색상: {}", if c0.colorize { "켜짐" } else { "꺼짐" }), true, None::<&str>)?;
+            let low_item = MenuItem::with_id(app, "low_alert", live::alert_label("배터리 부족 알림", c0.low_pct), true, None::<&str>)?;
+            let high_item = MenuItem::with_id(app, "high_alert", live::alert_label("충전 완료 알림", c0.high_pct), true, None::<&str>)?;
             let rec_on = MenuItem::with_id(app, "rec_on", "배터리 기록 시작", true, None::<&str>)?;
             let rec_off = MenuItem::with_id(app, "rec_off", "배터리 기록 중지", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "앱 종료 (기록은 계속됨)", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&status, &open, &info_item, &color_item, &rec_on, &rec_off, &quit])?;
+            let menu = Menu::with_items(app, &[&status, &open, &info_item, &color_item, &low_item, &high_item, &rec_on, &rec_off, &quit])?;
             let status_for_menu = status.clone();
             let cfg_menu = cfg.clone();
             let info_for_menu = info_item.clone();
             let color_for_menu = color_item.clone();
+            let low_for_menu = low_item.clone();
+            let high_for_menu = high_item.clone();
             TrayIconBuilder::with_id("tray")
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("3D Battery Life")
@@ -155,6 +177,20 @@ fn main() {
                             g.colorize = !g.colorize;
                             live::save_cfg(&g);
                             let _ = color_for_menu.set_text(format!("아이콘 색상: {}", if g.colorize { "켜짐" } else { "꺼짐" }));
+                        }
+                    }
+                    "low_alert" => {
+                        if let Ok(mut g) = cfg_menu.lock() {
+                            g.low_pct = live::next_step(&live::LOW_STEPS, g.low_pct);
+                            live::save_cfg(&g);
+                            let _ = low_for_menu.set_text(live::alert_label("배터리 부족 알림", g.low_pct));
+                        }
+                    }
+                    "high_alert" => {
+                        if let Ok(mut g) = cfg_menu.lock() {
+                            g.high_pct = live::next_step(&live::HIGH_STEPS, g.high_pct);
+                            live::save_cfg(&g);
+                            let _ = high_for_menu.set_text(live::alert_label("충전 완료 알림", g.high_pct));
                         }
                     }
                     "rec_on" => {
@@ -200,7 +236,7 @@ fn main() {
                 loop {
                     let l = reader.read();
                     let c = cfg_ticker.lock().map(|g| g.clone()).unwrap_or_default();
-                    if l.ok { notify_check(&l, &mut low, &mut crit, &mut high); }
+                    if l.ok { notify_check(&l, &c, &mut low, &mut crit, &mut high); }
                     // bridge SMC live values to a file the node server merges into /api/live
                     if let Some(ref s) = smc {
                         let f = |o: Option<f64>| o.map(|v| v.to_string()).unwrap_or_else(|| "null".into());

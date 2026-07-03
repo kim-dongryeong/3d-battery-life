@@ -87,9 +87,25 @@ impl Reader {
 pub struct Cfg {
     pub info: u8,       // title next to icon: 0 icon-only · 1 % · 2 time · 3 W · 4 %+W · 5 %+time
     pub colorize: bool, // color the glyph fill by level (else monochrome except red <20%)
+    // notification thresholds (like Stats): user-cycled from the tray menu. 0 = off.
+    // #[serde(default)] so an older tray.json (without these keys) still deserializes and keeps info/colorize.
+    #[serde(default = "d_low")] pub low_pct: u8,   // discharge warning at ≤ this %
+    #[serde(default = "d_high")] pub high_pct: u8, // charge-complete alert at ≥ this %
 }
+fn d_low() -> u8 { 20 }
+fn d_high() -> u8 { 80 }
 impl Default for Cfg {
-    fn default() -> Self { Cfg { info: 4, colorize: true } }
+    fn default() -> Self { Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80 } }
+}
+// Preset steps the tray menu cycles through (last = 0 = off).
+pub const LOW_STEPS: [u8; 6] = [10, 15, 20, 25, 30, 0];
+pub const HIGH_STEPS: [u8; 7] = [70, 75, 80, 85, 90, 100, 0];
+pub fn next_step(steps: &[u8], cur: u8) -> u8 {
+    let i = steps.iter().position(|&v| v == cur).unwrap_or(steps.len() - 1);
+    steps[(i + 1) % steps.len()]
+}
+pub fn alert_label(prefix: &str, v: u8) -> String {
+    if v == 0 { format!("{prefix}: 끄기") } else { format!("{prefix}: {v}%") }
 }
 pub fn cfg_path() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
@@ -158,6 +174,13 @@ pub fn battery_icon(l: &Live, colorize: bool) -> (Vec<u8>, u32, u32) {
         for &(x, y) in &[(18, 6), (17, 7), (16, 8), (18, 8), (17, 9), (16, 10), (15, 11), (18, 10), (19, 9), (20, 8)] {
             px(&mut buf, x, y, bolt); px(&mut buf, x, y + 1, bolt);
         }
+    } else if l.full {
+        // plugged-but-done: a tiny power-plug (two prongs + body) — like Stats, so the glyph
+        // distinguishes "plugged & holding" from "on battery" (which draws nothing).
+        let plug = (20u8, 24u8, 30u8, 255u8);
+        for &(x, y) in &[(15, 6), (15, 7), (18, 6), (18, 7)] { px(&mut buf, x, y, plug); } // prongs
+        rect(&mut buf, 14, 8, 20, 12, plug);                                               // body
+        for y in 12..15 { px(&mut buf, 16, y, plug); px(&mut buf, 17, y, plug); }           // cord
     }
     (buf, w, h)
 }
