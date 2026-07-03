@@ -4,8 +4,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 // ---- world dimensions ---------------------------------------------------
 // X = 하루 중 시각 (0..24h)  ·  Y = 배터리 %/W (높이)  ·  Z = 경과 일수 (깊이)
 // (kdr 호칭: 그가 부르는 x=날짜=내 Z · y=시각=내 X · z=잔량=내 Y — 그래프는 그대로, 명칭만 매핑)
-const X = 24, Y = 16, Z = 44;
-const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -12, 24시 -> +12
+const X_BASE = 24, Y = 16, Z = 44;
+let X = X_BASE;                                          // effective time-axis width — stretchable via state.xScale
+const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- state --------------------------------------------------------------
 const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'pct', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
@@ -16,6 +17,14 @@ state.tab = '3d';
 state.showTicks = false;   // 추세 눈금 밀도 조절 줄 — 기본 숨김(헤더 소음 감소), '눈금' 버튼으로 토글
 state.foldBuckets = (() => { try { return localStorage.getItem('battFoldB') === '1'; } catch { return false; } })();
 state.foldTrend = (() => { try { return localStorage.getItem('battFoldT') === '1'; } catch { return false; } })();
+state.xScale = (() => {
+  try {
+    const q = +new URLSearchParams(location.search).get('xs');   // ?xs=2 deep-link (shareable view)
+    if (q >= 1 && q <= 3) return q;
+    return Math.min(3, Math.max(1, +localStorage.getItem('battXScale') || 1));
+  } catch { return 1; }
+})();
+X = X_BASE * state.xScale;   // apply the saved time-axis stretch before the first build
 
 // ---- color themes (dark / light) for WebGL scenes + SVG charts -----------
 const THEMES = {
@@ -96,7 +105,8 @@ function buildAxes(valMax, valLabel, maxDay, firstT) {
   disposeGroup(sceneRoot);
   const x0 = -X / 2, z0 = -Z / 2, z1 = Z / 2;
 
-  const grid = new THREE.GridHelper(Z, 22, TH().gMain, TH().gMinor);
+  const gsize = Math.max(Z, X);                                    // floor must cover the stretched time axis
+  const grid = new THREE.GridHelper(gsize, Math.round(gsize / 2), TH().gMain, TH().gMinor);
   sceneRoot.add(grid);
 
   sceneRoot.add(axisLine([x0, 0, z0], [X / 2, 0, z0], TH().axis));   // X = 시각
@@ -779,11 +789,23 @@ document.querySelectorAll('.seg').forEach(seg => {
     if (group === 'source') { state.source = val; state.selectedPeriod = null; load(); }   // stale period keys don't cross sources
     else if (group === 'ui') { applyUI(val); }
     else if (group === 'layout') { applyLayout(val); }
+    else if (group === 'xScale') { setXScale(+val); }
     else { state[group] = val; rebuild(); }
   });
 });
+// reflect the persisted time-axis stretch on its segmented control
+document.querySelectorAll('.seg[data-group="xScale"] button').forEach(b => b.classList.toggle('on', +b.dataset.val === state.xScale));
 document.getElementById('spin').addEventListener('change', e => { controls.autoRotate = e.target.checked; controls.autoRotateSpeed = 0.6; });
-document.getElementById('reset').addEventListener('click', () => { camera.position.copy(HOME); controls.target.copy(LOOK); });
+document.getElementById('reset').addEventListener('click', () => { camera.position.copy(HOME).multiplyScalar(0.6 + 0.4 * state.xScale); controls.target.copy(LOOK); });
+
+// stretch the 하루 중 시각 (X) axis so a day's curve spreads out horizontally; dolly the camera out to keep it framed
+function setXScale(v) {
+  state.xScale = v;
+  X = X_BASE * v;
+  try { localStorage.setItem('battXScale', String(v)); } catch { /* ignore */ }
+  camera.position.copy(HOME).multiplyScalar(0.6 + 0.4 * v); controls.target.copy(LOOK);
+  rebuild();
+}
 
 // theme (dark / light) — recolors WebGL scenes + SVG charts + CSS panels, persisted
 function applyTheme() {
