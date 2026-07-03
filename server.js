@@ -173,7 +173,22 @@ export function startServer({ root, port } = {}) {
       return;
     }
 
-    // popover overflow actions → a file the tray app's ticker consumes (report / record / quit).
+    // the popover reports its content height → a file the tray app reads to size the window
+    // exactly (no scrollbar, no square margin around the rounded body).
+    if (url.pathname === '/api/height' && req.method === 'POST') {
+      let body = '';
+      req.on('data', c => { body += c; if (body.length > 1e3) req.destroy(); });
+      req.on('end', () => {
+        try {
+          const h = Math.round(+JSON.parse(body || '{}').h);
+          if (h >= 120 && h <= 2000) { fs.mkdirSync(userDataDir(), { recursive: true }); fs.writeFileSync(path.join(userDataDir(), 'popover-h'), String(h)); }
+          res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');
+        } catch { res.writeHead(400); res.end('bad'); }
+      });
+      return;
+    }
+
+    // popover overflow actions → a file the tray app's ticker consumes (report / record / quit / hide).
     // File-bridged (not Tauri IPC) so it works regardless of webview IPC availability.
     if (url.pathname === '/api/action' && req.method === 'POST') {
       let body = '';
@@ -181,7 +196,7 @@ export function startServer({ root, port } = {}) {
       req.on('end', () => {
         try {
           const a = String(JSON.parse(body || '{}').do || '');
-          if (['report', 'record', 'quit'].includes(a)) {
+          if (['report', 'record', 'quit', 'hide'].includes(a)) {
             fs.mkdirSync(userDataDir(), { recursive: true });
             fs.writeFileSync(path.join(userDataDir(), 'action'), a);
           }

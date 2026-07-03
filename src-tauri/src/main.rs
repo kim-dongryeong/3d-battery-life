@@ -219,6 +219,7 @@ fn main() {
                 let mut sc_on = false;   // whether the global ⌥⌃B is currently registered
                 let (mut lpm, mut tick) = (low_power_mode(), 0u32);
                 let mut rec_state = rec0;
+                let mut last_pop_h = 0.0f64;   // last height the popover reported (to size its window)
                 loop {
                     let l = reader.read();
                     let c = live::load_cfg();   // re-read each tick so menu AND popover-settings changes apply live
@@ -289,9 +290,22 @@ fn main() {
                                 "report" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || show_main(&h)); }
                                 "quit" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || h.exit(0)); }
                                 "record" => { let on = !plist_path().exists(); std::thread::spawn(move || run_record(if on { "on" } else { "off" })); }
+                                "hide" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } }); }
                                 _ => {}
                             }
                             break;   // re-read state promptly after acting
+                        }
+                        // popover reported its content height → size its window to fit exactly (no scrollbar)
+                        if let Ok(h) = std::fs::read_to_string(data_dir().join("popover-h")).map(|s| s.trim().parse::<f64>()) {
+                            if let Ok(h) = h {
+                                if (h - last_pop_h).abs() > 1.0 {
+                                    last_pop_h = h;
+                                    let hh = handle.clone();
+                                    let _ = handle.run_on_main_thread(move || {
+                                        if let Some(w) = hh.get_webview_window("popover") { let _ = w.set_size(tauri::LogicalSize::new(320.0, h)); }
+                                    });
+                                }
+                            }
                         }
                         if power::take_dirty() { break; }
                     }

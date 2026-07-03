@@ -29,20 +29,17 @@ const fmtTime = min => {
 // physical rail relationship (approx — SMC sensors don't perfectly sum): shown under 전원
 const powerLegend = s => s.ac ? '어댑터 = 시스템 소비 + 배터리 충전' : '시스템 소비 = 배터리 방전';
 
-// Tauri window handle (available because app.withGlobalTauri = true) — lets the popover hide itself
-// on ESC and resize to fit its content so there's never a scrollbar. Falls back gracefully if absent.
-const twin = () => { try { return window.__TAURI__?.window?.getCurrentWindow?.() || null; } catch { return null; } };
-const hideWindow = () => { const w = twin(); if (w && w.hide) w.hide(); else window.blur(); };
+// The Tauri webview IPC isn't reliable for this external-localhost window, so report the content
+// height (and hide requests) to the tray app through the node bridge, which resizes/hides the
+// window from Rust. This makes the window fit the content exactly → no scrollbar, no square margin.
 let lastWinH = 0;
 function fitWindow() {
-  const w = twin(); if (!w || !w.setSize) return;
-  const LS = window.__TAURI__?.dpi?.LogicalSize || window.__TAURI__?.window?.LogicalSize;
-  if (!LS) return;
-  const h = Math.min(Math.ceil(document.body.scrollHeight), Math.round((screen.availHeight || 900) * 0.94));
-  if (Math.abs(h - lastWinH) < 3) return;   // avoid churn on tiny value changes
+  const h = Math.min(Math.ceil(document.body.getBoundingClientRect().height), Math.round((screen.availHeight || 900) * 0.95));
+  if (Math.abs(h - lastWinH) < 2) return;   // only post when the content height actually changes
   lastWinH = h;
-  try { w.setSize(new LS(320, h)); } catch { /* ignore */ }
+  fetch('/api/height', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ h }) }).catch(() => {});
 }
+const hideWindow = () => { fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ do: 'hide' }) }).catch(() => {}); };
 const stateOf = s => s.charging ? '충전 중' : s.full ? '완충' : s.ac ? 'AC 연결(유휴)' : '배터리 사용';
 const stateIcon = s => s.charging ? '⚡' : s.ac ? '🔌' : '🔋';
 const ago = ms => { const t = (Date.now() - ms) / 1000; return t < 3 ? '방금' : `${Math.round(t)}초 전`; };
@@ -178,7 +175,12 @@ function procsHTML() {
     `<b>${(+p.power || 0).toFixed(1)}</b></div>`).join('');
 }
 
-function render() { paint(); requestAnimationFrame(fitWindow); }   // fit the window to content after each paint
+// footer status: green live dot + (when the launchd sampler is on) a red recording dot
+function setLive() {
+  const rec = live && live.recording ? `<i class="pdot rec"></i>기록 · ` : '';
+  $('live').innerHTML = `${rec}<i class="pdot live"></i>라이브 · ${ago(lastLiveAt)}`;
+}
+function render() { paint(); fitWindow(); }   // fitWindow reads getBoundingClientRect (forces layout) → works even while the window is hidden (rAF is paused then)
 function paint() {
   const el = $('pop');
   document.documentElement.className = resolveTheme();
@@ -250,7 +252,7 @@ function paint() {
       ${kvHTML(rowsHealth(s))}
       ${tailHTML(s)}`;
   }
-  $('live').textContent = `라이브 · ${ago(lastLiveAt)}`;
+  setLive();
 }
 
 // footer: layout segmented + gear (settings)
@@ -336,4 +338,4 @@ pull(); pullProcs(); pullDetail(); pullConfig();
 setInterval(() => { if (!document.hidden) pull(); }, 2000);
 setInterval(() => { if (!document.hidden) pullProcs(); }, 5000);
 setInterval(() => { if (!document.hidden) pullDetail(); }, 12000);
-setInterval(() => { if (live && !document.hidden) $('live').textContent = `라이브 · ${ago(lastLiveAt)}`; }, 1000);
+setInterval(() => { if (live && !document.hidden && !settingsOpen) setLive(); }, 1000);
