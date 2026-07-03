@@ -363,7 +363,18 @@ fn ensure_popover(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     .ok()
 }
 
-fn last_icon_rect() -> Option<(f64, f64, f64, f64)> { LAST_ICON_RECT.lock().ok().and_then(|g| *g) }
+// Current on-screen rect of the tray icon (physical px) — so a shortcut/menu open (no click) still
+// anchors the popover under the icon. Falls back to the last click rect, then place_popover's corner.
+fn icon_anchor(app: &AppHandle) -> Option<(f64, f64, f64, f64)> {
+    if let Some(tray) = app.tray_by_id("tray") {
+        if let Ok(Some(rect)) = tray.rect() {
+            let p = rect.position.to_physical::<f64>(1.0);
+            let sz = rect.size.to_physical::<f64>(1.0);
+            return Some((p.x, p.y, sz.width, sz.height));
+        }
+    }
+    LAST_ICON_RECT.lock().ok().and_then(|g| *g)
+}
 
 // Left-click a tray icon: toggle the popover, anchored under the clicked icon. A fresh show always
 // lands on the dashboard (closeSettings), so re-opening never gets stuck in the settings panel.
@@ -373,7 +384,7 @@ fn toggle_popover(app: &AppHandle, anchor: Option<(f64, f64, f64, f64)>) {
         if hidden_just_now() { return; }   // this same click may have just hidden it via focus-loss
     }
     if let Some(w) = ensure_popover(app) {
-        place_popover(&w, anchor.or_else(last_icon_rect));
+        place_popover(&w, anchor.or_else(|| icon_anchor(app)));
         let _ = w.eval("window.closeSettings&&closeSettings()");
         let _ = w.show();
         let _ = w.set_focus();
@@ -385,7 +396,7 @@ fn toggle_popover(app: &AppHandle, anchor: Option<(f64, f64, f64, f64)>) {
 // briefly in case the page is still loading.
 fn open_popover(app: &AppHandle, settings: bool) {
     if let Some(w) = ensure_popover(app) {
-        place_popover(&w, last_icon_rect());
+        place_popover(&w, icon_anchor(app));
         let _ = w.show();
         let _ = w.set_focus();
         let _ = w.eval(if settings {
