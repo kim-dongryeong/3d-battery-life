@@ -53,8 +53,19 @@ function batterySVG(pct, s) {
 
 function rowsCore(s) {
   const amp = s.amperage != null ? `${s.amperage} mA` : '–';
-  const r = [['전력', `${s.watts != null ? s.watts.toFixed(2) : '–'} W`]];
-  if (s.systemW != null) r.push(['시스템 전력', `${s.systemW.toFixed(1)} W&nbsp; ${LIVE}`]);   // SMC (moves every 2s)
+  const r = [];
+  // Real-time system draw (SMC PSTR) — the number that actually moves; show it first.
+  if (s.systemW != null) r.push(['시스템 전력', `${s.systemW.toFixed(1)} W&nbsp; ${LIVE}`]);
+  // On AC: adapter delivery (adapter rail). This is what Stats shows as Power/Voltage on AC —
+  // e.g. ~20 V from the charger — so our numbers line up with Stats when plugged in.
+  if (s.ac && (s.adapterW != null || detail.adapterVoltage != null)) {
+    const aw = s.adapterW != null ? `${s.adapterW.toFixed(1)} W` : '–';
+    const av = detail.adapterVoltage != null ? ` · ${detail.adapterVoltage.toFixed(1)} V` : '';
+    r.push(['어댑터 공급', `${aw}${av}${s.adapterW != null ? `&nbsp; ${LIVE}` : ''}`]);
+  }
+  // Battery power flow (battery rail, signed): + 충전 · 0 유휴(완충/대기) · − 방전.
+  const bp = s.powerW;
+  r.push(['배터리 전력', bp == null ? '–' : Math.abs(bp) < 0.05 ? '0 W · 유휴' : `${bp > 0 ? '+' : '−'}${Math.abs(bp).toFixed(2)} W`]);
   r.push(['전류', amp], ['전압', `${s.voltage != null ? s.voltage.toFixed(2) : '–'} V`], ['온도', fmtTemp(s.tempC) + (s.smc ? ' <i class="ld"></i>' : '')]);
   return r;
 }
@@ -130,7 +141,7 @@ function render() {
         <div class="st">${stateOf(s)} ${lpm}</div></div></div>
       <div class="card"><div class="ct">${timeLbl}</div><div class="cv">${fmtTime(s.timeRemain)}</div></div>
       <div class="cards2">
-        <div class="card"><div class="ct">전력</div><div class="cv">${s.watts != null ? s.watts.toFixed(1) : '–'}<small>W</small></div></div>
+        <div class="card"><div class="ct">${s.systemW != null ? '시스템 전력' : '전력'}</div><div class="cv">${s.systemW != null ? s.systemW.toFixed(1) : (s.watts != null ? s.watts.toFixed(1) : '–')}<small>W</small></div></div>
         <div class="card"><div class="ct">온도</div><div class="cv">${fmtTemp(s.tempC).replace(/ °[CF]/,'')}<small>°${unit==='f'?'F':'C'}</small></div></div>
         <div class="card"><div class="ct">건강</div><div class="cv">${s.healthPct != null ? Math.min(100, Math.round(s.healthPct)) : '–'}<small>%</small></div></div>
         <div class="card"><div class="ct">사이클</div><div class="cv">${s.cycles ?? '–'}</div></div>
