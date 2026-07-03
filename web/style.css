@@ -122,6 +122,17 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   border-radius: 6px; padding: 2px 8px; font-size: 11px; cursor: pointer; margin-left: 4px; }
 #trendchart .tbtns button:hover { color: var(--fg); }
 #trendchart .tbtns button.on { background: var(--accent); color: var(--onfg); border-color: var(--accent); font-weight: 600; }
+/* 확대 button: highlighted ring to invite the click */
+#trendchart .tbtns button.hl { border-color: var(--accent); color: var(--accent); font-weight: 600;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+#trendchart .tbtns button.more { font-weight: 700; letter-spacing: 1px; padding: 2px 7px; }
+#trendchart .tbtns button.more.on { background: var(--accent); color: var(--onfg); border-color: var(--accent); }
+/* fold/collapse: bigger, top-right corner */
+#trendchart .tcollapse { position: absolute; top: 8px; right: 10px; z-index: 3;
+  border: 1px solid var(--line); background: var(--btn); color: var(--fg);
+  border-radius: 7px; width: 30px; height: 26px; font-size: 15px; line-height: 1; cursor: pointer; padding: 0; }
+#trendchart .tcollapse:hover { border-color: var(--accent); color: var(--accent); }
+#trendchart h2 { padding-right: 38px; }   /* room for the top-right collapse button */
 #trendchart .tlegend { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 7px; font-size: 10px; color: var(--dim); }
 #trendchart .tlegend span { display: flex; align-items: center; gap: 4px; }
 #trendchart .tlegend i { width: 11px; height: 3px; border-radius: 2px; display: inline-block; }

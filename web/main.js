@@ -8,7 +8,7 @@ const X = 24, Y = 16, Z = 44;
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -12, 24시 -> +12
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'demo2', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'pct', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'pct', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
@@ -373,24 +373,29 @@ function renderTrend() {
   el.classList.toggle('folded', !!state.foldTrend);
   const series = trendSeries();
   const view = state.trendAll ? state.trendView : 'line';
+  // collapsed (not 확대) hides the fiddly controls behind "⋯" so the small graph stays uncluttered
+  const showExtras = state.trendBig || state.trendMore;
+  const geomBtns = (view === '3d') ? Object.keys(GEOMS).map(g => `<button data-tgeom="${g}" class="${state.trendGeom === g ? 'on' : ''}">${GEOMS[g]}</button>`).join('') : '';
+  const zeroBtns = (view !== 'heat' && (!posMetric() || state.delta)) ? `<span class="zg">0:${(view === '3d' ? [['off', '끔'], ['line', '선'], ['plane', '면'], ['both', '선+면']] : [['off', '끔'], ['line', '선']]).map(([m, l]) => `<button data-tzero="${m}" class="${state.zeroMode === m ? 'on' : ''}">${l}</button>`).join('')}</span>` : '';
+  const extra = showExtras ? (geomBtns + zeroBtns +
+    `<button data-tdelta class="${state.delta ? 'on' : ''}">델타</button>` +
+    `<button data-tticks class="${state.showTicks ? 'on' : ''}" title="축 눈금 밀도 조절">눈금</button>`) : '';
+  const moreBtn = state.trendBig ? '' : `<button data-tmore class="more${state.trendMore ? ' on' : ''}" title="${state.trendMore ? '간단히' : '더 보기'}">⋯</button>`;
   const ctrls = `<span class="tbtns">` +
-    `<button class="fold" data-tfold title="${state.foldTrend ? '펼치기' : '접기'}">${state.foldTrend ? '▸' : '▾'}</button>` +
     `<button data-tall class="${state.trendAll ? 'on' : ''}">전체구간</button>` +
     (state.trendAll ? Object.keys(VIEWS).map(v => `<button data-tview="${v}" class="${view === v ? 'on' : ''}">${VIEWS[v]}</button>`).join('') : '') +
-    (view === '3d' ? Object.keys(GEOMS).map(g => `<button data-tgeom="${g}" class="${state.trendGeom === g ? 'on' : ''}">${GEOMS[g]}</button>`).join('') : '') +
-    ((view !== 'heat' && (!posMetric() || state.delta)) ? `<span class="zg">0:${(view === '3d' ? [['off', '끔'], ['line', '선'], ['plane', '면'], ['both', '선+면']] : [['off', '끔'], ['line', '선']]).map(([m, l]) => `<button data-tzero="${m}" class="${state.zeroMode === m ? 'on' : ''}">${l}</button>`).join('')}</span>` : '') +
-    `<button data-tdelta class="${state.delta ? 'on' : ''}">델타</button>` +
-    `<button data-tticks class="${state.showTicks ? 'on' : ''}" title="축 눈금 밀도 조절">눈금</button>` +
-    `<button data-tbig class="${state.trendBig ? 'on' : ''}">${state.trendBig ? '축소' : '확대'}</button></span>`;
+    extra + moreBtn +
+    `<button data-tbig class="${state.trendBig ? 'on' : 'hl'}">${state.trendBig ? '축소' : '확대'}</button></span>`;
   const what = isRate() ? '방전속도' : M().label;
   const sub = `${metricUnit()}${state.delta ? ' · Δ기준대비' : ''} · ${VIEWS[view]}`;
   const tg = (g, gl, label) => `<span class="tickg">${label}<span class="seg2">${[1, 2, 3].map(v => `<button data-tick="${g}" data-v="${v}" class="${state[gl] === v ? 'on' : ''}">${['적', '중', '촘'][v - 1]}</button>`).join('')}</span></span>`;
-  const tickRow = state.showTicks ? `<div class="trow">눈금 ${tg('date', 'tickDate', '날짜')} ${tg('band', 'tickBand', '잔량')}${view !== 'heat' ? ' ' + tg('val', 'tickVal', '속도') : ''}</div>` : '';
+  const tickRow = (showExtras && state.showTicks) ? `<div class="trow">눈금 ${tg('date', 'tickDate', '날짜')} ${tg('band', 'tickBand', '잔량')}${view !== 'heat' ? ' ' + tg('val', 'tickVal', '속도') : ''}</div>` : '';
   const title = state.trendAll
     ? `<h2>구간별 ${what} 추세 <small>${sub}</small>${ctrls}</h2>`
     : `<h2>${series[0]?.label ?? ''} ${what} 추세 <small>${metricUnit()}${state.delta ? ' · Δ' : ''}${series[0] ? ' · ' + series[0].pts.length + periodLabel() : ''}</small>${ctrls}</h2>`;
   const head = title + tickRow;
-  if (!el.querySelector('#trend-head')) el.innerHTML = `<div id="trend-head"></div><div id="trend-body"></div>`;
+  if (!el.querySelector('#trend-head')) el.innerHTML = `<button class="tcollapse" data-tfold></button><div id="trend-head"></div><div id="trend-body"></div>`;
+  const fb = el.querySelector('.tcollapse'); if (fb) { fb.textContent = state.foldTrend ? '▸' : '▾'; fb.title = state.foldTrend ? '펼치기' : '접기'; }
   el.querySelector('#trend-head').innerHTML = head;
   const body = el.querySelector('#trend-body');
 
@@ -454,7 +459,7 @@ function renderTrend2D(series) {
       footer = `<div class="slope note">추세선은 데이터가 더 쌓이면 표시돼요 (현재 ${n}${periodLabel()}치 · 최소 4${periodLabel()} 필요)</div>`;
     }
   }
-  if (state.trendAll) legend = `<div class="tlegend">` + series.map(s => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('') + `</div>`;
+  if (state.trendAll && (state.trendBig || state.trendMore)) legend = `<div class="tlegend">` + series.map(s => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('') + `</div>`;
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">` + grid + xgrid +
     `<line x1="${pL}" y1="${pT}" x2="${pL}" y2="${H - pB}" stroke="${TH().svgAxis}"/>` +
     `<line x1="${pL}" y1="${H - pB}" x2="${W - pR}" y2="${H - pB}" stroke="${TH().svgAxis}"/>` +
@@ -553,6 +558,7 @@ function renderTrend3D(series, body) {
   body.appendChild(t.renderer.domElement);
   t.renderer.setSize(w, h); t.camera.aspect = w / h; t.camera.updateProjectionMatrix();
   buildTrend3D(series);
+  if (!(state.trendBig || state.trendMore)) return;   // collapsed → hide the legend/geometry note
   const note = document.createElement('div');
   const bandColored = state.trendGeom === 'lines' || (state.trendGeom === 'grid' && state.gridMain === 'lines');
   if (bandColored) {
@@ -881,6 +887,7 @@ document.getElementById('trendchart').addEventListener('click', e => {
   else if (b.hasAttribute('data-tick')) { const g = b.getAttribute('data-tick'); state['tick' + g[0].toUpperCase() + g.slice(1)] = +b.getAttribute('data-v'); }
   else if (b.hasAttribute('data-tdelta')) state.delta = !state.delta;
   else if (b.hasAttribute('data-tticks')) state.showTicks = !state.showTicks;
+  else if (b.hasAttribute('data-tmore')) state.trendMore = !state.trendMore;
   else if (b.hasAttribute('data-tfold')) {
     state.foldTrend = !state.foldTrend;
     try { localStorage.setItem('battFoldT', state.foldTrend ? '1' : '0'); } catch { /* ignore */ }
