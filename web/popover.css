@@ -11,7 +11,7 @@
   --rec: #ff5a4d;                   /* red = "battery recording" (launchd sampler) */
 }
 html.light {
-  --bg: #f6faff; --fg: #131926; --dim: #5a6478; --faint: #8b95a9;   /* brighter, less gray */
+  --bg: #fbfdff; --fg: #131926; --dim: #5a6478; --faint: #8b95a9;   /* very bright, near-white */
   --line: #e7edf5; --accent: #83e00f; --card: #ffffff; --onfg: #163609;   /* 봄 싱그러운 밝은 연두 + dark text on it */
   --acclite: #c4f27a;
   --rec: #e5342a;
@@ -23,7 +23,7 @@ body {
   font: 12.5px/1.38 -apple-system, "SF Pro Text", system-ui, sans-serif;
   color: var(--fg); width: 320px; padding: 11px 12px 6px; user-select: none;
   -webkit-font-smoothing: antialiased; scrollbar-width: none;
-  border-radius: 26px;              /* iPhone-like soft corners (window is transparent outside this) */
+  border-radius: 22px;              /* matches the native window layer clip (round_popover_window) */
   border: 1px solid color-mix(in srgb, var(--fg) 9%, transparent);
   /* base + a soft state-tinted glow bleeding down from the top edge */
   background:

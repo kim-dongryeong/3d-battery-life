@@ -357,11 +357,32 @@ fn show_main(app: &AppHandle) {
     }
 }
 
+// Round the popover's NATIVE window: making the webview background transparent (CSS) alone leaves a
+// square opaque NSWindow behind the rounded body. Here we clip the content view's layer to a corner
+// radius and clear the window background, so the window itself is a rounded, transparent card.
+#[cfg(target_os = "macos")]
+fn round_popover_window(w: &tauri::WebviewWindow) {
+    use objc::runtime::{Object, NO, YES};
+    use objc::{class, msg_send, sel, sel_impl};
+    let Ok(ns_window) = w.ns_window() else { return };
+    let ns_window = ns_window as *mut Object;
+    unsafe {
+        let _: () = msg_send![ns_window, setOpaque: NO];
+        let clear: *mut Object = msg_send![class!(NSColor), clearColor];
+        let _: () = msg_send![ns_window, setBackgroundColor: clear];
+        let content_view: *mut Object = msg_send![ns_window, contentView];
+        let _: () = msg_send![content_view, setWantsLayer: YES];
+        let layer: *mut Object = msg_send![content_view, layer];
+        let _: () = msg_send![layer, setCornerRadius: 22.0_f64];
+        let _: () = msg_send![layer, setMasksToBounds: YES];
+    }
+}
+
 // The popover: a small borderless window loading the node server's /popover.html (pure web,
 // no Tauri commands → safe to load from localhost). Lazily created, then reused.
 fn ensure_popover(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     if let Some(w) = app.get_webview_window("popover") { return Some(w); }
-    WebviewWindowBuilder::new(
+    let w = WebviewWindowBuilder::new(
         app,
         "popover",
         WebviewUrl::External("http://localhost:4317/popover.html".parse().unwrap()),
@@ -369,13 +390,16 @@ fn ensure_popover(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     .title("배터리")
     .inner_size(320.0, 700.0)   // roomy fallback; popover.js fitWindow() trims it to content when it can
     .decorations(false)
-    .transparent(true)          // so the CSS-rounded (iPhone-like) corners show instead of a square window
+    .transparent(true)
     .resizable(false)
     .always_on_top(true)
     .skip_taskbar(true)
     .visible(false)
     .build()
-    .ok()
+    .ok()?;
+    #[cfg(target_os = "macos")]
+    round_popover_window(&w);
+    Some(w)
 }
 
 // Current on-screen rect of the tray icon (physical px) — so a shortcut/menu open (no click) still

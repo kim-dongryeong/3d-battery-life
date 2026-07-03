@@ -14,6 +14,9 @@ starship-battery = "0.11"          # native IOKit battery read (~0.4ms, no subpr
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"                        # round the popover's native NSWindow (transparent + clipped corners)
+
 [profile.release]
 opt-level = "s"
 lto = true
