@@ -154,12 +154,27 @@ body[data-pv="cards"] > #pop > .card .cv { font-size: 18px; }
   background: var(--accent); color: var(--onfg); font-weight: 700;
   box-shadow: 0 1px 5px color-mix(in srgb, var(--accent) 45%, transparent);
 }
-#foot #gearBtn {
+#foot #gearBtn, #foot #moreBtn {
   border: none; background: transparent; font-size: 19px; padding: 3px 6px; cursor: pointer;
   color: var(--dim); line-height: 1; border-radius: 7px; transition: color .15s, background .15s;
 }
-#foot #gearBtn:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+#foot #gearBtn:hover, #foot #moreBtn:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
 body.settings-open #foot #gearBtn { color: var(--accent); }
+
+/* overflow (⋯) action menu — app actions that also live in the right-click tray menu */
+#omenu {
+  position: fixed; right: 10px; bottom: 42px; z-index: 50;
+  background: var(--card); border: 1px solid var(--line); border-radius: 11px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.5); padding: 4px; min-width: 172px;
+  display: flex; flex-direction: column; gap: 1px;
+}
+#omenu[hidden] { display: none; }
+#omenu button {
+  border: none; background: transparent; color: var(--fg); text-align: left; font: inherit;
+  padding: 8px 11px; border-radius: 7px; font-size: 12.5px; font-weight: 500; cursor: pointer;
+}
+#omenu button:hover { background: color-mix(in srgb, var(--fg) 9%, transparent); }
+#omenu button.danger { color: var(--live); }
 body.settings-open #foot .vsel { opacity: .4; }
 
 /* ── settings panel ───────────────────────────────────── */

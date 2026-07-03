@@ -206,6 +206,9 @@ fn main() {
             // 4) live tray title — a 2s ticker reads the battery natively and shows "87% · 5.2W" (or ⚡)
             //    next to the menu-bar icon, so the app earns its always-resident spot (Stats-parity).
             let handle = app.handle().clone();
+            let rec_ticker = rec_item.clone();      // keep the tray recording label in sync from the ticker
+            let status_ticker = status.clone();
+            let rec0 = recording;
             std::thread::spawn(move || {
                 let mut reader = live::Reader::new();
                 let smc = smc::Smc::open();   // live temp/system-power (real-time; ioreg is 60s-quantized)
@@ -213,13 +216,24 @@ fn main() {
                 power::start_notifier();      // wake instantly on AC plug/unplug (else just the 2s poll)
                 let mut last_key = String::new();
                 let (mut low, mut crit, mut high) = (false, false, false);
-                let mut sc_on = false;   // whether the global ⌥⌘B is currently registered
+                let mut sc_on = false;   // whether the global ⌥⌃B is currently registered
                 let (mut lpm, mut tick) = (low_power_mode(), 0u32);
+                let mut rec_state = rec0;
                 loop {
                     let l = reader.read();
                     let c = live::load_cfg();   // re-read each tick so menu AND popover-settings changes apply live
                     if tick % 3 == 0 { lpm = low_power_mode(); }   // refresh Low Power Mode every ~6s
                     tick = tick.wrapping_add(1);
+                    // keep the tray recording label synced to the real launchd state (menu/popover/external)
+                    let now_rec = plist_path().exists();
+                    if now_rec != rec_state {
+                        rec_state = now_rec;
+                        let (r, st) = (rec_ticker.clone(), status_ticker.clone());
+                        let _ = handle.run_on_main_thread(move || {
+                            let _ = r.set_text(if now_rec { "배터리 기록 중지" } else { "배터리 기록 시작" });
+                            let _ = st.set_text(status_text(now_rec));
+                        });
+                    }
                     if l.ok { notify_check(&l, &c, &mut low, &mut crit, &mut high); }
                     // register/unregister the global open-popover hotkey to match the setting (live)
                     if c.shortcut != sc_on {
@@ -265,8 +279,20 @@ fn main() {
                     }
                     // ~2s cadence for the continuously-changing values (W/temp), but break early
                     // when IOKit signals a power-source change so plug/unplug reflects near-instantly.
+                    // Also poll for popover overflow actions here so they respond within ~250ms.
                     for _ in 0..8 {
                         std::thread::sleep(std::time::Duration::from_millis(250));
+                        let af = data_dir().join("action");
+                        if let Ok(a) = std::fs::read_to_string(&af) {
+                            let _ = std::fs::remove_file(&af);
+                            match a.trim() {
+                                "report" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || show_main(&h)); }
+                                "quit" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || h.exit(0)); }
+                                "record" => { let on = !plist_path().exists(); std::thread::spawn(move || run_record(if on { "on" } else { "off" })); }
+                                _ => {}
+                            }
+                            break;   // re-read state promptly after acting
+                        }
                         if power::take_dirty() { break; }
                     }
                 }

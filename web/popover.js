@@ -14,7 +14,7 @@ let unit = ls('battUnit', 'system');                  // system | c | f
 let timeFmt = ls('battTimeFmt', 'long');              // short(1:20) | long(1시간 20분)
 let procN = +ls('battProcN', '6');                    // top-processes count · 0 = hide
 let cfg = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: false };
-let live = null, procs = [], detail = {}, lastLiveAt = 0, settingsOpen = qs('settings') === '1';
+let live = null, procs = [], detail = {}, lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
 
 const resolveTheme = () => theme === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme;
 // "system" temperature unit → °F only in the handful of Fahrenheit locales, else °C
@@ -207,7 +207,7 @@ function paint() {
           <circle cx="70" cy="70" r="${R}" fill="none" stroke="url(#gg)" stroke-width="11"
             stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${off}" transform="rotate(-90 70 70)"/>
           <text x="70" y="66" text-anchor="middle" class="gpct">${pctLbl}</text>
-          <text x="70" y="88" text-anchor="middle" class="gsub">${stateIcon(s)} ${s.watts != null ? s.watts.toFixed(1) + 'W' : ''}</text>
+          <text x="70" y="88" text-anchor="middle" class="gsub">${stateIcon(s)} ${(s.systemW ?? s.watts) != null ? (s.systemW ?? s.watts).toFixed(1) + 'W' : ''}</text>
         </svg>
         <div class="gstate">${stateOf(s)}</div> ${lpm ? `<div style="margin-top:6px">${lpm}</div>` : ''}
         <div class="gtime">${timeLbl} <b>${fmtTime(s.timeRemain)}</b></div>
@@ -258,6 +258,7 @@ $('foot').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.pv) { pv = b.dataset.pv; save('battPV', pv); settingsOpen = false; render(); }
   else if (b.id === 'gearBtn') { settingsOpen = !settingsOpen; if (settingsOpen) pullConfig(); render(); }
+  else if (b.id === 'moreBtn') { moreOpen = !moreOpen; renderMenu(); }
 });
 
 // settings controls (delegated — #pop is rebuilt on every render)
@@ -284,14 +285,39 @@ $('pop').addEventListener('click', e => {
   const b = e.target.closest('.tgl'); if (!b) return;   // boolean toggle
   applyCfg(b.dataset.c, !cfg[b.dataset.c]);
 });
+// ── overflow (⋯) menu: app actions mirrored from the right-click tray menu ──
+// These POST to /api/action → a file the tray app consumes (open report / toggle recording / quit).
+function renderMenu() {
+  const m = $('moreBtn'); if (m) m.style.color = moreOpen ? 'var(--fg)' : '';
+  const el = $('omenu');
+  if (!moreOpen) { el.hidden = true; el.innerHTML = ''; return; }
+  const recLabel = (live && live.recording) ? '⏸  배터리 기록 중지' : '▶  배터리 기록 시작';
+  el.innerHTML =
+    `<button data-act="report">📊  3D 리포트 열기</button>` +
+    `<button data-act="record">${recLabel}</button>` +
+    `<button data-act="quit" class="danger">⏻  앱 종료</button>`;
+  el.hidden = false;
+}
+async function doAction(act) {
+  moreOpen = false; renderMenu();
+  try { await fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ do: act }) }); } catch { /* ignore */ }
+  if (act === 'report') hideWindow();   // the main report window comes forward → close the popover
+}
+$('omenu').addEventListener('click', e => { const b = e.target.closest('button'); if (b) doAction(b.dataset.act); });
+// clicking anywhere else closes the overflow menu
+document.addEventListener('click', e => {
+  if (moreOpen && !e.target.closest('#omenu') && !e.target.closest('#moreBtn')) { moreOpen = false; renderMenu(); }
+});
+
 // called from Rust: tray "설정 열기…" jumps into settings; a plain icon-click resets to the dashboard
 window.openSettings = () => { settingsOpen = true; pullConfig(); render(); };
 window.closeSettings = () => { if (settingsOpen) { settingsOpen = false; render(); } };
 // ESC closes the settings panel (→ dashboard); on the dashboard, blur so the window auto-hides
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
-    if (settingsOpen) { settingsOpen = false; render(); }   // ESC closes settings → dashboard
-    else { hideWindow(); }                                   // ESC on dashboard closes the popover
+    if (moreOpen) { moreOpen = false; renderMenu(); }        // ESC closes the ⋯ menu first
+    else if (settingsOpen) { settingsOpen = false; render(); }   // then settings → dashboard
+    else { hideWindow(); }                                   // then the popover itself
   } else if (e.key === ',' && e.metaKey) {                   // ⌘, — macOS Preferences shortcut → open settings
     e.preventDefault();
     if (!settingsOpen) { settingsOpen = true; pullConfig(); render(); }

@@ -135,6 +135,8 @@ export function startServer({ root, port } = {}) {
     if (url.pathname === '/api/live') {
       try {
         const s = sample();
+        // whether the launchd sampler is installed (so the popover's recording toggle shows the right label)
+        try { s.recording = fs.existsSync(path.join(process.env.HOME || '', 'Library/LaunchAgents/com.kdr.3d-battery-life.sampler.plist')); } catch { /* ignore */ }
         try {
           const smc = JSON.parse(fs.readFileSync(path.join(userDataDir(), 'live-smc.json'), 'utf8'));
           if (smc && Date.now() / 1000 - smc.at < 6) {        // fresh (app running)
@@ -168,6 +170,24 @@ export function startServer({ root, port } = {}) {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(JSON.stringify(detailCache.data));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+
+    // popover overflow actions → a file the tray app's ticker consumes (report / record / quit).
+    // File-bridged (not Tauri IPC) so it works regardless of webview IPC availability.
+    if (url.pathname === '/api/action' && req.method === 'POST') {
+      let body = '';
+      req.on('data', c => { body += c; if (body.length > 1e4) req.destroy(); });
+      req.on('end', () => {
+        try {
+          const a = String(JSON.parse(body || '{}').do || '');
+          if (['report', 'record', 'quit'].includes(a)) {
+            fs.mkdirSync(userDataDir(), { recursive: true });
+            fs.writeFileSync(path.join(userDataDir(), 'action'), a);
+          }
+          res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');
+        } catch { res.writeHead(400); res.end('bad'); }
+      });
       return;
     }
 
