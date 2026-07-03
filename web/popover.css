@@ -11,7 +11,7 @@
   --rec: #ff5a4d;                   /* red = "battery recording" (launchd sampler) */
 }
 html.light {
-  --bg: #fbfdff; --fg: #131926; --dim: #5a6478; --faint: #8b95a9;   /* very bright, near-white */
+  --bg: #ffffff; --fg: #131926; --dim: #5a6478; --faint: #8b95a9;   /* pure white */
   --line: #e7edf5; --accent: #83e00f; --card: #ffffff; --onfg: #163609;   /* 봄 싱그러운 밝은 연두 + dark text on it */
   --acclite: #c4f27a;
   --rec: #e5342a;
