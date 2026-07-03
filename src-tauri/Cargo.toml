@@ -7,7 +7,7 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-shell = "2"
 tauri-plugin-global-shortcut = "2" # optional global hotkey (⌥⌘B) to open the popover
 starship-battery = "0.11"          # native IOKit battery read (~0.4ms, no subprocess) for the live tray

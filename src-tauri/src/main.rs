@@ -355,6 +355,7 @@ fn ensure_popover(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     .title("배터리")
     .inner_size(320.0, 700.0)   // roomy fallback; popover.js fitWindow() trims it to content when it can
     .decorations(false)
+    .transparent(true)          // so the CSS-rounded (iPhone-like) corners show instead of a square window
     .resizable(false)
     .always_on_top(true)
     .skip_taskbar(true)

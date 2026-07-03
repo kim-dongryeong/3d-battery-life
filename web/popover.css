@@ -4,22 +4,26 @@
    feels alive and tied to the actual battery: teal healthy, amber low, red critical. */
 :root {
   --bg: #0d1016; --fg: #eef1f8; --dim: #8b94a7; --faint: #616b80;
-  --line: #232a3a; --accent: #4dd0c0; --card: #161c28; --onfg: #06121a;
+  --line: #232a3a; --accent: #a3e635; --card: #161c28; --onfg: #0b1705;
+  --acclite: #d7f88e;               /* bright end of the accent gradient */
   --state: var(--accent);           /* overridden each render by popover.js */
-  --live: #ff5a4d;                  /* "live" heartbeat dot (SMC-fresh values) */
-  --ok: #30d158;
+  --live: #ff5a4d;                  /* "live" heartbeat dot — one color everywhere (values + footer) */
 }
 html.light {
   --bg: #eef1f7; --fg: #131926; --dim: #59637a; --faint: #8b95a9;
-  --line: #e1e6ef; --accent: #0c9384; --card: #ffffff; --onfg: #ffffff;
-  --live: #e5342a; --ok: #12b34a;
+  --line: #e1e6ef; --accent: #4f8f0c; --card: #ffffff; --onfg: #ffffff;
+  --acclite: #a7d84a;
+  --live: #e5342a;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
+html { background: transparent; }   /* transparent window → the rounded body corners show through */
 body {
   font: 12.5px/1.38 -apple-system, "SF Pro Text", system-ui, sans-serif;
   color: var(--fg); width: 320px; padding: 11px 12px 6px; user-select: none;
   -webkit-font-smoothing: antialiased; scrollbar-width: none;
+  border-radius: 26px;              /* iPhone-like soft corners (window is transparent outside this) */
+  border: 1px solid color-mix(in srgb, var(--fg) 9%, transparent);
   /* base + a soft state-tinted glow bleeding down from the top edge */
   background:
     radial-gradient(125% 70% at 50% -12%, color-mix(in srgb, var(--state) 16%, transparent), transparent 62%),
@@ -86,7 +90,7 @@ body::-webkit-scrollbar { width: 0; height: 0; display: none; }   /* no scrollba
 .hbar { height: 7px; border-radius: 99px; background: var(--line); overflow: hidden; margin: 10px 0 7px; }
 .hbar i {
   display: block; height: 100%; border-radius: 99px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 55%, #79f2e4), var(--accent));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 55%, var(--acclite)), var(--accent));
 }
 
 /* ── top processes ────────────────────────────────────── */
@@ -95,7 +99,7 @@ body::-webkit-scrollbar { width: 0; height: 0; display: none; }   /* no scrollba
 .pbarwrap { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; }
 .pbar {
   display: block; height: 100%; border-radius: 99px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 45%, #79f2e4), var(--accent));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 45%, var(--acclite)), var(--accent));
 }
 .proc b { font-variant-numeric: tabular-nums; color: var(--dim); font-size: 11px; text-align: right; }
 
@@ -133,15 +137,10 @@ body[data-pv="cards"] > #pop > .card .cv { font-size: 18px; }
 }
 #foot .spacer { flex: 1; }
 #live { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
-#live::before {
-  content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent);
-  animation: pulseG 2.4s ease-out infinite;
-}
-@keyframes pulseG {
-  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 50%, transparent); }
-  70%  { box-shadow: 0 0 0 5px color-mix(in srgb, var(--ok) 0%, transparent); }
-  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 0%, transparent); }
+#live::before {   /* same red "live" marker as the value dots (was a separate green) */
+  content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--live);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--live) 55%, transparent);
+  animation: pulse 2.4s ease-out infinite;
 }
 /* segmented control (list · cards · gauge) */
 .vsel { display: inline-flex; background: var(--card); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
@@ -154,27 +153,31 @@ body[data-pv="cards"] > #pop > .card .cv { font-size: 18px; }
   background: var(--accent); color: var(--onfg); font-weight: 700;
   box-shadow: 0 1px 5px color-mix(in srgb, var(--accent) 45%, transparent);
 }
-#foot #gearBtn, #foot #moreBtn {
-  border: none; background: transparent; font-size: 19px; padding: 3px 6px; cursor: pointer;
+#foot #reportBtn, #foot #moreBtn {
+  border: none; background: transparent; padding: 3px 6px; cursor: pointer;
   color: var(--dim); line-height: 1; border-radius: 7px; transition: color .15s, background .15s;
 }
-#foot #gearBtn:hover, #foot #moreBtn:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
-body.settings-open #foot #gearBtn { color: var(--accent); }
+#foot #reportBtn { font-size: 15px; }
+#foot #moreBtn { font-size: 20px; font-weight: 700; }
+#foot #reportBtn:hover, #foot #moreBtn:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+body.settings-open #foot #moreBtn { color: var(--accent); }   /* settings lives under ⋮ now */
 
-/* overflow (⋯) action menu — app actions that also live in the right-click tray menu */
+/* overflow (⋮) menu — settings + the app actions that also live in the right-click tray menu */
 #omenu {
   position: fixed; right: 10px; bottom: 42px; z-index: 50;
   background: var(--card); border: 1px solid var(--line); border-radius: 11px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.5); padding: 4px; min-width: 172px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.5); padding: 4px; min-width: 184px;
   display: flex; flex-direction: column; gap: 1px;
 }
 #omenu[hidden] { display: none; }
 #omenu button {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
   border: none; background: transparent; color: var(--fg); text-align: left; font: inherit;
   padding: 8px 11px; border-radius: 7px; font-size: 12.5px; font-weight: 500; cursor: pointer;
 }
 #omenu button:hover { background: color-mix(in srgb, var(--fg) 9%, transparent); }
 #omenu button.danger { color: var(--live); }
+#omenu .mk { color: var(--faint); font-size: 11px; font-weight: 400; }
 body.settings-open #foot .vsel { opacity: .4; }
 
 /* ── settings panel ───────────────────────────────────── */

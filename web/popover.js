@@ -257,7 +257,7 @@ function paint() {
 $('foot').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.pv) { pv = b.dataset.pv; save('battPV', pv); settingsOpen = false; render(); }
-  else if (b.id === 'gearBtn') { settingsOpen = !settingsOpen; if (settingsOpen) pullConfig(); render(); }
+  else if (b.id === 'reportBtn') openReport();
   else if (b.id === 'moreBtn') { moreOpen = !moreOpen; renderMenu(); }
 });
 
@@ -285,25 +285,29 @@ $('pop').addEventListener('click', e => {
   const b = e.target.closest('.tgl'); if (!b) return;   // boolean toggle
   applyCfg(b.dataset.c, !cfg[b.dataset.c]);
 });
-// ── overflow (⋯) menu: app actions mirrored from the right-click tray menu ──
-// These POST to /api/action → a file the tray app consumes (open report / toggle recording / quit).
+// ── overflow (⋮) menu: settings + the app actions from the right-click tray menu ──
+// 설정 opens the in-popover panel; record/quit POST to /api/action → a file the tray app consumes.
 function renderMenu() {
   const m = $('moreBtn'); if (m) m.style.color = moreOpen ? 'var(--fg)' : '';
   const el = $('omenu');
   if (!moreOpen) { el.hidden = true; el.innerHTML = ''; return; }
   const recLabel = (live && live.recording) ? '⏸  배터리 기록 중지' : '▶  배터리 기록 시작';
   el.innerHTML =
-    `<button data-act="report">📊  3D 리포트 열기</button>` +
-    `<button data-act="record">${recLabel}</button>` +
-    `<button data-act="quit" class="danger">⏻  앱 종료</button>`;
+    `<button data-m="settings">⚙  설정<span class="mk">⌘,</span></button>` +
+    `<button data-m="record">${recLabel}</button>` +
+    `<button data-m="quit" class="danger">⏻  앱 종료</button>`;
   el.hidden = false;
 }
-async function doAction(act) {
-  moreOpen = false; renderMenu();
+async function postAction(act) {
   try { await fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ do: act }) }); } catch { /* ignore */ }
-  if (act === 'report') hideWindow();   // the main report window comes forward → close the popover
 }
-$('omenu').addEventListener('click', e => { const b = e.target.closest('button'); if (b) doAction(b.dataset.act); });
+function openReport() { moreOpen = false; renderMenu(); postAction('report'); hideWindow(); }   // report window forward → close popover
+$('omenu').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  moreOpen = false; renderMenu();
+  if (b.dataset.m === 'settings') { settingsOpen = true; pullConfig(); render(); }
+  else postAction(b.dataset.m);   // record / quit
+});
 // clicking anywhere else closes the overflow menu
 document.addEventListener('click', e => {
   if (moreOpen && !e.target.closest('#omenu') && !e.target.closest('#moreBtn')) { moreOpen = false; renderMenu(); }
@@ -321,6 +325,9 @@ document.addEventListener('keydown', e => {
   } else if (e.key === ',' && e.metaKey) {                   // ⌘, — macOS Preferences shortcut → open settings
     e.preventDefault();
     if (!settingsOpen) { settingsOpen = true; pullConfig(); render(); }
+  } else if ((e.key === 'r' || e.key === 'R') && e.metaKey) { // ⌘R — open the 3D report
+    e.preventDefault();
+    openReport();
   }
 });
 
