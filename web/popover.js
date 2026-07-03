@@ -4,13 +4,28 @@ const $ = id => document.getElementById(id);
 // escape ALL server-derived strings — process names / serial / adapter name are attacker-influenceable
 // and CSP is disabled in the popover window, so unescaped innerHTML would execute.
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-let pv = (() => { try { return new URLSearchParams(location.search).get('pv') || localStorage.getItem('battPV') || 'list'; } catch { return 'list'; } })();
-let theme = (() => { try { return new URLSearchParams(location.search).get('theme') || localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
-let unit = (() => { try { return localStorage.getItem('battUnit') || 'c'; } catch { return 'c'; } })();
-let live = null, procs = [], detail = {}, lastLiveAt = 0;
+const qs = k => { try { return new URLSearchParams(location.search).get(k); } catch { return null; } };
+const ls = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+const save = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+// display prefs (popover-only) live in localStorage; menu-bar/alert prefs (cfg) live server-side (/api/config)
+let pv = qs('pv') || ls('battPV', 'list');
+let theme = qs('theme') || ls('battTheme', 'dark');   // dark | light | system
+let unit = ls('battUnit', 'system');                  // system | c | f
+let timeFmt = ls('battTimeFmt', 'long');              // short(1:20) | long(1시간 20분)
+let procN = +ls('battProcN', '6');                    // top-processes count · 0 = hide
+let cfg = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: false };
+let live = null, procs = [], detail = {}, lastLiveAt = 0, settingsOpen = qs('settings') === '1';
 
-const fmtTemp = c => c == null ? '–' : unit === 'f' ? `${(c * 9 / 5 + 32).toFixed(1)} °F` : `${c.toFixed(1)} °C`;
-const fmtTime = min => min == null ? '–' : min >= 60 ? `${Math.floor(min / 60)}시간 ${min % 60}분` : `${min}분`;
+const resolveTheme = () => theme === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme;
+// "system" temperature unit → °F only in the handful of Fahrenheit locales, else °C
+const resolveUnit = () => unit === 'system' ? (/^en-(US|LR|MM|BS|BZ|KY|PW|FM|MH)\b/i.test(navigator.language || '') ? 'f' : 'c') : unit;
+const fmtTemp = c => c == null ? '–' : resolveUnit() === 'f' ? `${(c * 9 / 5 + 32).toFixed(1)} °F` : `${c.toFixed(1)} °C`;
+const fmtTime = min => {
+  if (min == null) return '–';
+  const h = Math.floor(min / 60), m = min % 60;
+  if (timeFmt === 'short') return h ? `${h}:${String(m).padStart(2, '0')}` : `${m}분`;
+  return h ? `${h}시간 ${m}분` : `${m}분`;
+};
 const stateOf = s => s.charging ? '충전 중' : s.full ? '완충' : s.ac ? 'AC 연결(유휴)' : '배터리 사용';
 const stateIcon = s => s.charging ? '⚡' : s.ac ? '🔌' : '🔋';
 const ago = ms => { const t = (Date.now() - ms) / 1000; return t < 3 ? '방금' : `${Math.round(t)}초 전`; };
@@ -24,15 +39,20 @@ async function pull() {
     const r = await fetch('/api/live', { cache: 'no-store' });
     if (r.ok) { live = await r.json(); lastLiveAt = Date.now(); }
   } catch { /* keep last */ }
-  render();
+  if (!settingsOpen) render();   // don't clobber the open settings panel (would reset dropdowns)
 }
 async function pullProcs() {
-  try { const r = await fetch('/api/procs?n=6', { cache: 'no-store' }); if (r.ok) procs = await r.json(); } catch { /* keep */ }
-  render();
+  if (procN <= 0) { procs = []; if (!settingsOpen) render(); return; }   // disabled → don't even spawn `top`
+  try { const r = await fetch(`/api/procs?n=${procN}`, { cache: 'no-store' }); if (r.ok) procs = await r.json(); } catch { /* keep */ }
+  if (!settingsOpen) render();
+}
+async function pullConfig() {
+  try { const r = await fetch('/api/config', { cache: 'no-store' }); if (r.ok) cfg = { ...cfg, ...(await r.json()) }; } catch { /* keep defaults */ }
+  if (settingsOpen) render();
 }
 async function pullDetail() {
   try { const r = await fetch('/api/detail', { cache: 'no-store' }); if (r.ok) detail = await r.json(); } catch { /* keep */ }
-  render();
+  if (!settingsOpen) render();
 }
 
 function batterySVG(pct, s) {
@@ -100,6 +120,38 @@ function detailHTML(s) {
 }
 function tailHTML(s) { return detailHTML(s) + procsHTML(); }
 
+// ── settings panel (gear) ──────────────────────────────────────────────
+// data-k = a localStorage display pref (popover-only) · data-c = a server cfg key (menu-bar/alerts)
+const INFO_OPTS = [['0', '아이콘만'], ['1', '퍼센트'], ['2', '남은 시간'], ['3', '전력(W)'], ['4', '퍼센트+전력'], ['5', '퍼센트+시간']];
+const selEl = (attr, key, cur, opts) => `<select ${attr}="${key}">` +
+  opts.map(([v, l]) => `<option value="${v}"${String(v) === String(cur) ? ' selected' : ''}>${l}</option>`).join('') + `</select>`;
+const tglEl = (key, on) => `<button class="tgl${on ? ' on' : ''}" data-c="${key}" role="switch" aria-checked="${on}"><i></i></button>`;
+const pctOpts = steps => steps.map(v => [String(v), v === 0 ? '끄기' : `${v}%`]);
+
+function settingsHTML() {
+  return `<div class="settings">
+    <div class="sec">표시</div>
+    <div class="srow"><span>레이아웃</span>${selEl('data-k', 'pv', pv, [['list', '목록'], ['cards', '카드'], ['gauge', '게이지']])}</div>
+    <div class="srow"><span>테마</span>${selEl('data-k', 'theme', theme, [['dark', '다크'], ['light', '라이트'], ['system', '시스템']])}</div>
+    <div class="srow"><span>온도 단위</span>${selEl('data-k', 'unit', unit, [['system', '시스템'], ['c', '°C'], ['f', '°F']])}</div>
+    <div class="srow"><span>시간 형식</span>${selEl('data-k', 'timeFmt', timeFmt, [['short', '1:20'], ['long', '1시간 20분']])}</div>
+    <div class="srow"><span>상위 프로세스 수</span>${selEl('data-k', 'procN', procN, [['0', '끄기'], ['3', '3'], ['5', '5'], ['6', '6'], ['8', '8'], ['10', '10'], ['15', '15']])}</div>
+
+    <div class="sec">메뉴바</div>
+    <div class="srow"><span>표시 텍스트</span>${selEl('data-c', 'info', cfg.info, INFO_OPTS)}</div>
+    <div class="srow"><span>위젯 모양</span>${selEl('data-c', 'widget', cfg.widget, [['icon', '아이콘'], ['bar', '막대'], ['text', '텍스트']])}</div>
+    <div class="srow"><span>아이콘 색상</span>${tglEl('colorize', cfg.colorize)}</div>
+    <div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>
+    <div class="srow"><span>열기 단축키 <kbd>⌥⌘B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>
+
+    <div class="sec">알림</div>
+    <div class="srow"><span>배터리 부족</span>${selEl('data-c', 'low_pct', cfg.low_pct, pctOpts([0, 10, 15, 20, 25, 30]))}</div>
+    <div class="srow"><span>충전 완료</span>${selEl('data-c', 'high_pct', cfg.high_pct, pctOpts([0, 70, 75, 80, 85, 90, 100]))}</div>
+
+    <div class="shint">메뉴바·알림 설정은 즉시 저장되어 메뉴바에 반영됩니다.</div>
+  </div>`;
+}
+
 function procsHTML() {
   if (!procs.length) return '';
   const max = Math.max(...procs.map(p => p.power), 1);
@@ -111,11 +163,11 @@ function procsHTML() {
 
 function render() {
   const el = $('pop');
-  document.documentElement.className = theme;
+  document.documentElement.className = resolveTheme();
   document.body.dataset.pv = pv;
+  document.body.classList.toggle('settings-open', settingsOpen);
   document.querySelectorAll('.vsel button').forEach(b => b.classList.toggle('on', b.dataset.pv === pv));
-  $('themeBtn').textContent = theme === 'light' ? '☀️' : '🌙';
-  $('unitBtn').textContent = unit === 'f' ? '°F' : '°C';
+  if (settingsOpen) { el.innerHTML = settingsHTML(); $('live').textContent = ''; return; }
   if (!live || live.error) { el.innerHTML = `<div class="err">배터리 정보를 읽을 수 없습니다${live && live.error ? ` (${esc(live.error)})` : ''}.</div>`; $('live').textContent = ''; return; }
   const s = live;
   const known = s.pct != null;
@@ -156,7 +208,7 @@ function render() {
       <div class="card"><div class="ct">${timeLbl}</div><div class="cv">${fmtTime(s.timeRemain)}</div></div>
       <div class="cards2">
         <div class="card"><div class="ct">${s.systemW != null ? '시스템 전력' : '전력'}</div><div class="cv">${s.systemW != null ? s.systemW.toFixed(1) : (s.watts != null ? s.watts.toFixed(1) : '–')}<small>W</small></div></div>
-        <div class="card"><div class="ct">온도</div><div class="cv">${fmtTemp(s.tempC).replace(/ °[CF]/,'')}<small>°${unit==='f'?'F':'C'}</small></div></div>
+        <div class="card"><div class="ct">온도</div><div class="cv">${fmtTemp(s.tempC).replace(/ °[CF]/,'')}<small>°${resolveUnit()==='f'?'F':'C'}</small></div></div>
         <div class="card"><div class="ct">건강</div><div class="cv">${s.healthPct != null ? Math.min(100, Math.round(s.healthPct)) : '–'}<small>%</small></div></div>
         <div class="card"><div class="ct">사이클</div><div class="cv">${s.cycles ?? '–'}</div></div>
       </div>
@@ -180,16 +232,42 @@ function render() {
   $('live').textContent = `라이브 · ${ago(lastLiveAt)}`;
 }
 
-// controls
+// footer: layout segmented + gear (settings)
 $('foot').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.pv) { pv = b.dataset.pv; try { localStorage.setItem('battPV', pv); } catch {} render(); }
-  else if (b.id === 'themeBtn') { theme = theme === 'light' ? 'dark' : 'light'; try { localStorage.setItem('battTheme', theme); } catch {} render(); }
-  else if (b.id === 'unitBtn') { unit = unit === 'c' ? 'f' : 'c'; try { localStorage.setItem('battUnit', unit); } catch {} render(); }
+  if (b.dataset.pv) { pv = b.dataset.pv; save('battPV', pv); settingsOpen = false; render(); }
+  else if (b.id === 'gearBtn') { settingsOpen = !settingsOpen; if (settingsOpen) pullConfig(); render(); }
 });
 
+// settings controls (delegated — #pop is rebuilt on every render)
+const coerce = (k, v) => (k === 'info' || k === 'low_pct' || k === 'high_pct') ? +v : v;
+function applyDisplay(k, v) {
+  if (k === 'pv') { pv = v; save('battPV', v); }
+  else if (k === 'theme') { theme = v; save('battTheme', v); }
+  else if (k === 'unit') { unit = v; save('battUnit', v); }
+  else if (k === 'timeFmt') { timeFmt = v; save('battTimeFmt', v); }
+  else if (k === 'procN') { procN = +v; save('battProcN', v); pullProcs(); }
+  render();
+}
+async function applyCfg(k, v) {
+  cfg = { ...cfg, [k]: v };
+  render();   // reflect toggle/select immediately
+  try { await fetch('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ [k]: v }) }); } catch { /* keep local */ }
+}
+$('pop').addEventListener('change', e => {
+  const t = e.target;
+  if (t.matches('select[data-k]')) applyDisplay(t.dataset.k, t.value);
+  else if (t.matches('select[data-c]')) applyCfg(t.dataset.c, coerce(t.dataset.c, t.value));
+});
+$('pop').addEventListener('click', e => {
+  const b = e.target.closest('.tgl'); if (!b) return;   // boolean toggle
+  applyCfg(b.dataset.c, !cfg[b.dataset.c]);
+});
+// called from Rust (tray "설정 열기…" / global shortcut) to jump straight into settings
+window.openSettings = () => { settingsOpen = true; pullConfig(); render(); };
+
 render();
-pull(); pullProcs(); pullDetail();
+pull(); pullProcs(); pullDetail(); pullConfig();
 setInterval(() => { if (!document.hidden) pull(); }, 2000);
 setInterval(() => { if (!document.hidden) pullProcs(); }, 5000);
 setInterval(() => { if (!document.hidden) pullDetail(); }, 12000);

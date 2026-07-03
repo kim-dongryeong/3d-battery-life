@@ -104,33 +104,17 @@ fn d_widget() -> String { "icon".into() }
 impl Default for Cfg {
     fn default() -> Self { Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: "icon".into(), glyph_xl: false, shortcut: false } }
 }
-// Preset steps the tray menu cycles through (last = 0 = off).
-pub const LOW_STEPS: [u8; 6] = [10, 15, 20, 25, 30, 0];
-pub const HIGH_STEPS: [u8; 7] = [70, 75, 80, 85, 90, 100, 0];
-pub fn next_step(steps: &[u8], cur: u8) -> u8 {
-    let i = steps.iter().position(|&v| v == cur).unwrap_or(steps.len() - 1);
-    steps[(i + 1) % steps.len()]
-}
-pub fn alert_label(prefix: &str, v: u8) -> String {
-    if v == 0 { format!("{prefix}: 끄기") } else { format!("{prefix}: {v}%") }
-}
 pub fn cfg_path() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
         .join("Library/Application Support/3d-battery-life/tray.json")
 }
+// The popover's settings panel writes tray.json (via the node server's /api/config); the tray
+// menu no longer mutates it, so we only ever READ it here.
 pub fn load_cfg() -> Cfg {
     let mut c: Cfg = std::fs::read_to_string(cfg_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-    if c.info > 5 { c.info = 4; }   // clamp so `(info + 1) % 6` never overflows u8
+    if c.info > 5 { c.info = 4; }   // clamp the menu-bar text mode to a valid variant
     c
 }
-pub fn save_cfg(c: &Cfg) {
-    if let Ok(s) = serde_json::to_string(c) {
-        let _ = std::fs::create_dir_all(cfg_path().parent().unwrap());
-        let _ = std::fs::write(cfg_path(), s);
-    }
-}
-pub const INFO_LABELS: [&str; 6] = ["아이콘만", "퍼센트", "남은 시간", "전력(W)", "퍼센트+전력", "퍼센트+시간"];
-
 fn time_str(l: &Live) -> String {
     match l.time_min {
         Some(m) if m > 0 => format!("{}:{:02}", m / 60, m % 60),

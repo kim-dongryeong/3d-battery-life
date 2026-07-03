@@ -129,24 +129,15 @@ fn main() {
             // 2) tray menu (menu-bar item).
             // Recording (launchd) is INDEPENDENT of the app — quitting the app never stops it.
             let recording = plist_path().exists();
-            let cfg = Arc::new(Mutex::new(live::load_cfg()));
-            let c0 = cfg.lock().unwrap().clone();
             let status = MenuItem::with_id(app, "status", status_text(recording), false, None::<&str>)?;
             let open = MenuItem::with_id(app, "open", "3D 리포트 열기", true, None::<&str>)?;
-            let info_item = MenuItem::with_id(app, "info", format!("메뉴바 표시: {}", live::INFO_LABELS[c0.info as usize % 6]), true, None::<&str>)?;
-            let color_item = MenuItem::with_id(app, "color", format!("아이콘 색상: {}", if c0.colorize { "켜짐" } else { "꺼짐" }), true, None::<&str>)?;
-            let low_item = MenuItem::with_id(app, "low_alert", live::alert_label("배터리 부족 알림", c0.low_pct), true, None::<&str>)?;
-            let high_item = MenuItem::with_id(app, "high_alert", live::alert_label("충전 완료 알림", c0.high_pct), true, None::<&str>)?;
+            // all display/menu-bar/alert settings now live in the popover's settings panel (gear)
+            let settings_item = MenuItem::with_id(app, "settings", "설정 열기…", true, None::<&str>)?;
             // one recording item that toggles (was separate 시작/중지 — no need for both)
             let rec_item = MenuItem::with_id(app, "rec_toggle", if recording { "배터리 기록 중지" } else { "배터리 기록 시작" }, true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "앱 종료 (기록은 계속됨)", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&status, &open, &info_item, &color_item, &low_item, &high_item, &rec_item, &quit])?;
+            let menu = Menu::with_items(app, &[&status, &open, &settings_item, &rec_item, &quit])?;
             let status_for_menu = status.clone();
-            let cfg_menu = cfg.clone();
-            let info_for_menu = info_item.clone();
-            let color_for_menu = color_item.clone();
-            let low_for_menu = low_item.clone();
-            let high_for_menu = high_item.clone();
             let rec_for_menu = rec_item.clone();
             TrayIconBuilder::with_id("tray")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -166,34 +157,7 @@ fn main() {
                 })
                 .on_menu_event(move |app, event| match event.id().as_ref() {
                     "open" => show_main(app),
-                    "info" => {
-                        if let Ok(mut g) = cfg_menu.lock() {
-                            g.info = (g.info + 1) % 6;
-                            live::save_cfg(&g);
-                            let _ = info_for_menu.set_text(format!("메뉴바 표시: {}", live::INFO_LABELS[g.info as usize]));
-                        }
-                    }
-                    "color" => {
-                        if let Ok(mut g) = cfg_menu.lock() {
-                            g.colorize = !g.colorize;
-                            live::save_cfg(&g);
-                            let _ = color_for_menu.set_text(format!("아이콘 색상: {}", if g.colorize { "켜짐" } else { "꺼짐" }));
-                        }
-                    }
-                    "low_alert" => {
-                        if let Ok(mut g) = cfg_menu.lock() {
-                            g.low_pct = live::next_step(&live::LOW_STEPS, g.low_pct);
-                            live::save_cfg(&g);
-                            let _ = low_for_menu.set_text(live::alert_label("배터리 부족 알림", g.low_pct));
-                        }
-                    }
-                    "high_alert" => {
-                        if let Ok(mut g) = cfg_menu.lock() {
-                            g.high_pct = live::next_step(&live::HIGH_STEPS, g.high_pct);
-                            live::save_cfg(&g);
-                            let _ = high_for_menu.set_text(live::alert_label("충전 완료 알림", g.high_pct));
-                        }
-                    }
+                    "settings" => open_popover(app, true),   // show the popover straight in its settings panel
                     "rec_toggle" => {
                         let turning_on = !plist_path().exists();   // toggle relative to the live launchd state
                         let _ = status_for_menu.set_text(status_text(turning_on));
@@ -299,20 +263,11 @@ fn show_main(app: &AppHandle) {
     }
 }
 
-// Left-click popover: a small borderless window loading the node server's /popover.html (pure web,
-// no Tauri commands → safe to load from localhost). Lazily created, then toggled.
-fn toggle_popover(app: &AppHandle, anchor: Option<(f64, f64, f64, f64)>) {
-    if let Some(w) = app.get_webview_window("popover") {
-        if w.is_visible().unwrap_or(false) {
-            let _ = w.hide();
-        } else if !hidden_just_now() {   // this same click may have just hidden it via focus-loss
-            place_popover(&w, anchor);
-            let _ = w.show();
-            let _ = w.set_focus();
-        }
-        return;
-    }
-    let built = WebviewWindowBuilder::new(
+// The popover: a small borderless window loading the node server's /popover.html (pure web,
+// no Tauri commands → safe to load from localhost). Lazily created, then reused.
+fn ensure_popover(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    if let Some(w) = app.get_webview_window("popover") { return Some(w); }
+    WebviewWindowBuilder::new(
         app,
         "popover",
         WebviewUrl::External("http://localhost:4317/popover.html".parse().unwrap()),
@@ -324,11 +279,33 @@ fn toggle_popover(app: &AppHandle, anchor: Option<(f64, f64, f64, f64)>) {
     .always_on_top(true)
     .skip_taskbar(true)
     .visible(false)
-    .build();
-    if let Ok(w) = built {
+    .build()
+    .ok()
+}
+
+// Left-click a tray icon: toggle the popover, anchored under the clicked icon.
+fn toggle_popover(app: &AppHandle, anchor: Option<(f64, f64, f64, f64)>) {
+    if let Some(w) = app.get_webview_window("popover") {
+        if w.is_visible().unwrap_or(false) { let _ = w.hide(); return; }
+        if hidden_just_now() { return; }   // this same click may have just hidden it via focus-loss
+    }
+    if let Some(w) = ensure_popover(app) {
         place_popover(&w, anchor);
         let _ = w.show();
         let _ = w.set_focus();
+    }
+}
+
+// Force-show the popover (menu "설정 열기" / global shortcut). `settings` opens it straight in the
+// settings panel via the page's window.openSettings() hook (or a ?settings=1 reload if not loaded yet).
+fn open_popover(app: &AppHandle, settings: bool) {
+    if let Some(w) = ensure_popover(app) {
+        place_popover(&w, None);
+        let _ = w.show();
+        let _ = w.set_focus();
+        if settings {
+            let _ = w.eval("if(window.openSettings){openSettings()}else{location.search='?settings=1'}");
+        }
     }
 }
 
