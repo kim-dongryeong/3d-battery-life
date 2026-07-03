@@ -25,6 +25,12 @@ state.xScale = (() => {
   } catch { return 1; }
 })();
 X = X_BASE * state.xScale;   // apply the saved time-axis stretch before the first build
+// deep-linkable view (shareable): ?y=pct|watts|rate · ?color=state|lowPower|tempC|loadPct|watts
+try {
+  const q = new URLSearchParams(location.search);
+  if (['pct', 'watts', 'rate'].includes(q.get('y'))) state.y = q.get('y');
+  if (['state', 'lowPower', 'tempC', 'loadPct', 'watts'].includes(q.get('color'))) state.color = q.get('color');
+} catch { /* ignore */ }
 
 // ---- color themes (dark / light) for WebGL scenes + SVG charts -----------
 const THEMES = {
@@ -123,7 +129,7 @@ function buildAxes(valMax, valLabel, maxDay, firstT) {
   for (let i = 0; i <= 4; i++) {
     const v = valMax * i / 4, y = Y * i / 4;
     sceneRoot.add(axisLine([x0 - 0.3, y, z0], [x0, y, z0], TH().axisTick));
-    const s = makeLabel(state.y === 'pct' ? `${Math.round(v)}%` : `${v.toFixed(0)}W`, { size: 28, color: TH().tickC });
+    const s = makeLabel(state.y === 'pct' ? `${Math.round(v)}%` : state.y === 'rate' ? `${v.toFixed(2)}` : `${v.toFixed(0)}W`, { size: 28, color: TH().tickC });
     s.position.set(x0 - 2.2, y, z0); sceneRoot.add(s);
   }
   const yt = makeLabel(valLabel, { color: TH().titleC }); yt.position.set(x0 - 4.5, Y + 1, z0); sceneRoot.add(yt);
@@ -142,6 +148,23 @@ const C_DISCHARGE = new THREE.Color().setHSL(0.02, 0.85, 0.55); // red-orange
 const C_CHARGE = new THREE.Color().setHSL(0.33, 0.80, 0.50);    // green
 const C_FULL = new THREE.Color().setHSL(0.55, 0.45, 0.50);      // dim blue
 const stateColor = p => (p.charging ? C_CHARGE : (p.ac ? C_FULL : C_DISCHARGE));
+const C_LPM = new THREE.Color(0xffcc0a);                        // 저전력 모드 ON (macOS systemYellow, matches live.rs)
+const C_LPM_OFF = new THREE.Color(0x51617a);                    // 저전력 off / 기록 이전(unknown)
+
+// per-point discharge rate %/min via a ~10-min backward window — raw Δpct/Δt is a useless integer
+// staircase (pct is integer, 60s samples), so we window it; charging/idle (pct rising) → 0.
+function windowedRates(points, winSec = 600) {
+  const out = new Array(points.length).fill(null);
+  for (let i = 0; i < points.length; i++) {
+    if (points[i].pct == null) continue;
+    let j = i;
+    while (j > 0 && points[i].t - points[j - 1].t <= winSec) j--;   // earliest point within the window (or run start)
+    const dtMin = (points[i].t - points[j].t) / 60;
+    if (dtMin <= 0 || points[j].pct == null) continue;
+    out[i] = Math.max(0, -(points[i].pct - points[j].pct) / dtMin); // discharge magnitude (%/min); charge → 0
+  }
+  return out;
+}
 
 let lines = [];
 function buildLines(report) {
@@ -160,7 +183,7 @@ function buildLines(report) {
   // midnight anchor can push the last slice to spanDays+1 — include it so Z never overshoots the grid
   const lastDay = runs.length ? dayOfT(runs[runs.length - 1].points[runs[runs.length - 1].points.length - 1].t) : 0;
   const maxDay = Math.max(1, report.spanDays || 0, lastDay, ...runs.map(r => r.dayIndex));
-  const numeric = state.color !== 'state';
+  const numeric = state.color !== 'state' && state.color !== 'lowPower';   // 'state'/'lowPower' are categorical, not ramped
   let cMin = null, cMax = null;
   if (numeric) {
     const vals = [];
@@ -170,11 +193,22 @@ function buildLines(report) {
       if (cMax <= cMin) cMax = cMin + 1e-6;
     }
   }
-  const yMaxRaw = state.y === 'pct' ? 100 : percentile(runs.flatMap(r => r.points.map(p => p.watts ?? 0)), 0.98);
-  const yMax = state.y === 'pct' ? 100 : Math.max(5, yMaxRaw);  // value (depth) max
+  // 방전속도(%/min): per-point rate computed per run so the derivative spans midnight (only the drawn line splits)
+  const runRates = state.y === 'rate' ? runs.map(r => windowedRates(r.points)) : null;
+  let yMax;
+  if (state.y === 'rate') {
+    const all = runRates.flat().filter(v => v != null && Number.isFinite(v));
+    yMax = all.length ? Math.max(0.2, percentile(all, 0.98)) : 1;   // p98 clamp so a spike doesn't flatten everything
+  } else {
+    const yMaxRaw = state.y === 'pct' ? 100 : percentile(runs.flatMap(r => r.points.map(p => p.watts ?? 0)), 0.98);
+    yMax = state.y === 'pct' ? 100 : Math.max(5, yMaxRaw);  // value (depth) max
+  }
 
+  let ri = -1;
   for (const run of runs) {
-    let pos = [], col = [], pts = [], curDay = null;
+    ri++;
+    const rates = runRates ? runRates[ri] : null;
+    let pos = [], col = [], pts = [], curDay = null, pi = -1;
     const flush = () => {
       if (pos.length >= 6) {                                    // >=2 vertices
         const g = new THREE.BufferGeometry();
@@ -187,15 +221,17 @@ function buildLines(report) {
       pos = []; col = []; pts = [];
     };
     for (const p of run.points) {
-      const yv = state.y === 'pct' ? p.pct : p.watts;
+      pi++;
+      const yv = state.y === 'rate' ? (rates ? rates[pi] : null) : (state.y === 'pct' ? p.pct : p.watts);
       if (yv == null || !Number.isFinite(yv)) continue;         // skip null/NaN -> no bad vertices
       const d = dayOfT(p.t);
       if (curDay !== null && d !== curDay) flush();             // split at midnight: no cross-day diagonal
       curDay = d;
-      pos.push(xFromTod(todOf(p.t)), yFromVal(yv, yMax), zFromDay(d, maxDay));  // X=시각, Y=잔량, Z=날짜(점별)
+      pos.push(xFromTod(todOf(p.t)), yFromVal(yv, yMax), zFromDay(d, maxDay));  // X=시각, Y=값, Z=날짜(점별)
       const c = numeric
         ? ramp(cMax > cMin && p[state.color] != null ? (p[state.color] - cMin) / (cMax - cMin) : 0.5)
-        : stateColor(p);
+        : state.color === 'lowPower' ? (p.lowPower ? C_LPM : C_LPM_OFF)
+          : stateColor(p);
       col.push(c.r, c.g, c.b);
       pts.push(p);
     }
@@ -205,7 +241,8 @@ function buildLines(report) {
 }
 
 // ---- rebuild everything for current state -------------------------------
-const COLOR_META = { state: { label: '상태', unit: '' }, tempC: { label: '온도', unit: '°C' }, loadPct: { label: 'CPU 부하(load avg)', unit: '%' }, watts: { label: '전력', unit: 'W' } };
+const COLOR_META = { state: { label: '상태', unit: '' }, lowPower: { label: '저전력 모드', unit: '' }, tempC: { label: '온도', unit: '°C' }, loadPct: { label: 'CPU 부하(load avg)', unit: '%' }, watts: { label: '전력', unit: 'W' } };
+const Y_LABEL = { pct: '배터리 %', watts: '전력 W', rate: '방전속도 %/min' };
 const GRAD_NUM = 'linear-gradient(90deg, hsl(215,45%,45%), hsl(260,56%,49%), hsl(305,68%,52%), hsl(350,80%,56%), hsl(35,95%,60%))';
 const GRAD_STATE = 'linear-gradient(90deg, hsl(7,85%,55%) 0 33%, hsl(198,45%,50%) 50%, hsl(119,80%,50%) 66% 100%)';
 
@@ -214,7 +251,7 @@ function rebuild() {
   document.getElementById('empty').hidden = !(r && (!r.runs || r.runs.length === 0));
   if (!r) return;
   const { yMax, maxDay, cMin, cMax } = buildLines(r);
-  buildAxes(yMax, state.y === 'pct' ? '배터리 %' : '전력 W', maxDay, r.firstT);
+  buildAxes(yMax, Y_LABEL[state.y] || '배터리 %', maxDay, r.firstT);
 
   const cm = COLOR_META[state.color];
   document.getElementById('legLbl').textContent = cm.label;
@@ -223,6 +260,10 @@ function rebuild() {
     document.getElementById('legMin').textContent = '🔋방전';
     document.getElementById('legMax').textContent = '충전🔌';
     bar.style.background = GRAD_STATE;
+  } else if (state.color === 'lowPower') {
+    document.getElementById('legMin').textContent = '꺼짐';
+    document.getElementById('legMax').textContent = '🟡 켜짐';
+    bar.style.background = 'linear-gradient(90deg, #51617a 0 50%, #ffcc0a 50% 100%)';
   } else {
     document.getElementById('legMin').textContent = cMin != null ? `${cMin.toFixed(0)}${cm.unit}` : '';
     document.getElementById('legMax').textContent = cMax != null ? `${cMax.toFixed(0)}${cm.unit}` : '';
@@ -735,6 +776,7 @@ function showTip(dayIndex, p, x, y) {
       <tr><td class="k">전력</td><td>${p.watts ?? '?'} W</td></tr>
       <tr><td class="k">온도</td><td>${p.tempC ?? '?'}°C</td></tr>
       <tr><td class="k">CPU 부하</td><td>${p.loadPct ?? '?'}%</td></tr>
+      ${p.lowPower != null ? `<tr><td class="k">저전력</td><td>${p.lowPower ? '🟡 켜짐' : '꺼짐'}</td></tr>` : ''}
     </table>`;
   tip.hidden = false;
   const r = tip.getBoundingClientRect();
@@ -793,8 +835,30 @@ document.querySelectorAll('.seg').forEach(seg => {
     else { state[group] = val; rebuild(); }
   });
 });
-// reflect the persisted time-axis stretch on its segmented control
-document.querySelectorAll('.seg[data-group="xScale"] button').forEach(b => b.classList.toggle('on', +b.dataset.val === state.xScale));
+// reflect current state on every segmented control (defaults + deep-linked y/color/xScale)
+document.querySelectorAll('.seg').forEach(seg => {
+  const g = seg.dataset.group;
+  seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', g === 'xScale' ? +b.dataset.val === state.xScale : String(state[g]) === b.dataset.val));
+});
+
+// ?안내 — the Tauri (WKWebView) window swallows target=_blank, so show help.html in an in-app modal (works in a browser too)
+{
+  const helpBtn = document.getElementById('helpBtn');
+  const helpModal = document.getElementById('helpModal');
+  const helpFrame = document.getElementById('helpFrame');
+  if (helpBtn && helpModal && helpFrame) {
+    const close = () => { helpModal.hidden = true; };
+    helpBtn.addEventListener('click', e => {
+      e.preventDefault();
+      if (!helpFrame.dataset.loaded) { helpFrame.src = '/help.html'; helpFrame.dataset.loaded = '1'; }   // lazy-load once
+      helpModal.hidden = false;
+    });
+    document.getElementById('helpClose').addEventListener('click', close);
+    helpModal.addEventListener('click', e => { if (e.target === helpModal) close(); });   // backdrop click
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && !helpModal.hidden) close(); });
+  }
+}
+
 document.getElementById('spin').addEventListener('change', e => { controls.autoRotate = e.target.checked; controls.autoRotateSpeed = 0.6; });
 document.getElementById('reset').addEventListener('click', () => { camera.position.copy(HOME).multiplyScalar(0.6 + 0.4 * state.xScale); controls.target.copy(LOOK); });
 

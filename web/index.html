@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>3D Battery Life</title>
+  <title>3D 분석 리포트</title>
   <link rel="stylesheet" href="/style.css" />
   <script type="importmap">
   {
@@ -19,7 +19,7 @@
 
   <!-- top-left: live status -->
   <header id="hud">
-    <h1>🔋 3D Battery Life <a class="help-link" href="/help.html" target="_blank" title="지표·방법 과학 안내">?안내</a></h1>
+    <h1>🔋 3D 분석 리포트 <a class="help-link" id="helpBtn" href="/help.html" title="지표·방법 과학 안내">?안내</a></h1>
     <div id="healthBig" class="healthBig" title="현재 최대 용량 (= macOS 배터리 성능의 Maximum Capacity) · 사이클"></div>
     <div id="trend" class="trend">불러오는 중…</div>
     <dl id="stats"></dl>
@@ -36,10 +36,11 @@
       </div>
     </div>
     <div class="grp">
-      <span class="lbl">세로축 (Y · 잔량)</span>
+      <span class="lbl">세로축 (Y · 높이)</span>
       <div class="seg" data-group="y">
         <button data-val="pct" class="on">배터리 %</button>
         <button data-val="watts">전력 W</button>
+        <button data-val="rate" title="배터리 잔량 변화 속도 dy/dt (방전=양수, ~10분 평활)">방전속도 %/min</button>
       </div>
     </div>
     <div class="grp">
@@ -55,6 +56,7 @@
       <span class="lbl">색상</span>
       <div class="seg" data-group="color">
         <button data-val="state" class="on">충/방전</button>
+        <button data-val="lowPower" title="저전력 모드 구간을 노란색으로 (기록 이후 데이터만)">저전력</button>
         <button data-val="tempC">온도</button>
         <button data-val="loadPct">CPU부하</button>
         <button data-val="watts">전력</button>
@@ -83,6 +85,14 @@
   <div id="insight" hidden></div>  <!-- E 카드 레이아웃: 결론 카드 -->
   <aside id="tip" hidden></aside>
   <div id="empty" hidden>아직 배터리 세션 데이터가 충분하지 않습니다.<br/>백그라운드 기록이 쌓이면 여기에 나타납니다. 지금은 <b>데모(1년)</b>를 보세요.</div>
+
+  <!-- 지표·방법 안내 — WKWebView(앱 창)는 target=_blank를 무시하므로 앱 내부 모달로 표시 -->
+  <div id="helpModal" class="modal" hidden>
+    <div class="modalCard">
+      <button id="helpClose" class="modalX" type="button" aria-label="닫기">✕</button>
+      <iframe id="helpFrame" title="지표·방법 안내"></iframe>
+    </div>
+  </div>
 
   <script type="module" src="/main.js"></script>
 </body>
