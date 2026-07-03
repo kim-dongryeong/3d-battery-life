@@ -9,7 +9,7 @@ let X = X_BASE;                                          // effective time-axis 
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'pct', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
@@ -112,39 +112,41 @@ const yFromVal = (v, valMax) => state.y === 'rate'
 function buildAxes(valMax, valLabel, maxDay, firstT) {
   disposeGroup(sceneRoot);
   const x0 = -X / 2, z0 = -Z / 2, z1 = Z / 2;
+  const signed = state.y === 'rate';                                // 잔량 변화율: 바닥·축·눈금을 0(충전↔방전 경계)에 붙인다
+  const baseY = signed ? Y / 2 : 0;
+  const axC = signed ? 0x4dd0c0 : TH().axis;                        // 0 평면 축은 청록으로 강조
 
   const gsize = Math.max(Z, X);                                    // floor must cover the stretched time axis
   const grid = new THREE.GridHelper(gsize, Math.round(gsize / 2), TH().gMain, TH().gMinor);
+  grid.position.y = baseY;                                         // rate 모드: 바닥격자 = 0-변화율 평면
   sceneRoot.add(grid);
 
-  sceneRoot.add(axisLine([x0, 0, z0], [X / 2, 0, z0], TH().axis));   // X = 시각
-  sceneRoot.add(axisLine([x0, 0, z0], [x0, Y, z0], TH().axis));      // Y = 잔량/전력
-  sceneRoot.add(axisLine([x0, 0, z0], [x0, 0, z1], TH().axis));      // Z = 날짜
+  sceneRoot.add(axisLine([x0, baseY, z0], [X / 2, baseY, z0], axC));   // X = 시각 (0 평면에 붙음)
+  sceneRoot.add(axisLine([x0, 0, z0], [x0, Y, z0], TH().axis));        // Y = 값 (수직 전체: −max..0..+max)
+  sceneRoot.add(axisLine([x0, baseY, z0], [x0, baseY, z1], axC));      // Z = 날짜 (0 평면에 붙음)
 
   // X ticks: hours
   for (const h of [0, 6, 12, 18, 24]) {
-    const s = makeLabel(`${h}시`, { size: 30, color: TH().tickC }); s.position.set(xFromTod(h), -1, z0 - 1.2); sceneRoot.add(s);
+    const s = makeLabel(`${h}시`, { size: 30, color: TH().tickC }); s.position.set(xFromTod(h), baseY - 1, z0 - 1.2); sceneRoot.add(s);
   }
-  const xt = makeLabel('하루 중 시각 →', { color: TH().titleC }); xt.position.set(0, -2.6, z0 - 2); sceneRoot.add(xt);
+  const xt = makeLabel('하루 중 시각 →', { color: TH().titleC }); xt.position.set(0, baseY - 2.6, z0 - 2); sceneRoot.add(xt);
 
-  // Y ticks: battery %/watts run 0..max · 잔량 변화율은 부호축(−max..+max, 0이 중앙)
-  const signed = state.y === 'rate';
+  // Y ticks: battery %/watts run 0..max · 잔량 변화율은 부호축(−max..0..+max, 0=바닥격자 평면)
   for (let i = 0; i <= 4; i++) {
     const v = signed ? valMax * (i / 2 - 1) : valMax * i / 4, y = Y * i / 4;
     sceneRoot.add(axisLine([x0 - 0.3, y, z0], [x0, y, z0], TH().axisTick));
     const s = makeLabel(state.y === 'pct' ? `${Math.round(v)}%` : signed ? v.toFixed(2) : `${v.toFixed(0)}W`, { size: 28, color: TH().tickC });
     s.position.set(x0 - 2.2, y, z0); sceneRoot.add(s);
   }
-  if (signed) sceneRoot.add(axisLine([x0, Y / 2, z0], [X / 2, Y / 2, z0], 0x4dd0c0));   // dy/dt = 0 : 충전↑ / 방전↓ 경계
   const yt = makeLabel(valLabel, { color: TH().titleC }); yt.position.set(x0 - 4.5, Y + 1, z0); sceneRoot.add(yt);
 
   // Z ticks: dates (older -> recent)
   const days = maxDay <= 1 ? [0] : [0, Math.round(maxDay / 2), maxDay];
   for (const d of days) {
     const date = new Date(((firstT || 0) + d * 86400) * 1000);
-    const s = makeLabel(`${date.getMonth() + 1}/${date.getDate()}`, { size: 26, color: TH().tickC }); s.position.set(x0 - 1.5, -0.4, zFromDay(d, maxDay)); sceneRoot.add(s);
+    const s = makeLabel(`${date.getMonth() + 1}/${date.getDate()}`, { size: 26, color: TH().tickC }); s.position.set(x0 - 1.5, baseY - 0.4, zFromDay(d, maxDay)); sceneRoot.add(s);
   }
-  const zt = makeLabel('경과 일수 (오래됨 → 최근)', { color: TH().titleC }); zt.position.set(x0 - 2, -2.6, z1 - 6); sceneRoot.add(zt);
+  const zt = makeLabel('경과 일수 (오래됨 → 최근)', { color: TH().titleC }); zt.position.set(x0 - 2, baseY - 2.6, z1 - 6); sceneRoot.add(zt);
 }
 
 // ---- battery curves (continuous runs: charge + discharge, gap-split) ----
@@ -375,7 +377,7 @@ function renderRates() {
   const metBtns = [['rate', '속도'], ['wh', '노화Wh/%'], ['watts', '전력W'], ['temp', '온도°C']].map(([k, l]) => `<button data-rm="${k}" class="${k === state.metric ? 'on' : ''}">${l}</button>`).join('');
   const perBtns = PERIODS.map(([k, l]) => `<button data-rp="${k}" class="${k === state.period ? 'on' : ''}">${l}</button>`).join('');
   const verBtns = RATE_VERS.map(([k, lbl]) => `<button data-rv="${k}" class="${k === state.rateVersion ? 'on' : ''}">${lbl}</button>`).join('');
-  const lvlBtns = [['pct', '정수%'], ['rawcap', 'mAh정밀']].map(([k, l]) => `<button data-rl="${k}" class="${k === state.rateLevel ? 'on' : ''}">${l}</button>`).join('');
+  const lvlBtns = [['rawcap', 'mAh정밀', '원시 배터리 용량(mAh) 기반 · ~0.02% 해상도 · 부드럽고 정확 (권장)'], ['pct', '정수%', 'macOS 표시 %(정수·1% 계단) — 메뉴바 숫자 기준. 표시% 관점일 때만']].map(([k, l, t]) => `<button data-rl="${k}" title="${t}" class="${k === state.rateLevel ? 'on' : ''}">${l}</button>`).join('');
   const body = rt.byBand.map(b => {
     const v = bandVal(b), sel = b.band === state.selectedBand ? ' class="sel"' : '';
     if (v == null) return `<tr data-band="${b.band}"${sel}><td>${b.label}</td><td class="rt">–</td><td></td></tr>`;
