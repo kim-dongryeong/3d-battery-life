@@ -9,7 +9,7 @@ let X = X_BASE;                                          // effective time-axis 
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
@@ -31,6 +31,7 @@ try {
   if (['pct', 'watts', 'rate'].includes(q.get('y'))) state.y = q.get('y');
   if (['state', 'lowPower', 'tempC', 'loadPct', 'watts'].includes(q.get('color'))) state.color = q.get('color');
 } catch { /* ignore */ }
+try { const w = +localStorage.getItem('battRateWin'); if ([120, 300, 600, 1200].includes(w)) state.rateWin = w; } catch { /* ignore */ }
 
 // ---- color themes (dark / light) for WebGL scenes + SVG charts -----------
 const THEMES = {
@@ -202,7 +203,7 @@ function buildLines(report) {
     }
   }
   // 방전속도(%/min): per-point rate computed per run so the derivative spans midnight (only the drawn line splits)
-  const runRates = state.y === 'rate' ? runs.map(r => windowedRates(r.points)) : null;
+  const runRates = state.y === 'rate' ? runs.map(r => windowedRates(r.points, state.rateWin)) : null;
   let yMax;
   if (state.y === 'rate') {
     const mags = runRates.flat().filter(v => v != null && Number.isFinite(v)).map(Math.abs);
@@ -255,6 +256,8 @@ const GRAD_NUM = 'linear-gradient(90deg, hsl(215,45%,45%), hsl(260,56%,49%), hsl
 const GRAD_STATE = 'linear-gradient(90deg, hsl(7,85%,55%) 0 33%, hsl(198,45%,50%) 50%, hsl(119,80%,50%) 66% 100%)';
 
 function rebuild() {
+  const rwg = document.getElementById('rateWinGrp');
+  if (rwg) rwg.hidden = state.y !== 'rate';   // 평활 창 컨트롤은 방전속도(rate) 모드에서만
   const r = state.report;
   document.getElementById('empty').hidden = !(r && (!r.runs || r.runs.length === 0));
   if (!r) return;
@@ -291,6 +294,11 @@ const agoText = ms => {
   const s = Math.max(0, (Date.now() - ms) / 1000);
   return s < 90 ? '방금' : s < 3600 ? `${Math.round(s / 60)}분 전` : s < 86400 ? `${Math.round(s / 3600)}시간 전` : `${Math.round(s / 86400)}일 전`;
 };
+const fmtDur = sec => {                                     // 초 → "1일 3시간" / "5시간 20분" / "40분"
+  sec = Math.max(0, Math.round(sec));
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  return d ? `${d}일 ${h}시간` : h ? `${h}시간 ${m}분` : `${m}분`;
+};
 
 function updateHud(r) {
   const L = r.latest, stats = document.getElementById('stats');
@@ -317,6 +325,12 @@ function updateHud(r) {
     rows.push([`현재${live ? ' 🟢' : ''}`, `${L.pct}% · ${L.watts}W ${L.charging ? '⚡' : L.ac ? '🔌' : '🔋'}`]);
     if (Number.isFinite(ms)) rows.push(['기준 시각', live ? `${fmtWhen(ms)} · ${agoText(ms)}` : `${fmtWhen(ms)} (데모)`]);
     if (L.lowPower != null) rows.push(['저전력 모드', L.lowPower ? '🟡 켜짐' : '꺼짐']);   // pmset lowpowermode
+    const sc = r.sinceCharge;   // 마지막 전원분리 이후: 경과(잠자기 포함) + 그중 실사용(깨어있던)
+    if (sc && !sc.onAC && sc.unplugT) {
+      const pct = sc.wallSec > 0 ? Math.round(sc.awakeSec / sc.wallSec * 100) : 0;
+      rows.push(['마지막 충전 이후', `${sc.knownStart ? '' : '≥ '}${fmtDur(sc.wallSec)}`]);
+      rows.push(['그중 사용(켜짐)', `${fmtDur(sc.awakeSec)} · ${pct}%`]);
+    }
     rows.push(['배터리 건강도', `${L.healthPct}%`]);
     rows.push(['사이클', `${L.cycles}회`]);
     rows.push(['만충 용량', `${L.rawMax} / ${L.design} mAh`]);
@@ -840,6 +854,7 @@ document.querySelectorAll('.seg').forEach(seg => {
     else if (group === 'ui') { applyUI(val); }
     else if (group === 'layout') { applyLayout(val); }
     else if (group === 'xScale') { setXScale(+val); }
+    else if (group === 'rateWin') { state.rateWin = +val; try { localStorage.setItem('battRateWin', val); } catch { /* ignore */ } rebuild(); }
     else { state[group] = val; rebuild(); }
   });
 });

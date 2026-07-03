@@ -43,6 +43,15 @@
         <button data-val="rate" title="배터리 잔량 변화율 d(잔량)/dt · +충전 −방전 · mAh 원시용량 기반(부드러움)">잔량 변화 %/min</button>
       </div>
     </div>
+    <div class="grp" id="rateWinGrp" hidden>
+      <span class="lbl">평활 창 (좁을수록 예민)</span>
+      <div class="seg" data-group="rateWin">
+        <button data-val="120">2분</button>
+        <button data-val="300" class="on">5분</button>
+        <button data-val="600">10분</button>
+        <button data-val="1200">20분</button>
+      </div>
+    </div>
     <div class="grp">
       <span class="lbl">시각 축 (X · 가로 폭)</span>
       <div class="seg" data-group="xScale">
