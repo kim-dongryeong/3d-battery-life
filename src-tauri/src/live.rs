@@ -83,19 +83,26 @@ impl Reader {
 }
 
 // ---- menu-bar display settings (persisted; changed from the tray menu) ----
+// The persisted settings, shared by the menu-bar (Rust) and the popover settings panel
+// (which reads/writes them through the node server's /api/config → the same tray.json).
+// Every field has a #[serde(default)] so a partial or older JSON still deserializes.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Cfg {
-    pub info: u8,       // title next to icon: 0 icon-only · 1 % · 2 time · 3 W · 4 %+W · 5 %+time
-    pub colorize: bool, // color the glyph fill by level (else monochrome except red <20%)
-    // notification thresholds (like Stats): user-cycled from the tray menu. 0 = off.
-    // #[serde(default)] so an older tray.json (without these keys) still deserializes and keeps info/colorize.
-    #[serde(default = "d_low")] pub low_pct: u8,   // discharge warning at ≤ this %
-    #[serde(default = "d_high")] pub high_pct: u8, // charge-complete alert at ≥ this %
+    #[serde(default = "d_info")] pub info: u8,      // title next to icon: 0 icon-only · 1 % · 2 time · 3 W · 4 %+W · 5 %+time
+    #[serde(default = "d_true")] pub colorize: bool,// color the glyph fill by level (else monochrome except red <20%)
+    #[serde(default = "d_low")] pub low_pct: u8,    // discharge warning at ≤ this % (0 = off)
+    #[serde(default = "d_high")] pub high_pct: u8,  // charge-complete alert at ≥ this % (0 = off)
+    #[serde(default = "d_widget")] pub widget: String, // menu-bar widget: "icon" | "bar" | "text"
+    #[serde(default)] pub glyph_xl: bool,           // draw the glyph at a larger body size
+    #[serde(default)] pub shortcut: bool,           // register a global ⌥⌘B to open the popover
 }
+fn d_info() -> u8 { 4 }
+fn d_true() -> bool { true }
 fn d_low() -> u8 { 20 }
 fn d_high() -> u8 { 80 }
+fn d_widget() -> String { "icon".into() }
 impl Default for Cfg {
-    fn default() -> Self { Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80 } }
+    fn default() -> Self { Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: "icon".into(), glyph_xl: false, shortcut: false } }
 }
 // Preset steps the tray menu cycles through (last = 0 = off).
 pub const LOW_STEPS: [u8; 6] = [10, 15, 20, 25, 30, 0];

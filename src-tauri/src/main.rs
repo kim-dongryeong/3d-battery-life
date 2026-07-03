@@ -227,7 +227,6 @@ fn main() {
             // 4) live tray title — a 2s ticker reads the battery natively and shows "87% · 5.2W" (or ⚡)
             //    next to the menu-bar icon, so the app earns its always-resident spot (Stats-parity).
             let handle = app.handle().clone();
-            let cfg_ticker = cfg.clone();
             std::thread::spawn(move || {
                 let mut reader = live::Reader::new();
                 let smc = smc::Smc::open();   // live temp/system-power (real-time; ioreg is 60s-quantized)
@@ -236,7 +235,7 @@ fn main() {
                 let (mut low, mut crit, mut high) = (false, false, false);
                 loop {
                     let l = reader.read();
-                    let c = cfg_ticker.lock().map(|g| g.clone()).unwrap_or_default();
+                    let c = live::load_cfg();   // re-read each tick so menu AND popover-settings changes apply live
                     if l.ok { notify_check(&l, &c, &mut low, &mut crit, &mut high); }
                     // read SMC once per tick: feeds both the live-smc.json bridge and the menu-bar W.
                     let mut sys_w = None;

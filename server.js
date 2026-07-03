@@ -42,6 +42,27 @@ let procsCache = { at: 0, data: [] };   // /api/procs cache (shared across reque
 let procsInflight = false;
 let detailCache = { at: 0, data: {} };  // /api/detail cache (slow-changing fields)
 
+// tray.json = the settings the menu-bar (Rust) and the popover settings panel both share.
+// The Rust ticker re-reads it every 2s, so a popover change applies to the menu bar live.
+const TRAY_DEFAULTS = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: false };
+const trayPath = () => path.join(userDataDir(), 'tray.json');
+function readTray() {
+  try { return { ...TRAY_DEFAULTS, ...JSON.parse(fs.readFileSync(trayPath(), 'utf8')) }; } catch { return { ...TRAY_DEFAULTS }; }
+}
+// only accept known keys with valid types/ranges — tray.json is deserialized by Rust (serde),
+// so a wrong type would break the menu-bar reader.
+function sanitizeCfg(p) {
+  const o = {};
+  if (Number.isInteger(p.info) && p.info >= 0 && p.info <= 5) o.info = p.info;
+  if (typeof p.colorize === 'boolean') o.colorize = p.colorize;
+  if (Number.isInteger(p.low_pct) && p.low_pct >= 0 && p.low_pct <= 100) o.low_pct = p.low_pct;
+  if (Number.isInteger(p.high_pct) && p.high_pct >= 0 && p.high_pct <= 100) o.high_pct = p.high_pct;
+  if (['icon', 'bar', 'text'].includes(p.widget)) o.widget = p.widget;
+  if (typeof p.glyph_xl === 'boolean') o.glyph_xl = p.glyph_xl;
+  if (typeof p.shortcut === 'boolean') o.shortcut = p.shortcut;
+  return o;
+}
+
 function hostAllowed(req) {
   const h = String(req.headers.host || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
   return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '';
@@ -136,6 +157,27 @@ export function startServer({ root, port } = {}) {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(JSON.stringify(detailCache.data));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+
+    // shared settings (tray.json): GET returns current, POST merges a patch and writes it.
+    // The menu-bar reader (Rust) re-reads tray.json every tick, so changes here apply live.
+    if (url.pathname === '/api/config') {
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', c => { body += c; if (body.length > 1e5) req.destroy(); });
+        req.on('end', () => {
+          try {
+            const merged = { ...readTray(), ...sanitizeCfg(JSON.parse(body || '{}')) };
+            fs.mkdirSync(userDataDir(), { recursive: true });
+            fs.writeFileSync(trayPath(), JSON.stringify(merged));
+            res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(merged));
+          } catch (e) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+        });
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(readTray()));
       return;
     }
 
