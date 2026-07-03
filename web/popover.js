@@ -34,11 +34,19 @@ const powerLegend = s => s.ac ? '어댑터 = 시스템 소비 + 배터리 충전
 // window from Rust. This makes the window fit the content exactly → no scrollbar, no square margin.
 let lastWinH = 0;
 function fitWindow() {
+  if (document.hidden) return;   // a hidden webview doesn't lay out reliably → measure only when shown
   const h = Math.min(Math.ceil(document.body.getBoundingClientRect().height), Math.round((screen.availHeight || 900) * 0.95));
   if (Math.abs(h - lastWinH) < 2) return;   // only post when the content height actually changes
   lastWinH = h;
   fetch('/api/height', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ h }) }).catch(() => {});
 }
+// when the popover is shown, re-pull fresh data and re-measure at the true (visible) layout height
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  lastWinH = 0;
+  pull(); pullProcs(); pullDetail();
+  requestAnimationFrame(fitWindow);
+});
 const hideWindow = () => { fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ do: 'hide' }) }).catch(() => {}); };
 const stateOf = s => s.charging ? '충전 중' : s.full ? '완충' : s.ac ? 'AC 연결(유휴)' : '배터리 사용';
 const stateIcon = s => s.charging ? '⚡' : s.ac ? '🔌' : '🔋';
