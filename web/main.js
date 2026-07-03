@@ -8,7 +8,7 @@ const X = 24, Y = 16, Z = 44;
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -12, 24시 -> +12
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'demo2', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'pct', selectedBand: null, selectedPeriod: null, trendAll: false, trendBig: false, trendView: 'line', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'demo2', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'pct', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
