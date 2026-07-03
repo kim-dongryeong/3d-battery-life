@@ -24,7 +24,7 @@ fn hidden_just_now() -> bool {
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, LogicalPosition, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Manager, PhysicalPosition, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
 
@@ -131,8 +131,14 @@ fn main() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)   // left-click = popover; right-click = menu
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
-                        toggle_popover(tray.app_handle());
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = event {
+                        // rect is the icon's screen box in PHYSICAL px, top-left origin (tray-icon flips
+                        // macOS' bottom-left coords for us). Position/Size are dpi enums → already the
+                        // Physical variant here, so to_physical just casts (scale arg ignored).
+                        let p = rect.position.to_physical::<f64>(1.0);
+                        let sz = rect.size.to_physical::<f64>(1.0);
+                        let anchor = (p.x, p.y, sz.width, sz.height);
+                        toggle_popover(tray.app_handle(), Some(anchor));
                     }
                 })
                 .on_menu_event(move |app, event| match event.id().as_ref() {
@@ -256,12 +262,12 @@ fn show_main(app: &AppHandle) {
 
 // Left-click popover: a small borderless window loading the node server's /popover.html (pure web,
 // no Tauri commands → safe to load from localhost). Lazily created, then toggled.
-fn toggle_popover(app: &AppHandle) {
+fn toggle_popover(app: &AppHandle, anchor: Option<(f64, f64, f64, f64)>) {
     if let Some(w) = app.get_webview_window("popover") {
         if w.is_visible().unwrap_or(false) {
             let _ = w.hide();
         } else if !hidden_just_now() {   // this same click may have just hidden it via focus-loss
-            place_popover(&w);
+            place_popover(&w, anchor);
             let _ = w.show();
             let _ = w.set_focus();
         }
@@ -281,21 +287,44 @@ fn toggle_popover(app: &AppHandle) {
     .visible(false)
     .build();
     if let Ok(w) = built {
-        place_popover(&w);
+        place_popover(&w, anchor);
         let _ = w.show();
         let _ = w.set_focus();
     }
 }
 
-// Position the popover top-right of the menu-bar monitor. Use the monitor's real origin
-// (not an assumed 0,0) so it lands correctly on multi-monitor / non-primary-origin setups.
-fn place_popover(w: &tauri::WebviewWindow) {
-    if let Ok(Some(mon)) = w.primary_monitor() {
-        let sf = mon.scale_factor();
-        let ox = mon.position().x as f64 / sf;
-        let oy = mon.position().y as f64 / sf;
-        let mw = mon.size().width as f64 / sf;
-        let x = (ox + mw - 336.0).max(ox + 6.0);
-        let _ = w.set_position(LogicalPosition::new(x, oy + 32.0));
-    }
+// Anchor the popover just below the clicked menu-bar icon, horizontally centered under it and
+// clamped to that icon's monitor. `anchor` = the icon's screen rect in PHYSICAL px, top-left
+// origin (exactly what the tray Click event gives). Everything here — anchor, monitor position/
+// size, and the popover position — is in the same global physical coordinate space, so no
+// scale-factor juggling between rails. Fallback (no anchor): menu-bar monitor's top-right corner.
+fn place_popover(w: &tauri::WebviewWindow, anchor: Option<(f64, f64, f64, f64)>) {
+    // Pick the monitor under the icon (multi-monitor safe), else the primary one.
+    let mon = anchor
+        .and_then(|(x, y, aw, ah)| {
+            let (cx, cy) = (x + aw / 2.0, y + ah / 2.0);
+            w.available_monitors().ok().and_then(|ms| {
+                ms.into_iter().find(|m| {
+                    let (p, s) = (m.position(), m.size());
+                    let (l, t) = (p.x as f64, p.y as f64);
+                    cx >= l && cx < l + s.width as f64 && cy >= t && cy < t + s.height as f64
+                })
+            })
+        })
+        .or_else(|| w.primary_monitor().ok().flatten());
+    let Some(mon) = mon else { return; };
+    let sf = mon.scale_factor();
+    let (ml, mt, mw) = (mon.position().x as f64, mon.position().y as f64, mon.size().width as f64);
+    let pop_w = 320.0 * sf;          // logical inner width → physical
+    let gap = 6.0 * sf;
+    let (x, y) = match anchor {
+        Some((ax, ay, aw, ah)) => {
+            let center = ax + aw / 2.0;
+            let lo = ml + gap;
+            let hi = (ml + mw - pop_w - gap).max(lo);   // never let hi < lo on a very narrow display
+            ((center - pop_w / 2.0).clamp(lo, hi), ay + ah + 2.0 * sf)
+        }
+        None => ((ml + mw - pop_w - gap).max(ml + gap), mt + 32.0 * sf),
+    };
+    let _ = w.set_position(PhysicalPosition::new(x, y));
 }
