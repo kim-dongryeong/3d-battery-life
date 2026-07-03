@@ -100,6 +100,12 @@ impl Smc {
     pub fn adapter_watts(&self) -> Option<f64> {
         self.read_f64("PDTR").filter(|v| *v >= 0.0 && *v < 500.0).map(|v| (v * 100.0).round() / 100.0)
     }
+    // Live battery power magnitude in Watts (PPBR). ioreg's Amperage/Voltage are 60s-quantized, so
+    // right after (un)plugging the battery current lags; PPBR moves in real time. Direction is
+    // decided upstream from PDTR vs PSTR (adapter surplus → charging, deficit → discharging).
+    pub fn battery_watts(&self) -> Option<f64> {
+        self.read_f64("PPBR").filter(|v| *v >= 0.0 && *v < 500.0).map(|v| (v * 100.0).round() / 100.0)
+    }
 }
 
 impl Drop for Smc { fn drop(&mut self) { unsafe { IOServiceClose(self.conn); } } }

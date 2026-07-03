@@ -62,6 +62,15 @@ fn ask_consent() -> bool {
     }
 }
 
+// Low Power Mode state (`pmset -g` → "lowpowermode  1"). Read on a slow cadence from the ticker.
+fn low_power_mode() -> bool {
+    std::process::Command::new("pmset").arg("-g").output().ok().is_some_and(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .any(|l| l.contains("lowpowermode") && l.split_whitespace().last() == Some("1"))
+    })
+}
+
 // macOS notification via osascript (no plugin / entitlement). Quotes sanitized.
 fn notify(title: &str, body: &str) {
     let clean = |s: &str| s.replace('\\', "").replace('"', "'").replace(['\n', '\r'], " ");
@@ -205,9 +214,12 @@ fn main() {
                 let mut last_key = String::new();
                 let (mut low, mut crit, mut high) = (false, false, false);
                 let mut sc_on = false;   // whether the global ⌥⌘B is currently registered
+                let (mut lpm, mut tick) = (low_power_mode(), 0u32);
                 loop {
                     let l = reader.read();
                     let c = live::load_cfg();   // re-read each tick so menu AND popover-settings changes apply live
+                    if tick % 3 == 0 { lpm = low_power_mode(); }   // refresh Low Power Mode every ~6s
+                    tick = tick.wrapping_add(1);
                     if l.ok { notify_check(&l, &c, &mut low, &mut crit, &mut high); }
                     // register/unregister the global open-popover hotkey to match the setting (live)
                     if c.shortcut != sc_on {
@@ -229,8 +241,8 @@ fn main() {
                         sys_w = s.system_watts();
                         let f = |o: Option<f64>| o.map(|v| v.to_string()).unwrap_or_else(|| "null".into());
                         let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-                        let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"at\":{}}}",
-                            f(s.battery_temp_c()), f(sys_w), f(s.adapter_watts()), now);
+                        let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"batteryW\":{},\"at\":{}}}",
+                            f(s.battery_temp_c()), f(sys_w), f(s.adapter_watts()), f(s.battery_watts()), now);
                         let _ = std::fs::write(data_dir().join("live-smc.json"), j);
                     }
                     if let Some(tray) = handle.tray_by_id("tray") {
@@ -239,11 +251,11 @@ fn main() {
                         // text-only widget must never be blank (no glyph to fall back on)
                         if c.widget == "text" && title.is_empty() { title = format!("{}%", l.pct.round() as i64); }
                         let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
-                        // redraw the glyph only when something visible changes (level/charge/widget/color/xl)
-                        let key = format!("{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl);
+                        // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm)
+                        let key = format!("{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm);
                         if l.ok && key != last_key {
                             last_key = key;
-                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl) {
+                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm) {
                                 Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
                                 None => { let _ = tray.set_icon(None); }   // text-only widget
                             }

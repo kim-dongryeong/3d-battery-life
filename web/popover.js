@@ -89,7 +89,7 @@ function rowsPower(s) {
   const bp = s.powerW;
   const bw = bp == null ? null : Math.abs(bp) < 0.05 ? '0 W' : `${bp > 0 ? '+' : '−'}${Math.abs(bp).toFixed(2)} W`;
   const b = [bw, s.voltage != null ? `${s.voltage.toFixed(2)} V` : null, s.amperage != null ? `${s.amperage} mA` : null].filter(Boolean);
-  r.push(['배터리', b.length ? b.join(' · ') : '–']);
+  r.push(['배터리', (b.length ? b.join(' · ') : '–') + (s.batLive ? ' <i class="ld"></i>' : '')]);
   return r;
 }
 // 상태 rows shared by list/gauge: remaining time + live temperature.

@@ -122,9 +122,11 @@ fn time_str(l: &Live) -> String {
     }
 }
 
-// Level → fill color (shared by the icon + bar glyphs). red <20% always, else amber <40% / green,
-// teal while charging/full; monochrome gray when colorize is off.
-fn fill_color(l: &Live, colorize: bool) -> (u8, u8, u8, u8) {
+// Level → fill color (shared by the icon + bar glyphs). Low Power Mode → yellow, like macOS' own
+// battery icon (overrides level). Else: red <20% always, amber <40% / green, teal while
+// charging/full; monochrome gray when colorize is off.
+fn fill_color(l: &Live, colorize: bool, lpm: bool) -> (u8, u8, u8, u8) {
+    if lpm { return (255, 204, 10, 255); }   // macOS systemYellow — the LPM signal
     let pct = l.pct.clamp(0.0, 100.0);
     if pct <= 20.0 { (229, 72, 77, 255) }
     else if !colorize { (170, 176, 188, 255) }
@@ -134,11 +136,11 @@ fn fill_color(l: &Live, colorize: bool) -> (u8, u8, u8, u8) {
 }
 
 // Which menu-bar glyph to draw: "text" → None (title only), "bar" → vertical bar, else the battery.
-pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool) -> Option<(Vec<u8>, u32, u32)> {
+pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool) -> Option<(Vec<u8>, u32, u32)> {
     match widget {
         "text" => None,
-        "bar" => Some(bar_glyph(l, colorize)),
-        _ => Some(battery_icon(l, colorize, xl)),
+        "bar" => Some(bar_glyph(l, colorize, lpm)),
+        _ => Some(battery_icon(l, colorize, xl, lpm)),
     }
 }
 
@@ -146,7 +148,7 @@ pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool) -> Option<(Ve
 // teal + bolt while charging, plug while plugged-and-holding. `xl` shrinks the vertical margin so
 // the body fills more of the canvas — since macOS scales the tray image to the menu-bar height,
 // that renders the glyph visibly larger. Returns raw RGBA + dims.
-pub fn battery_icon(l: &Live, colorize: bool, xl: bool) -> (Vec<u8>, u32, u32) {
+pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (40u32, 20u32);
     let mut buf = vec![0u8; (w * h * 4) as usize];
     let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
@@ -159,7 +161,7 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool) -> (Vec<u8>, u32, u32) {
     };
     let outline = (170u8, 176u8, 188u8, 255u8); // mid-gray: readable on light & dark menu bars
     let pct = l.pct.clamp(0.0, 100.0);
-    let fill = fill_color(l, colorize);
+    let fill = fill_color(l, colorize, lpm);
 
     // body outline (2px). XL uses a smaller vertical margin so the body is taller.
     let m = if xl { 1i32 } else { 3 };
@@ -192,7 +194,7 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool) -> (Vec<u8>, u32, u32) {
 }
 
 // ---- vertical bar glyph (Stats' "bar_chart"): a thin upright cell filling from the bottom.
-pub fn bar_glyph(l: &Live, colorize: bool) -> (Vec<u8>, u32, u32) {
+pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (14u32, 20u32);
     let mut buf = vec![0u8; (w * h * 4) as usize];
     let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
@@ -205,7 +207,7 @@ pub fn bar_glyph(l: &Live, colorize: bool) -> (Vec<u8>, u32, u32) {
     };
     let outline = (170u8, 176u8, 188u8, 255u8);
     let pct = l.pct.clamp(0.0, 100.0);
-    let fill = fill_color(l, colorize);
+    let fill = fill_color(l, colorize, lpm);
     let (bx0, by0, bx1, by1) = (3i32, 1i32, 11i32, 19i32);   // upright cell
     rect(&mut buf, bx0, by0, bx1, by0 + 2, outline);
     rect(&mut buf, bx0, by1 - 2, bx1, by1, outline);

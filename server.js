@@ -142,6 +142,17 @@ export function startServer({ root, port } = {}) {
             if (smc.systemW != null) s.systemW = smc.systemW;  // live system power draw
             if (smc.adapterW != null) s.adapterW = smc.adapterW;
             s.smc = true;
+            // Live battery rail: ioreg's Amperage/Voltage are 60s-quantized (stale right after
+            // (un)plugging), so when SMC gives us the battery power magnitude (PPBR) use it, signed
+            // by whether the adapter is running a surplus (charging +) or deficit (discharging −),
+            // and derive the current from the (stable) battery voltage.
+            if (smc.batteryW != null && smc.systemW != null) {
+              const charging = (smc.adapterW ?? 0) - smc.systemW >= 0;
+              const signed = charging ? smc.batteryW : -smc.batteryW;
+              s.powerW = +signed.toFixed(3);
+              if (s.voltage) s.amperage = Math.round(signed / s.voltage * 1000);
+              s.batLive = true;
+            }
           }
         } catch { /* no bridge / app not running → ioreg only */ }
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
