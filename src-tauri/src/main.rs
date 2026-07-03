@@ -113,6 +113,7 @@ fn main() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
             // 1) start the local server (bundled single binary) as a sidecar
             let cmd = app.shell().sidecar("battery-life").expect("sidecar 'battery-life' missing").args(["serve"]);
@@ -197,10 +198,25 @@ fn main() {
                 if smc.is_some() { let _ = std::fs::create_dir_all(data_dir()); }   // so the bridge write can't silently fail
                 let mut last_key = String::new();
                 let (mut low, mut crit, mut high) = (false, false, false);
+                let mut sc_on = false;   // whether the global ⌥⌘B is currently registered
                 loop {
                     let l = reader.read();
                     let c = live::load_cfg();   // re-read each tick so menu AND popover-settings changes apply live
                     if l.ok { notify_check(&l, &c, &mut low, &mut crit, &mut high); }
+                    // register/unregister the global open-popover hotkey to match the setting (live)
+                    if c.shortcut != sc_on {
+                        use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+                        let gs = handle.global_shortcut();
+                        let hk = Shortcut::new(Some(Modifiers::ALT | Modifiers::SUPER), Code::KeyB);
+                        if c.shortcut {
+                            let _ = gs.on_shortcut(hk, |app, _s, ev| {
+                                if ev.state() == ShortcutState::Pressed { open_popover(app, false); }
+                            });
+                        } else {
+                            let _ = gs.unregister(hk);
+                        }
+                        sc_on = c.shortcut;
+                    }
                     // read SMC once per tick: feeds both the live-smc.json bridge and the menu-bar W.
                     let mut sys_w = None;
                     if let Some(ref s) = smc {
