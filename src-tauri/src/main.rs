@@ -6,6 +6,7 @@
 
 mod live;
 mod smc;
+mod power;
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -196,6 +197,7 @@ fn main() {
                 let mut reader = live::Reader::new();
                 let smc = smc::Smc::open();   // live temp/system-power (real-time; ioreg is 60s-quantized)
                 if smc.is_some() { let _ = std::fs::create_dir_all(data_dir()); }   // so the bridge write can't silently fail
+                power::start_notifier();      // wake instantly on AC plug/unplug (else just the 2s poll)
                 let mut last_key = String::new();
                 let (mut low, mut crit, mut high) = (false, false, false);
                 let mut sc_on = false;   // whether the global ⌥⌘B is currently registered
@@ -243,7 +245,12 @@ fn main() {
                             }
                         }
                     }
-                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    // ~2s cadence for the continuously-changing values (W/temp), but break early
+                    // when IOKit signals a power-source change so plug/unplug reflects near-instantly.
+                    for _ in 0..8 {
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                        if power::take_dirty() { break; }
+                    }
                 }
             });
             Ok(())
