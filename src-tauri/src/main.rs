@@ -287,7 +287,7 @@ fn main() {
                         if let Ok(a) = std::fs::read_to_string(&af) {
                             let _ = std::fs::remove_file(&af);
                             match a.trim() {
-                                "report" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || show_main(&h)); }
+                                "report" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { show_main(&h); if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } }); }
                                 "quit" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || h.exit(0)); }
                                 "record" => { let on = !plist_path().exists(); std::thread::spawn(move || run_record(if on { "on" } else { "off" })); }
                                 "hide" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } }); }
@@ -399,10 +399,19 @@ fn toggle_popover(app: &AppHandle, anchor: Option<(f64, f64, f64, f64)>) {
         if hidden_just_now() { return; }   // this same click may have just hidden it via focus-loss
     }
     if let Some(w) = ensure_popover(app) {
+        fit_popover(&w);
         place_popover(&w, anchor.or_else(|| icon_anchor(app)));
         let _ = w.eval("window.closeSettings&&closeSettings()");
         let _ = w.show();
         let _ = w.set_focus();
+    }
+}
+
+// Size the popover to the height its web content last reported, so a fresh show is already
+// fitted (no scrollbar, no square margin around the rounded/transparent body).
+fn fit_popover(w: &tauri::WebviewWindow) {
+    if let Ok(Ok(h)) = std::fs::read_to_string(data_dir().join("popover-h")).map(|s| s.trim().parse::<f64>()) {
+        if (120.0..=2000.0).contains(&h) { let _ = w.set_size(tauri::LogicalSize::new(320.0, h)); }
     }
 }
 
@@ -411,6 +420,7 @@ fn toggle_popover(app: &AppHandle, anchor: Option<(f64, f64, f64, f64)>) {
 // briefly in case the page is still loading.
 fn open_popover(app: &AppHandle, settings: bool) {
     if let Some(w) = ensure_popover(app) {
+        fit_popover(&w);
         place_popover(&w, icon_anchor(app));
         let _ = w.show();
         let _ = w.set_focus();

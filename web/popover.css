@@ -4,16 +4,16 @@
    feels alive and tied to the actual battery: teal healthy, amber low, red critical. */
 :root {
   --bg: #0d1016; --fg: #eef1f8; --dim: #8b94a7; --faint: #616b80;
-  --line: #232a3a; --accent: #8fe84a; --card: #161c28; --onfg: #0b1705;   /* fresh 연두 */
-  --acclite: #cbf784;               /* bright end of the accent gradient */
+  --line: #232a3a; --accent: #a8ff33; --card: #161c28; --onfg: #0b1705;   /* very bright 연두 */
+  --acclite: #d9ff96;               /* bright end of the accent gradient */
   --state: var(--accent);           /* overridden each render by popover.js */
   --live: var(--accent);            /* live markers = the same fresh green */
   --rec: #ff5a4d;                   /* red = "battery recording" (launchd sampler) */
 }
 html.light {
   --bg: #eef1f7; --fg: #131926; --dim: #59637a; --faint: #8b95a9;
-  --line: #e1e6ef; --accent: #4d9410; --card: #ffffff; --onfg: #ffffff;
-  --acclite: #9fd648;
+  --line: #e1e6ef; --accent: #57ad0d; --card: #ffffff; --onfg: #ffffff;
+  --acclite: #a9e84c;
   --rec: #e5342a;
 }
 * { box-sizing: border-box; }
@@ -95,8 +95,8 @@ html { scrollbar-width: none; }
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 55%, var(--acclite)), var(--accent));
 }
 
-/* ── top processes ────────────────────────────────────── */
-.proc { display: grid; grid-template-columns: 1fr 62px auto; gap: 9px; align-items: center; padding: 2px 0; }
+/* ── top processes (fixed value column so every bar starts/ends at the same x) ── */
+.proc { display: grid; grid-template-columns: 1fr 66px 40px; gap: 9px; align-items: center; padding: 2px 0; }
 .pn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .pbarwrap { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; }
 .pbar {
@@ -160,11 +160,11 @@ body[data-pv="cards"] > #pop > .card .cv { font-size: 18px; }
   box-shadow: 0 1px 5px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 #foot #reportBtn, #foot #moreBtn {
-  border: none; background: transparent; padding: 3px 4px; cursor: pointer;
-  color: var(--dim); line-height: 1; border-radius: 7px; transition: color .15s, background .15s;
+  border: none; background: transparent; padding: 3px 5px; cursor: pointer;
+  color: var(--dim); line-height: 1; border-radius: 7px; transition: color .15s, background .15s; white-space: nowrap;
 }
-#foot #reportBtn { font-size: 14px; }
-#foot #moreBtn { font-size: 19px; font-weight: 700; }
+#foot #reportBtn { font-size: 10.5px; font-weight: 600; }
+#foot #moreBtn { font-size: 19px; font-weight: 700; padding: 3px 4px; }
 #foot #reportBtn:hover, #foot #moreBtn:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
 body.settings-open #foot #moreBtn { color: var(--accent); }   /* settings lives under ⋮ now */
 

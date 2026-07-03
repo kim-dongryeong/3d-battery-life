@@ -45,8 +45,7 @@ const stateIcon = s => s.charging ? '⚡' : s.ac ? '🔌' : '🔋';
 const ago = ms => { const t = (Date.now() - ms) / 1000; return t < 3 ? '방금' : `${Math.round(t)}초 전`; };
 const barColor = pct => pct <= 20 ? '#e5484d' : pct <= 40 ? '#e8850c' : 'var(--accent)';
 // the whole popover tints to this: teal when healthy/charging, amber low, red critical
-const stateColor = (s, pct) => s.charging ? 'var(--accent)' : barColor(pct);
-const LIVE = `<span class="livet"><i class="ld"></i><span class="livew">LIVE</span></span>`;  // own literal, safe HTML
+const stateColor = (s, pct) => s.charging ? 'var(--accent)' : barColor(pct);   // live values are marked with a pulsing dot (.ld) — no "LIVE" word, so every rail is consistent
 
 async function pull() {
   try {
@@ -93,7 +92,7 @@ function batterySVG(pct, s) {
 //   배터리 = signed battery power/voltage/current (+ charging · 0 idle · − discharging)
 function rowsPower(s) {
   const r = [];
-  if (s.systemW != null) r.push(['시스템', `${s.systemW.toFixed(1)} W&nbsp; ${LIVE}`]);
+  if (s.systemW != null) r.push(['시스템', `${s.systemW.toFixed(1)} W <i class="ld"></i>`]);
   if (s.ac) {
     const w = s.adapterW, v = detail.adapterVoltage;
     const a = (w != null && v) ? Math.round(w / v * 1000) : null;   // live adapter current ≈ W/V
@@ -175,10 +174,10 @@ function procsHTML() {
     `<b>${(+p.power || 0).toFixed(1)}</b></div>`).join('');
 }
 
-// footer status: green live dot + (when the launchd sampler is on) a red recording dot
+// footer status: green live dot + (when the launchd sampler is on) a red "기록 중" dot
 function setLive() {
-  const rec = live && live.recording ? `<i class="pdot rec"></i>기록 · ` : '';
-  $('live').innerHTML = `${rec}<i class="pdot live"></i>라이브 · ${ago(lastLiveAt)}`;
+  const rec = live && live.recording ? `<i class="pdot rec"></i>기록 중 · ` : '';
+  $('live').innerHTML = `${rec}<i class="pdot live"></i>라이브`;
 }
 function render() { paint(); fitWindow(); }   // fitWindow reads getBoundingClientRect (forces layout) → works even while the window is hidden (rAF is paused then)
 function paint() {
@@ -303,7 +302,7 @@ function renderMenu() {
 async function postAction(act) {
   try { await fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ do: act }) }); } catch { /* ignore */ }
 }
-function openReport() { moreOpen = false; renderMenu(); postAction('report'); hideWindow(); }   // report window forward → close popover
+function openReport() { moreOpen = false; renderMenu(); postAction('report'); }   // Rust shows the report window AND hides the popover (one action → no file race with hide)
 $('omenu').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   moreOpen = false; renderMenu();
@@ -338,4 +337,3 @@ pull(); pullProcs(); pullDetail(); pullConfig();
 setInterval(() => { if (!document.hidden) pull(); }, 2000);
 setInterval(() => { if (!document.hidden) pullProcs(); }, 5000);
 setInterval(() => { if (!document.hidden) pullDetail(); }, 12000);
-setInterval(() => { if (live && !document.hidden && !settingsOpen) setLive(); }, 1000);
