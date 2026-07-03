@@ -154,7 +154,11 @@ body[data-pv="cards"] > #pop > .card .cv { font-size: 18px; }
   background: var(--accent); color: var(--onfg); font-weight: 700;
   box-shadow: 0 1px 5px color-mix(in srgb, var(--accent) 45%, transparent);
 }
-#foot #gearBtn { border: none; background: transparent; font-size: 15px; padding: 2px 5px; cursor: pointer; color: var(--dim); line-height: 1; }
+#foot #gearBtn {
+  border: none; background: transparent; font-size: 19px; padding: 3px 6px; cursor: pointer;
+  color: var(--dim); line-height: 1; border-radius: 7px; transition: color .15s, background .15s;
+}
+#foot #gearBtn:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
 body.settings-open #foot #gearBtn { color: var(--accent); }
 body.settings-open #foot .vsel { opacity: .4; }
 

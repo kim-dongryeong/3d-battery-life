@@ -289,9 +289,13 @@ window.openSettings = () => { settingsOpen = true; pullConfig(); render(); };
 window.closeSettings = () => { if (settingsOpen) { settingsOpen = false; render(); } };
 // ESC closes the settings panel (→ dashboard); on the dashboard, blur so the window auto-hides
 document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape') return;
-  if (settingsOpen) { settingsOpen = false; render(); }   // ESC closes settings → dashboard
-  else { hideWindow(); }                                   // ESC on dashboard closes the popover
+  if (e.key === 'Escape') {
+    if (settingsOpen) { settingsOpen = false; render(); }   // ESC closes settings → dashboard
+    else { hideWindow(); }                                   // ESC on dashboard closes the popover
+  } else if (e.key === ',' && e.metaKey) {                   // ⌘, — macOS Preferences shortcut → open settings
+    e.preventDefault();
+    if (!settingsOpen) { settingsOpen = true; pullConfig(); render(); }
+  }
 });
 
 render();
