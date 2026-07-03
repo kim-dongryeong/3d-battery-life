@@ -15,7 +15,7 @@ let timeFmt = ls('battTimeFmt', 'long');              // short(1:20) | long(1시
 let procN = +ls('battProcN', '6');                    // top-processes count · 0 = hide
 let sparkMode = qs('sm') || ls('battSparkMode', 'pct');   // mini-chart metric: pct | w | 3d
 let sparkH = +(qs('sh') ?? ls('battSparkH', '6'));        // mini-chart window hours: 6 | 24 | 0(all)
-let three = null, r3 = null, spark3dURL = '';         // lazy Three.js + reused renderer + last 3D snapshot
+let three = null, t3d = null, t3dLoading = false;     // lazy Three.js + persistent live-3D scene (survives DOM rebuilds)
 let cfg = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true };
 let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
 
@@ -54,9 +54,9 @@ function fitWindow() {
 }
 // when the popover is shown, re-pull fresh data and re-measure at the true (visible) layout height
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) return;
+  if (document.hidden) { stop3D(); return; }   // pause the 3D animation loop while hidden (saves CPU)
   lastWinH = 0;
-  pull(); pullProcs(); pullDetail();
+  pull(); pullProcs(); pullDetail(); pullSpark();
   requestAnimationFrame(fitWindow);
 });
 const hideWindow = () => { fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ do: 'hide' }) }).catch(() => {}); };
@@ -89,7 +89,9 @@ async function pullDetail() {
 }
 async function pullSpark() {
   try { const r = await fetch(`/api/spark?h=${sparkH}`, { cache: 'no-store' }); if (r.ok) spark = await r.json(); } catch { /* keep */ }
-  if (sparkMode === '3d') build3D(); else if (!settingsOpen) render();   // build3D re-renders when the snapshot is ready
+  if (settingsOpen) return;
+  if (sparkMode === '3d' && t3d && t3d.active) build3DGeom();   // live 3D up: update geometry in place, don't rebuild the canvas
+  else { renderSpark(); fitWindow(); }
 }
 
 function batterySVG(pct, s) {
@@ -155,60 +157,15 @@ function detailHTML(s) {
   if (detail.serial) rows.push(['배터리 시리얼', esc(detail.serial)]);
   return rows.length ? `<div class="sec">상세</div>${kvHTML(rows)}` : '';
 }
-// Render a small static 3D chart of the recent % offscreen (Three.js, lazy-loaded) → a data URL.
-// The popover rebuilds its DOM every ~2s, so a live WebGL canvas can't live in it; instead we snapshot
-// on data/window change and show the image. One reused renderer (no per-call WebGL context leak).
-async function build3D() {
-  const pts = (spark || []).filter(p => p.pct != null);
-  if (pts.length < 3) { spark3dURL = ''; if (sparkMode === '3d' && !settingsOpen) render(); return; }
-  try {
-    if (!three) three = await import('/vendor/three.module.js');
-    const T = three, W = 296, H = 168;
-    if (!r3) {
-      const renderer = new T.WebGLRenderer({ canvas: document.createElement('canvas'), antialias: true, alpha: true, preserveDrawingBuffer: true });
-      renderer.setPixelRatio(2); renderer.setSize(W, H, false);
-      const scene = new T.Scene();
-      const camera = new T.PerspectiveCamera(38, W / H, 0.1, 100);
-      camera.position.set(2.7, 2.1, 3.5); camera.lookAt(0, 0.55, 0);
-      scene.add(new T.AmbientLight(0xffffff, 1.0));
-      const dl = new T.DirectionalLight(0xffffff, 0.65); dl.position.set(2, 5, 3); scene.add(dl);
-      r3 = { renderer, scene, camera, group: null };
-    }
-    const { renderer, scene, camera } = r3;
-    if (r3.group) { scene.remove(r3.group); r3.group.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); }); }
-    const g = new T.Group();
-    const ps = pts.map(p => p.pct), n = ps.length;
-    const pmin = Math.min(...ps), pmax = Math.max(...ps), pr = Math.max(1, pmax - pmin);
-    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#8fe84a';
-    const col = new T.Color(accent), spanX = 3.4, yh = 1.4;
-    const xAt = i => (i / (n - 1) - 0.5) * spanX, yAt = v => (v - pmin) / pr * yh + 0.02;
-    const shape = new T.Shape(); shape.moveTo(xAt(0), 0);
-    ps.forEach((v, i) => shape.lineTo(xAt(i), yAt(v)));
-    shape.lineTo(xAt(n - 1), 0); shape.closePath();
-    const geo = new T.ExtrudeGeometry(shape, { depth: 0.55, bevelEnabled: false }); geo.translate(0, 0, -0.28);
-    g.add(new T.Mesh(geo, new T.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.5 })));
-    for (const z of [0.27, -0.27]) g.add(new T.Line(new T.BufferGeometry().setFromPoints(ps.map((v, i) => new T.Vector3(xAt(i), yAt(v), z))), new T.LineBasicMaterial({ color: col })));
-    g.add(new T.GridHelper(spanX + 0.4, 10, 0x5a6472, 0x2b333f));
-    scene.add(g); r3.group = g;
-    renderer.render(scene, camera);
-    spark3dURL = renderer.domElement.toDataURL('image/png');
-  } catch { spark3dURL = ''; }
-  if (sparkMode === '3d' && !settingsOpen) render();
-}
+// ── mini trend preview ─────────────────────────────────────────────────────────────
+// Lives in its OWN persistent container (#sparkbox), NOT in #pop — because #pop is
+// innerHTML-rebuilt every ~2s and that would destroy a live WebGL canvas. So the 3D
+// renderer/canvas is created once and survives; renderSpark() only swaps the controls
+// and the 2D/3D chart slot. 3D is a live scene: gentle auto-rotate + drag-to-rotate.
+const spModeBtns = () => [['pct', '잔량'], ['w', '전력'], ['3d', '3D']].map(([m, l]) => `<button data-sm="${m}" class="${sparkMode === m ? 'on' : ''}">${l}</button>`).join('');
+const spWinBtns = () => [[6, '6시간'], [24, '24시간'], [0, '전체']].map(([w, l]) => `<button data-sh="${w}" class="${sparkH === w ? 'on' : ''}">${l}</button>`).join('');
 
-// mini "3D 리포트" preview — selectable charts: 잔량(%) area · 전력(W) line · 3D snapshot, over 6h/24h/전체.
-// Clicking the chart / "전체 3D 그래프 →" opens the full (interactive) 3D report.
-function sparkHTML() {
-  const modeBtns = [['pct', '잔량'], ['w', '전력'], ['3d', '3D']].map(([m, l]) => `<button data-sm="${m}" class="${sparkMode === m ? 'on' : ''}">${l}</button>`).join('');
-  const winBtns = [[6, '6시간'], [24, '24시간'], [0, '전체']].map(([w, l]) => `<button data-sh="${w}" class="${sparkH === w ? 'on' : ''}">${l}</button>`).join('');
-  const head = `<div class="sec">최근 추세</div><div class="spbtns"><span class="spseg">${modeBtns}</span><span class="spseg">${winBtns}</span></div>`;
-  const pts = spark.filter(p => (sparkMode === 'w' ? p.w : p.pct) != null);
-  if (!Array.isArray(spark) || pts.length < 3) return head + `<div class="note spnote">기록 데이터가 쌓이면 표시돼요.</div>`;
-  if (sparkMode === '3d') {
-    const hrs = Math.max(1, Math.round((pts[pts.length - 1].t - pts[0].t) / 3600));
-    const body = spark3dURL ? `<img class="spark3d" data-report src="${spark3dURL}" alt="3D 추세">` : `<div class="note spnote">3D 렌더링 중…</div>`;
-    return head + body + `<div class="spmore"><span class="spsub">${hrs}시간 · 잔량 3D</span><span data-report>전체 3D 그래프 →</span></div>`;
-  }
+function spark2D(pts) {
   const W = 296, H = 44, pad = 3;
   const vs = pts.map(p => sparkMode === 'w' ? p.w : p.pct), ts = pts.map(p => p.t);
   const t0 = ts[0], t1 = ts[ts.length - 1];
@@ -218,20 +175,91 @@ function sparkHTML() {
   const Y = v => pad + (1 - (v - vmin) / vr) * (H - 2 * pad);
   const line = pts.map(p => `${X(p.t).toFixed(1)},${Y(sparkMode === 'w' ? p.w : p.pct).toFixed(1)}`).join(' ');
   const area = `${X(t0).toFixed(1)},${H - pad} ${line} ${X(t1).toFixed(1)},${H - pad}`;
-  const hrs = Math.max(1, Math.round((t1 - t0) / 3600));
-  const sub = sparkMode === 'w'
-    ? `${vmin.toFixed(1)}–${vmax.toFixed(1)} W`
-    : `${(vs[vs.length - 1] - vs[0]) >= 0 ? '+' : ''}${(vs[vs.length - 1] - vs[0])}%p`;
-  return head +
-    `<svg class="spark" data-report viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none">
+  return `<svg class="spark" data-report viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none">
       <defs><linearGradient id="sf" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stop-color="var(--accent)" stop-opacity=".32"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
       ${sparkMode === 'pct' ? `<polygon points="${area}" fill="url(#sf)"/>` : ''}
       <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
-    </svg>` +
-    `<div class="spmore"><span class="spsub">${hrs}시간 · ${sub}</span><span data-report>전체 3D 그래프 →</span></div>`;
+    </svg>`;
 }
-function tailHTML(s) { return sparkHTML() + detailHTML(s) + procsHTML(); }
+
+function renderSpark() {
+  const box = document.getElementById('sparkbox');
+  if (!box) return;
+  if (!live || live.error || settingsOpen) { stop3D(); box.innerHTML = ''; return; }
+  if (!box.querySelector('#spkchart')) box.innerHTML = `<div id="spkctrl"></div><div id="spkchart"></div><div id="spkfoot"></div>`;
+  box.querySelector('#spkctrl').innerHTML = `<div class="sec">최근 추세</div><div class="spbtns"><span class="spseg">${spModeBtns()}</span><span class="spseg">${spWinBtns()}</span></div>`;
+  const chart = box.querySelector('#spkchart'), foot = box.querySelector('#spkfoot');
+  const pts = (spark || []).filter(p => (sparkMode === 'w' ? p.w : p.pct) != null);
+  if (pts.length < 3) { stop3D(); chart.innerHTML = `<div class="note spnote">기록 데이터가 쌓이면 표시돼요.</div>`; foot.innerHTML = ''; return; }
+  const hrs = Math.max(1, Math.round((pts[pts.length - 1].t - pts[0].t) / 3600));
+  let sub;
+  if (sparkMode === 'w') { const vs = pts.map(p => p.w); sub = `${Math.min(...vs).toFixed(1)}–${Math.max(...vs).toFixed(1)} W`; }
+  else if (sparkMode === '3d') sub = '잔량 3D · 드래그로 회전';
+  else { const vs = pts.map(p => p.pct), d = vs[vs.length - 1] - vs[0]; sub = `${d >= 0 ? '+' : ''}${d}%p`; }
+  foot.innerHTML = `<div class="spmore"><span class="spsub">${hrs}시간 · ${sub}</span><span data-report>전체 3D 그래프 →</span></div>`;
+  if (sparkMode === '3d') start3D(chart);
+  else { stop3D(); chart.innerHTML = spark2D(pts); }
+}
+
+// live rotating 3D — one reused renderer/canvas that persists across popover DOM rebuilds
+async function ensure3D() {
+  if (t3d || t3dLoading) return;
+  t3dLoading = true;
+  try {
+    if (!three) three = await import('/vendor/three.module.js');
+    const T = three, W = 300, H = 172;
+    const renderer = new T.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); renderer.setSize(W, H, false);
+    const el = renderer.domElement; el.className = 'spark3d';
+    const scene = new T.Scene();
+    const camera = new T.PerspectiveCamera(40, W / H, 0.1, 100);
+    camera.position.set(2.9, 2.1, 3.6); camera.lookAt(0, 0.45, 0);
+    scene.add(new T.AmbientLight(0xffffff, 1.0));
+    const dl = new T.DirectionalLight(0xffffff, 0.65); dl.position.set(2, 5, 3); scene.add(dl);
+    const group = new T.Group(); scene.add(group);
+    t3d = { renderer, scene, camera, group, active: false, raf: 0, dragging: false, lastX: 0, spin: 0 };
+    el.addEventListener('pointerdown', e => { t3d.dragging = true; t3d.lastX = e.clientX; el.setPointerCapture(e.pointerId); });
+    el.addEventListener('pointermove', e => { if (t3d.dragging) { t3d.spin += (e.clientX - t3d.lastX) * 0.01; t3d.lastX = e.clientX; } });
+    const stopDrag = () => { t3d.dragging = false; };
+    el.addEventListener('pointerup', stopDrag); el.addEventListener('pointercancel', stopDrag);
+  } catch { t3d = null; }
+  t3dLoading = false;
+  renderSpark(); fitWindow();   // canvas just appeared → grow the window to fit it
+}
+function build3DGeom() {
+  if (!t3d) return;
+  const T = three, g = t3d.group;
+  while (g.children.length) { const c = g.children.pop(); c.geometry?.dispose?.(); c.material?.dispose?.(); }
+  const pts = (spark || []).filter(p => p.pct != null), ps = pts.map(p => p.pct), n = ps.length;
+  if (n < 3) return;
+  const pmin = Math.min(...ps), pmax = Math.max(...ps), pr = Math.max(1, pmax - pmin);
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#8fe84a';
+  const col = new T.Color(accent), spanX = 3.4, yh = 1.4;
+  const xAt = i => (i / (n - 1) - 0.5) * spanX, yAt = v => (v - pmin) / pr * yh + 0.02;
+  const shape = new T.Shape(); shape.moveTo(xAt(0), 0);
+  ps.forEach((v, i) => shape.lineTo(xAt(i), yAt(v)));
+  shape.lineTo(xAt(n - 1), 0); shape.closePath();
+  const geo = new T.ExtrudeGeometry(shape, { depth: 0.55, bevelEnabled: false }); geo.translate(0, 0, -0.28);
+  g.add(new T.Mesh(geo, new T.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.5 })));
+  for (const z of [0.27, -0.27]) g.add(new T.Line(new T.BufferGeometry().setFromPoints(ps.map((v, i) => new T.Vector3(xAt(i), yAt(v), z))), new T.LineBasicMaterial({ color: col })));
+  g.add(new T.GridHelper(spanX + 0.4, 10, 0x5a6472, 0x2b333f));
+}
+function start3D(chart) {
+  if (!t3d) { chart.innerHTML = `<div class="note spnote">3D 로딩 중…</div>`; ensure3D(); return; }
+  if (!chart.contains(t3d.renderer.domElement)) { chart.innerHTML = ''; chart.appendChild(t3d.renderer.domElement); }
+  build3DGeom();
+  if (!t3d.active) { t3d.active = true; loop3D(); }
+}
+function stop3D() { if (t3d && t3d.active) { t3d.active = false; if (t3d.raf) cancelAnimationFrame(t3d.raf); t3d.raf = 0; } }
+function loop3D() {
+  if (!t3d || !t3d.active) return;
+  if (!t3d.dragging) t3d.spin += 0.004;            // gentle turntable auto-rotate
+  t3d.group.rotation.y = t3d.spin;
+  t3d.renderer.render(t3d.scene, t3d.camera);
+  t3d.raf = requestAnimationFrame(loop3D);
+}
+function tailHTML(s) { return detailHTML(s) + procsHTML(); }
 
 // ── settings panel (gear) ──────────────────────────────────────────────
 // data-k = a localStorage display pref (popover-only) · data-c = a server cfg key (menu-bar/alerts)
@@ -279,15 +307,15 @@ function setLive() {
   const rec = live && live.recording ? `<i class="pdot rec"></i>기록 중 · ` : '';
   $('live').innerHTML = `${rec}<i class="pdot live"></i>라이브`;
 }
-function render() { paint(); fitWindow(); }   // fitWindow reads getBoundingClientRect (forces layout) → works even while the window is hidden (rAF is paused then)
+function render() { paint(); renderSpark(); fitWindow(); }   // fitWindow reads getBoundingClientRect (forces layout) → works even while the window is hidden (rAF is paused then)
 function paint() {
   const el = $('pop');
   document.documentElement.className = resolveTheme();
   document.body.dataset.pv = pv;
   document.body.classList.toggle('settings-open', settingsOpen);
   document.querySelectorAll('.vsel button').forEach(b => b.classList.toggle('on', b.dataset.pv === pv));
-  if (settingsOpen) { el.innerHTML = settingsHTML(); $('live').textContent = ''; return; }
-  if (!live || live.error) { el.innerHTML = `<div class="err">배터리 정보를 읽을 수 없습니다${live && live.error ? ` (${esc(live.error)})` : ''}.</div>`; $('live').textContent = ''; return; }
+  if (settingsOpen) { el.innerHTML = settingsHTML(); $('poptail').innerHTML = ''; $('live').textContent = ''; return; }
+  if (!live || live.error) { el.innerHTML = `<div class="err">배터리 정보를 읽을 수 없습니다${live && live.error ? ` (${esc(live.error)})` : ''}.</div>`; $('poptail').innerHTML = ''; $('live').textContent = ''; return; }
   const s = live;
   const known = s.pct != null;
   const pct = known ? Math.round(s.pct) : 0;   // unknown → gauge shows 0 fill but label reads "?"
@@ -320,7 +348,7 @@ function paint() {
       <div class="leg">${powerLegend(s)}</div>
       <div class="sec">배터리</div>
       <div class="hbar"><i style="width:${s.healthPct != null ? Math.min(100, s.healthPct) : 0}%"></i></div>
-      ${kvHTML(rowsHealth(s))}${tailHTML(s)}`;
+      ${kvHTML(rowsHealth(s))}`;
   } else if (pv === 'cards') {
     el.innerHTML =
       `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pctLbl}</div>
@@ -336,8 +364,7 @@ function paint() {
       ${kvHTML(rowsPower(s))}
       <div class="leg">${powerLegend(s)}</div>
       <div class="sec">배터리</div>
-      ${kvHTML([['만충 / 설계', (s.rawMax != null && s.design != null ? s.rawMax + ' / ' + s.design : '–') + ' mAh']])}
-      ${tailHTML(s)}`;
+      ${kvHTML([['만충 / 설계', (s.rawMax != null && s.design != null ? s.rawMax + ' / ' + s.design : '–') + ' mAh']])}`;
   } else { // list (Stats-like dense)
     el.innerHTML =
       `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pctLbl}</div>
@@ -348,9 +375,9 @@ function paint() {
       ${kvHTML(rowsPower(s))}
       <div class="leg">${powerLegend(s)}</div>
       <div class="sec">배터리</div>
-      ${kvHTML(rowsHealth(s))}
-      ${tailHTML(s)}`;
+      ${kvHTML(rowsHealth(s))}`;
   }
+  $('poptail').innerHTML = tailHTML(s);   // 상세 + 프로세스 render below the trend preview (#sparkbox sits between)
   setLive();
 }
 
@@ -383,11 +410,14 @@ $('pop').addEventListener('change', e => {
   else if (t.matches('select[data-c]')) applyCfg(t.dataset.c, coerce(t.dataset.c, t.value));
 });
 $('pop').addEventListener('click', e => {
-  const sm = e.target.closest('[data-sm]'); if (sm) { sparkMode = sm.dataset.sm; save('battSparkMode', sparkMode); if (sparkMode === '3d') build3D(); render(); return; }
-  const sh = e.target.closest('[data-sh]'); if (sh) { sparkH = +sh.dataset.sh; save('battSparkH', String(sparkH)); pullSpark(); return; }
-  if (e.target.closest('[data-report]')) { openReport(); return; }   // spark preview → full 3D report
-  const b = e.target.closest('.tgl'); if (!b) return;   // boolean toggle
+  const b = e.target.closest('.tgl'); if (!b) return;   // boolean toggle (settings)
   applyCfg(b.dataset.c, !cfg[b.dataset.c]);
+});
+// trend preview lives in its own persistent container (#sparkbox) so the live 3D canvas survives
+$('sparkbox').addEventListener('click', e => {
+  const sm = e.target.closest('[data-sm]'); if (sm) { sparkMode = sm.dataset.sm; save('battSparkMode', sparkMode); renderSpark(); fitWindow(); return; }
+  const sh = e.target.closest('[data-sh]'); if (sh) { sparkH = +sh.dataset.sh; save('battSparkH', String(sparkH)); pullSpark(); return; }
+  if (e.target.closest('[data-report]')) openReport();   // spark preview → full 3D report
 });
 // ── overflow (⋮) menu: settings + the app actions from the right-click tray menu ──
 // 설정 opens the in-popover panel; record/quit POST to /api/action → a file the tray app consumes.
