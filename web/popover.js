@@ -196,7 +196,7 @@ function renderSpark() {
   let sub;
   if (sparkMode === 'w') { const vs = pts.map(p => p.w); sub = `${Math.min(...vs).toFixed(1)}–${Math.max(...vs).toFixed(1)} W`; }
   else if (sparkMode === '3d') sub = '잔량 3D · 드래그로 회전';
-  else { const vs = pts.map(p => p.pct), d = vs[vs.length - 1] - vs[0]; sub = `${d >= 0 ? '+' : ''}${d}%p`; }
+  else { const vs = pts.map(p => p.pct); sub = `${Math.min(...vs)}–${Math.max(...vs)}%`; }   // 창 내 잔량 범위(최저–최고). 순증감(%p)은 긴 창에선 무의미
   foot.innerHTML = `<div class="spmore"><span class="spsub">${hrs}시간 · ${sub}</span><span data-report>3D 분석 리포트 →</span></div>`;
   if (sparkMode === '3d') start3D(chart);
   else { stop3D(); chart.innerHTML = spark2D(pts); }

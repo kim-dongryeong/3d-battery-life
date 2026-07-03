@@ -105,7 +105,9 @@ function axisLine(a, b, color) {
 // ---- axes / grid --------------------------------------------------------
 // X = 하루 중 시각, Y = 배터리 %/W (높이), Z = 경과 일수 (깊이)
 const zFromDay = (d, maxDay) => (d / Math.max(1, maxDay)) * Z - Z / 2;
-const yFromVal = (v, valMax) => clamp(v / (valMax > 0 ? valMax : 1), 0, 1) * Y;
+const yFromVal = (v, valMax) => state.y === 'rate'
+  ? clamp((v + valMax) / (2 * (valMax > 0 ? valMax : 1)), 0, 1) * Y   // signed: −valMax→floor, 0→중앙, +valMax→top
+  : clamp(v / (valMax > 0 ? valMax : 1), 0, 1) * Y;
 
 function buildAxes(valMax, valLabel, maxDay, firstT) {
   disposeGroup(sceneRoot);
@@ -125,13 +127,15 @@ function buildAxes(valMax, valLabel, maxDay, firstT) {
   }
   const xt = makeLabel('하루 중 시각 →', { color: TH().titleC }); xt.position.set(0, -2.6, z0 - 2); sceneRoot.add(xt);
 
-  // Y ticks: battery % or watts (height)
+  // Y ticks: battery %/watts run 0..max · 잔량 변화율은 부호축(−max..+max, 0이 중앙)
+  const signed = state.y === 'rate';
   for (let i = 0; i <= 4; i++) {
-    const v = valMax * i / 4, y = Y * i / 4;
+    const v = signed ? valMax * (i / 2 - 1) : valMax * i / 4, y = Y * i / 4;
     sceneRoot.add(axisLine([x0 - 0.3, y, z0], [x0, y, z0], TH().axisTick));
-    const s = makeLabel(state.y === 'pct' ? `${Math.round(v)}%` : state.y === 'rate' ? `${v.toFixed(2)}` : `${v.toFixed(0)}W`, { size: 28, color: TH().tickC });
+    const s = makeLabel(state.y === 'pct' ? `${Math.round(v)}%` : signed ? v.toFixed(2) : `${v.toFixed(0)}W`, { size: 28, color: TH().tickC });
     s.position.set(x0 - 2.2, y, z0); sceneRoot.add(s);
   }
+  if (signed) sceneRoot.add(axisLine([x0, Y / 2, z0], [X / 2, Y / 2, z0], 0x4dd0c0));   // dy/dt = 0 : 충전↑ / 방전↓ 경계
   const yt = makeLabel(valLabel, { color: TH().titleC }); yt.position.set(x0 - 4.5, Y + 1, z0); sceneRoot.add(yt);
 
   // Z ticks: dates (older -> recent)
@@ -151,17 +155,19 @@ const stateColor = p => (p.charging ? C_CHARGE : (p.ac ? C_FULL : C_DISCHARGE));
 const C_LPM = new THREE.Color(0xffcc0a);                        // 저전력 모드 ON (macOS systemYellow, matches live.rs)
 const C_LPM_OFF = new THREE.Color(0x51617a);                    // 저전력 off / 기록 이전(unknown)
 
-// per-point discharge rate %/min via a ~10-min backward window — raw Δpct/Δt is a useless integer
-// staircase (pct is integer, 60s samples), so we window it; charging/idle (pct rising) → 0.
-function windowedRates(points, winSec = 600) {
+// per-point SIGNED rate d(잔량)/dt in %/min over a short backward window.
+// Uses the fine mAh-based level (p.cap, ~0.02% res) so the curve is smooth — pct is macOS's INTEGER %
+// (60s samples), whose Δ is a useless 0/±1 staircase. Sign: + 충전(잔량↑) · − 방전(잔량↓).
+function windowedRates(points, winSec = 300) {
+  const lvl = p => (p.cap != null ? p.cap : p.pct);   // fine mAh % if present, else fall back to integer %
   const out = new Array(points.length).fill(null);
   for (let i = 0; i < points.length; i++) {
-    if (points[i].pct == null) continue;
+    if (lvl(points[i]) == null) continue;
     let j = i;
     while (j > 0 && points[i].t - points[j - 1].t <= winSec) j--;   // earliest point within the window (or run start)
     const dtMin = (points[i].t - points[j].t) / 60;
-    if (dtMin <= 0 || points[j].pct == null) continue;
-    out[i] = Math.max(0, -(points[i].pct - points[j].pct) / dtMin); // discharge magnitude (%/min); charge → 0
+    if (dtMin <= 0 || lvl(points[j]) == null) continue;
+    out[i] = (lvl(points[i]) - lvl(points[j])) / dtMin;            // signed %/min (+ charge / − discharge)
   }
   return out;
 }
@@ -197,8 +203,8 @@ function buildLines(report) {
   const runRates = state.y === 'rate' ? runs.map(r => windowedRates(r.points)) : null;
   let yMax;
   if (state.y === 'rate') {
-    const all = runRates.flat().filter(v => v != null && Number.isFinite(v));
-    yMax = all.length ? Math.max(0.2, percentile(all, 0.98)) : 1;   // p98 clamp so a spike doesn't flatten everything
+    const mags = runRates.flat().filter(v => v != null && Number.isFinite(v)).map(Math.abs);
+    yMax = mags.length ? Math.max(0.1, percentile(mags, 0.98)) : 1;   // symmetric ±yMax; p98 so one spike doesn't flatten it
   } else {
     const yMaxRaw = state.y === 'pct' ? 100 : percentile(runs.flatMap(r => r.points.map(p => p.watts ?? 0)), 0.98);
     yMax = state.y === 'pct' ? 100 : Math.max(5, yMaxRaw);  // value (depth) max
@@ -242,7 +248,7 @@ function buildLines(report) {
 
 // ---- rebuild everything for current state -------------------------------
 const COLOR_META = { state: { label: '상태', unit: '' }, lowPower: { label: '저전력 모드', unit: '' }, tempC: { label: '온도', unit: '°C' }, loadPct: { label: 'CPU 부하(load avg)', unit: '%' }, watts: { label: '전력', unit: 'W' } };
-const Y_LABEL = { pct: '배터리 %', watts: '전력 W', rate: '방전속도 %/min' };
+const Y_LABEL = { pct: '배터리 %', watts: '전력 W', rate: '잔량 변화 %/min (+충전/−방전)' };
 const GRAD_NUM = 'linear-gradient(90deg, hsl(215,45%,45%), hsl(260,56%,49%), hsl(305,68%,52%), hsl(350,80%,56%), hsl(35,95%,60%))';
 const GRAD_STATE = 'linear-gradient(90deg, hsl(7,85%,55%) 0 33%, hsl(198,45%,50%) 50%, hsl(119,80%,50%) 66% 100%)';
 
