@@ -54,23 +54,30 @@ function batterySVG(pct, s) {
   </svg>`;
 }
 
-function rowsCore(s) {
-  const amp = s.amperage != null ? `${s.amperage} mA` : '–';
+// 전원 section — the full picture across all three rails, each with W · V · A.
+//   시스템 = SMC PSTR (total live draw) · 어댑터 = SMC PDTR + adapter voltage (A computed W/V)
+//   배터리 = signed battery power/voltage/current (+ charging · 0 idle · − discharging)
+function rowsPower(s) {
   const r = [];
-  // Real-time system draw (SMC PSTR) — the number that actually moves; show it first.
-  if (s.systemW != null) r.push(['시스템 전력', `${s.systemW.toFixed(1)} W&nbsp; ${LIVE}`]);
-  // On AC: adapter delivery (adapter rail). This is what Stats shows as Power/Voltage on AC —
-  // e.g. ~20 V from the charger — so our numbers line up with Stats when plugged in.
-  if (s.ac && (s.adapterW != null || detail.adapterVoltage != null)) {
-    const aw = s.adapterW != null ? `${s.adapterW.toFixed(1)} W` : '–';
-    const av = detail.adapterVoltage != null ? ` · ${detail.adapterVoltage.toFixed(1)} V` : '';
-    r.push(['어댑터 공급', `${aw}${av}${s.adapterW != null ? `&nbsp; ${LIVE}` : ''}`]);
+  if (s.systemW != null) r.push(['시스템', `${s.systemW.toFixed(1)} W&nbsp; ${LIVE}`]);
+  if (s.ac) {
+    const w = s.adapterW, v = detail.adapterVoltage;
+    const a = (w != null && v) ? Math.round(w / v * 1000) : null;   // live adapter current ≈ W/V
+    const p = [w != null ? `${w.toFixed(1)} W` : null, v != null ? `${v.toFixed(1)} V` : null, a != null ? `${a} mA` : null].filter(Boolean);
+    if (p.length) r.push(['어댑터', p.join(' · ') + (w != null ? ' <i class="ld"></i>' : '')]);
   }
-  // Battery power flow (battery rail, signed): + 충전 · 0 유휴(완충/대기) · − 방전.
   const bp = s.powerW;
-  r.push(['배터리 전력', bp == null ? '–' : Math.abs(bp) < 0.05 ? '0 W · 유휴' : `${bp > 0 ? '+' : '−'}${Math.abs(bp).toFixed(2)} W`]);
-  r.push(['전류', amp], ['전압', `${s.voltage != null ? s.voltage.toFixed(2) : '–'} V`], ['온도', fmtTemp(s.tempC) + (s.smc ? ' <i class="ld"></i>' : '')]);
+  const bw = bp == null ? null : Math.abs(bp) < 0.05 ? '0 W' : `${bp > 0 ? '+' : '−'}${Math.abs(bp).toFixed(2)} W`;
+  const b = [bw, s.voltage != null ? `${s.voltage.toFixed(2)} V` : null, s.amperage != null ? `${s.amperage} mA` : null].filter(Boolean);
+  r.push(['배터리', b.length ? b.join(' · ') : '–']);
   return r;
+}
+// 상태 rows shared by list/gauge: remaining time + live temperature.
+function statusRows(s) {
+  return [
+    [s.charging ? '완충까지' : '남은 시간', fmtTime(s.timeRemain)],
+    ['온도', fmtTemp(s.tempC) + (s.smc ? ' <i class="ld"></i>' : '')],
+  ];
 }
 function rowsHealth(s) {
   return [
@@ -135,7 +142,11 @@ function render() {
         <div class="gstate">${stateOf(s)}</div> ${lpm ? `<div style="margin-top:6px">${lpm}</div>` : ''}
         <div class="gtime">${timeLbl} <b>${fmtTime(s.timeRemain)}</b></div>
       </div>
-      ${kvHTML(rowsCore(s))}
+      <div class="sec">상태</div>
+      <div class="kv"><span>온도</span><b>${fmtTemp(s.tempC)}${s.smc ? ' <i class="ld"></i>' : ''}</b></div>
+      <div class="sec">전원</div>
+      ${kvHTML(rowsPower(s))}
+      <div class="sec">배터리</div>
       <div class="hbar"><i style="width:${s.healthPct != null ? Math.min(100, s.healthPct) : 0}%"></i></div>
       ${kvHTML(rowsHealth(s))}${tailHTML(s)}`;
   } else if (pv === 'cards') {
@@ -149,7 +160,9 @@ function render() {
         <div class="card"><div class="ct">건강</div><div class="cv">${s.healthPct != null ? Math.min(100, Math.round(s.healthPct)) : '–'}<small>%</small></div></div>
         <div class="card"><div class="ct">사이클</div><div class="cv">${s.cycles ?? '–'}</div></div>
       </div>
-      <div class="grid2">${kvHTML([['전류', s.amperage != null ? s.amperage + ' mA' : '–'], ['전압', (s.voltage != null ? s.voltage.toFixed(2) : '–') + ' V']])}</div>
+      <div class="sec">전원</div>
+      ${kvHTML(rowsPower(s))}
+      <div class="sec">배터리</div>
       ${kvHTML([['만충 / 설계', (s.rawMax != null && s.design != null ? s.rawMax + ' / ' + s.design : '–') + ' mAh']])}
       ${tailHTML(s)}`;
   } else { // list (Stats-like dense)
@@ -157,8 +170,9 @@ function render() {
       `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pctLbl}</div>
         <div class="st">${stateOf(s)} ${lpm}</div></div></div>
       <div class="sec">상태</div>
-      <div class="kv"><span>${timeLbl}</span><b>${fmtTime(s.timeRemain)}</b></div>
-      ${kvHTML(rowsCore(s))}
+      ${kvHTML(statusRows(s))}
+      <div class="sec">전원</div>
+      ${kvHTML(rowsPower(s))}
       <div class="sec">배터리</div>
       ${kvHTML(rowsHealth(s))}
       ${tailHTML(s)}`;
