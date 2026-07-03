@@ -13,8 +13,9 @@ let theme = qs('theme') || ls('battTheme', 'dark');   // dark | light | system
 let unit = ls('battUnit', 'system');                  // system | c | f
 let timeFmt = ls('battTimeFmt', 'long');              // short(1:20) | long(1시간 20분)
 let procN = +ls('battProcN', '6');                    // top-processes count · 0 = hide
-let sparkMode = ls('battSparkMode', 'pct');           // mini-chart metric: pct | w
-let sparkH = +ls('battSparkH', '6');                  // mini-chart window hours: 6 | 24 | 0(all)
+let sparkMode = qs('sm') || ls('battSparkMode', 'pct');   // mini-chart metric: pct | w | 3d
+let sparkH = +(qs('sh') ?? ls('battSparkH', '6'));        // mini-chart window hours: 6 | 24 | 0(all)
+let three = null, r3 = null, spark3dURL = '';         // lazy Three.js + reused renderer + last 3D snapshot
 let cfg = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true };
 let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
 
@@ -88,7 +89,7 @@ async function pullDetail() {
 }
 async function pullSpark() {
   try { const r = await fetch(`/api/spark?h=${sparkH}`, { cache: 'no-store' }); if (r.ok) spark = await r.json(); } catch { /* keep */ }
-  if (!settingsOpen) render();
+  if (sparkMode === '3d') build3D(); else if (!settingsOpen) render();   // build3D re-renders when the snapshot is ready
 }
 
 function batterySVG(pct, s) {
@@ -154,14 +155,60 @@ function detailHTML(s) {
   if (detail.serial) rows.push(['배터리 시리얼', esc(detail.serial)]);
   return rows.length ? `<div class="sec">상세</div>${kvHTML(rows)}` : '';
 }
-// mini "3D 리포트" preview — selectable 2D charts: 잔량(%) area · 전력(W) line, over 6h/24h/전체.
-// Clicking the chart / "전체 3D 그래프 →" opens the full 3D report.
+// Render a small static 3D chart of the recent % offscreen (Three.js, lazy-loaded) → a data URL.
+// The popover rebuilds its DOM every ~2s, so a live WebGL canvas can't live in it; instead we snapshot
+// on data/window change and show the image. One reused renderer (no per-call WebGL context leak).
+async function build3D() {
+  const pts = (spark || []).filter(p => p.pct != null);
+  if (pts.length < 3) { spark3dURL = ''; if (sparkMode === '3d' && !settingsOpen) render(); return; }
+  try {
+    if (!three) three = await import('/vendor/three.module.js');
+    const T = three, W = 296, H = 168;
+    if (!r3) {
+      const renderer = new T.WebGLRenderer({ canvas: document.createElement('canvas'), antialias: true, alpha: true, preserveDrawingBuffer: true });
+      renderer.setPixelRatio(2); renderer.setSize(W, H, false);
+      const scene = new T.Scene();
+      const camera = new T.PerspectiveCamera(38, W / H, 0.1, 100);
+      camera.position.set(2.7, 2.1, 3.5); camera.lookAt(0, 0.55, 0);
+      scene.add(new T.AmbientLight(0xffffff, 1.0));
+      const dl = new T.DirectionalLight(0xffffff, 0.65); dl.position.set(2, 5, 3); scene.add(dl);
+      r3 = { renderer, scene, camera, group: null };
+    }
+    const { renderer, scene, camera } = r3;
+    if (r3.group) { scene.remove(r3.group); r3.group.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); }); }
+    const g = new T.Group();
+    const ps = pts.map(p => p.pct), n = ps.length;
+    const pmin = Math.min(...ps), pmax = Math.max(...ps), pr = Math.max(1, pmax - pmin);
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#8fe84a';
+    const col = new T.Color(accent), spanX = 3.4, yh = 1.4;
+    const xAt = i => (i / (n - 1) - 0.5) * spanX, yAt = v => (v - pmin) / pr * yh + 0.02;
+    const shape = new T.Shape(); shape.moveTo(xAt(0), 0);
+    ps.forEach((v, i) => shape.lineTo(xAt(i), yAt(v)));
+    shape.lineTo(xAt(n - 1), 0); shape.closePath();
+    const geo = new T.ExtrudeGeometry(shape, { depth: 0.55, bevelEnabled: false }); geo.translate(0, 0, -0.28);
+    g.add(new T.Mesh(geo, new T.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.5 })));
+    for (const z of [0.27, -0.27]) g.add(new T.Line(new T.BufferGeometry().setFromPoints(ps.map((v, i) => new T.Vector3(xAt(i), yAt(v), z))), new T.LineBasicMaterial({ color: col })));
+    g.add(new T.GridHelper(spanX + 0.4, 10, 0x5a6472, 0x2b333f));
+    scene.add(g); r3.group = g;
+    renderer.render(scene, camera);
+    spark3dURL = renderer.domElement.toDataURL('image/png');
+  } catch { spark3dURL = ''; }
+  if (sparkMode === '3d' && !settingsOpen) render();
+}
+
+// mini "3D 리포트" preview — selectable charts: 잔량(%) area · 전력(W) line · 3D snapshot, over 6h/24h/전체.
+// Clicking the chart / "전체 3D 그래프 →" opens the full (interactive) 3D report.
 function sparkHTML() {
-  const modeBtns = [['pct', '잔량'], ['w', '전력']].map(([m, l]) => `<button data-sm="${m}" class="${sparkMode === m ? 'on' : ''}">${l}</button>`).join('');
+  const modeBtns = [['pct', '잔량'], ['w', '전력'], ['3d', '3D']].map(([m, l]) => `<button data-sm="${m}" class="${sparkMode === m ? 'on' : ''}">${l}</button>`).join('');
   const winBtns = [[6, '6시간'], [24, '24시간'], [0, '전체']].map(([w, l]) => `<button data-sh="${w}" class="${sparkH === w ? 'on' : ''}">${l}</button>`).join('');
   const head = `<div class="sec">최근 추세</div><div class="spbtns"><span class="spseg">${modeBtns}</span><span class="spseg">${winBtns}</span></div>`;
   const pts = spark.filter(p => (sparkMode === 'w' ? p.w : p.pct) != null);
   if (!Array.isArray(spark) || pts.length < 3) return head + `<div class="note spnote">기록 데이터가 쌓이면 표시돼요.</div>`;
+  if (sparkMode === '3d') {
+    const hrs = Math.max(1, Math.round((pts[pts.length - 1].t - pts[0].t) / 3600));
+    const body = spark3dURL ? `<img class="spark3d" data-report src="${spark3dURL}" alt="3D 추세">` : `<div class="note spnote">3D 렌더링 중…</div>`;
+    return head + body + `<div class="spmore"><span class="spsub">${hrs}시간 · 잔량 3D</span><span data-report>전체 3D 그래프 →</span></div>`;
+  }
   const W = 296, H = 44, pad = 3;
   const vs = pts.map(p => sparkMode === 'w' ? p.w : p.pct), ts = pts.map(p => p.t);
   const t0 = ts[0], t1 = ts[ts.length - 1];
@@ -336,7 +383,7 @@ $('pop').addEventListener('change', e => {
   else if (t.matches('select[data-c]')) applyCfg(t.dataset.c, coerce(t.dataset.c, t.value));
 });
 $('pop').addEventListener('click', e => {
-  const sm = e.target.closest('[data-sm]'); if (sm) { sparkMode = sm.dataset.sm; save('battSparkMode', sparkMode); render(); return; }
+  const sm = e.target.closest('[data-sm]'); if (sm) { sparkMode = sm.dataset.sm; save('battSparkMode', sparkMode); if (sparkMode === '3d') build3D(); render(); return; }
   const sh = e.target.closest('[data-sh]'); if (sh) { sparkH = +sh.dataset.sh; save('battSparkH', String(sparkH)); pullSpark(); return; }
   if (e.target.closest('[data-report]')) { openReport(); return; }   // spark preview → full 3D report
   const b = e.target.closest('.tgl'); if (!b) return;   // boolean toggle
