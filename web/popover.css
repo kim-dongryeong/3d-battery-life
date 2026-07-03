@@ -23,13 +23,14 @@ body {
   font: 12.5px/1.38 -apple-system, "SF Pro Text", system-ui, sans-serif;
   color: var(--fg); width: 320px; padding: 11px 12px 6px; user-select: none;
   -webkit-font-smoothing: antialiased; scrollbar-width: none;
-  border-radius: 22px;              /* matches the native window layer clip (round_popover_window) */
+  border-radius: 34px;              /* matches the native window layer clip (round_popover_window) — iPhone-round */
   border: 1px solid color-mix(in srgb, var(--fg) 9%, transparent);
   /* base + a soft state-tinted glow bleeding down from the top edge */
   background:
     radial-gradient(125% 70% at 50% -12%, color-mix(in srgb, var(--state) 16%, transparent), transparent 62%),
     var(--bg);
 }
+html.light body { background: var(--bg); }   /* light mode = flat pure white (no glow tint) */
 html { scrollbar-width: none; }
 ::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }   /* never a scrollbar; the window fits its content */
 #pop { min-height: 90px; }

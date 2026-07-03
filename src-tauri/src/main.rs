@@ -373,7 +373,7 @@ fn round_popover_window(w: &tauri::WebviewWindow) {
         let content_view: *mut Object = msg_send![ns_window, contentView];
         let _: () = msg_send![content_view, setWantsLayer: YES];
         let layer: *mut Object = msg_send![content_view, layer];
-        let _: () = msg_send![layer, setCornerRadius: 22.0_f64];
+        let _: () = msg_send![layer, setCornerRadius: 34.0_f64];
         let _: () = msg_send![layer, setMasksToBounds: YES];
     }
 }
