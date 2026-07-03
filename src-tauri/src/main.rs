@@ -132,21 +132,22 @@ fn main() {
             let cfg = Arc::new(Mutex::new(live::load_cfg()));
             let c0 = cfg.lock().unwrap().clone();
             let status = MenuItem::with_id(app, "status", status_text(recording), false, None::<&str>)?;
-            let open = MenuItem::with_id(app, "open", "뷰어 열기", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "3D 리포트 열기", true, None::<&str>)?;
             let info_item = MenuItem::with_id(app, "info", format!("메뉴바 표시: {}", live::INFO_LABELS[c0.info as usize % 6]), true, None::<&str>)?;
             let color_item = MenuItem::with_id(app, "color", format!("아이콘 색상: {}", if c0.colorize { "켜짐" } else { "꺼짐" }), true, None::<&str>)?;
             let low_item = MenuItem::with_id(app, "low_alert", live::alert_label("배터리 부족 알림", c0.low_pct), true, None::<&str>)?;
             let high_item = MenuItem::with_id(app, "high_alert", live::alert_label("충전 완료 알림", c0.high_pct), true, None::<&str>)?;
-            let rec_on = MenuItem::with_id(app, "rec_on", "배터리 기록 시작", true, None::<&str>)?;
-            let rec_off = MenuItem::with_id(app, "rec_off", "배터리 기록 중지", true, None::<&str>)?;
+            // one recording item that toggles (was separate 시작/중지 — no need for both)
+            let rec_item = MenuItem::with_id(app, "rec_toggle", if recording { "배터리 기록 중지" } else { "배터리 기록 시작" }, true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "앱 종료 (기록은 계속됨)", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&status, &open, &info_item, &color_item, &low_item, &high_item, &rec_on, &rec_off, &quit])?;
+            let menu = Menu::with_items(app, &[&status, &open, &info_item, &color_item, &low_item, &high_item, &rec_item, &quit])?;
             let status_for_menu = status.clone();
             let cfg_menu = cfg.clone();
             let info_for_menu = info_item.clone();
             let color_for_menu = color_item.clone();
             let low_for_menu = low_item.clone();
             let high_for_menu = high_item.clone();
+            let rec_for_menu = rec_item.clone();
             TrayIconBuilder::with_id("tray")
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("3D Battery Life")
@@ -193,13 +194,11 @@ fn main() {
                             let _ = high_for_menu.set_text(live::alert_label("충전 완료 알림", g.high_pct));
                         }
                     }
-                    "rec_on" => {
-                        let _ = status_for_menu.set_text(status_text(true));
-                        std::thread::spawn(|| run_record("on"));
-                    }
-                    "rec_off" => {
-                        let _ = status_for_menu.set_text(status_text(false));
-                        std::thread::spawn(|| run_record("off"));
+                    "rec_toggle" => {
+                        let turning_on = !plist_path().exists();   // toggle relative to the live launchd state
+                        let _ = status_for_menu.set_text(status_text(turning_on));
+                        let _ = rec_for_menu.set_text(if turning_on { "배터리 기록 중지" } else { "배터리 기록 시작" });
+                        std::thread::spawn(move || run_record(if turning_on { "on" } else { "off" }));
                     }
                     "quit" => app.exit(0),
                     _ => {}
@@ -212,6 +211,7 @@ fn main() {
             let marker = data_dir().join(".consent-asked");
             if !plist_path().exists() && !marker.exists() {
                 let status_for_consent = status.clone();
+                let rec_for_consent = rec_item.clone();
                 std::thread::spawn(move || {
                     let yes = ask_consent();
                     let _ = std::fs::create_dir_all(data_dir());
@@ -219,6 +219,7 @@ fn main() {
                     if yes {
                         run_record("on");
                         let _ = status_for_consent.set_text(status_text(true));
+                        let _ = rec_for_consent.set_text("배터리 기록 중지");   // keep the toggle in sync
                     }
                 });
             }
