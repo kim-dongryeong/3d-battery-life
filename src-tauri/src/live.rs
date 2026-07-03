@@ -174,12 +174,23 @@ pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u
     rect(&mut buf, bx0, by0, bx0 + 1, by1, outline);
     rect(&mut buf, bx1 - 1, by0, bx1, by1, outline);
     rect(&mut buf, bx1, 7, bx1 + 3, 13, outline);
-    // % digits, 2× scale, centered inside the body
+    // left indicator so iconpct still shows charge state: bolt (charging) / plug (full).
+    let ind_w = if l.charging || l.full { 8i32 } else { 0 };
+    if l.charging {
+        for &(x, y) in &[(6, 4), (5, 5), (5, 6), (4, 7), (7, 8), (6, 9), (6, 10), (5, 11)] { px(&mut buf, x, y, ink); }
+        rect(&mut buf, 4, 7, 8, 8, ink);                       // crossbar → lightning
+    } else if l.full {
+        for &(x, y) in &[(4, 4), (4, 5), (6, 4), (6, 5)] { px(&mut buf, x, y, ink); }   // prongs
+        rect(&mut buf, 3, 6, 8, 10, ink);                                              // plug body
+        for y in 10..13 { px(&mut buf, 5, y, ink); }                                    // cord
+    }
+    // % digits, 2× scale, centered in the space to the right of the indicator
     let digits: Vec<u8> = (l.pct.clamp(0.0, 100.0).round() as u32).to_string().bytes().map(|b| b - b'0').collect();
     let (scale, gap) = (2i32, 1i32);
     let dw = 3 * scale + gap;
     let total = digits.len() as i32 * dw - gap;
-    let mut x = (bx0 + bx1) / 2 - total / 2;
+    let (dl, dr) = (bx0 + 1 + ind_w, bx1 - 1);
+    let mut x = (dl + dr) / 2 - total / 2;
     let y0 = (h as i32 - 5 * scale) / 2;
     for &d in &digits {
         let g = DIGITS[d as usize % 10];
