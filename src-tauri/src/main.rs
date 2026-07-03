@@ -19,6 +19,9 @@ use std::time::Instant;
 // re-show if that was just now — otherwise clicking the icon to close would reopen it.
 static LAST_POPOVER_HIDE: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
 fn note_popover_hidden() { if let Ok(mut g) = LAST_POPOVER_HIDE.lock() { *g = Some(Instant::now()); } }
+// Last tray-icon screen rect (physical px) so menu-triggered opens (설정 열기 / ⌥⌘B) can anchor
+// under the icon too, not just left-clicks.
+static LAST_ICON_RECT: LazyLock<Mutex<Option<(f64, f64, f64, f64)>>> = LazyLock::new(|| Mutex::new(None));
 fn hidden_just_now() -> bool {
     LAST_POPOVER_HIDE.lock().ok().and_then(|g| *g).map_or(false, |t| t.elapsed().as_millis() < 300)
 }
@@ -154,6 +157,7 @@ fn main() {
                         let p = rect.position.to_physical::<f64>(1.0);
                         let sz = rect.size.to_physical::<f64>(1.0);
                         let anchor = (p.x, p.y, sz.width, sz.height);
+                        if let Ok(mut g) = LAST_ICON_RECT.lock() { *g = Some(anchor); }
                         toggle_popover(tray.app_handle(), Some(anchor));
                     }
                 })
@@ -253,6 +257,15 @@ fn main() {
                     }
                 }
             });
+
+            // pre-warm the popover once the sidecar server is up (loads the page hidden), so the
+            // first icon click just show()s an already-rendered window — near-instant, like Stats.
+            let prewarm = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1800));
+                let p2 = prewarm.clone();
+                let _ = prewarm.run_on_main_thread(move || { let _ = ensure_popover(&p2); });
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -310,29 +323,36 @@ fn ensure_popover(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     .ok()
 }
 
-// Left-click a tray icon: toggle the popover, anchored under the clicked icon.
+fn last_icon_rect() -> Option<(f64, f64, f64, f64)> { LAST_ICON_RECT.lock().ok().and_then(|g| *g) }
+
+// Left-click a tray icon: toggle the popover, anchored under the clicked icon. A fresh show always
+// lands on the dashboard (closeSettings), so re-opening never gets stuck in the settings panel.
 fn toggle_popover(app: &AppHandle, anchor: Option<(f64, f64, f64, f64)>) {
     if let Some(w) = app.get_webview_window("popover") {
         if w.is_visible().unwrap_or(false) { let _ = w.hide(); return; }
         if hidden_just_now() { return; }   // this same click may have just hidden it via focus-loss
     }
     if let Some(w) = ensure_popover(app) {
-        place_popover(&w, anchor);
+        place_popover(&w, anchor.or_else(last_icon_rect));
+        let _ = w.eval("window.closeSettings&&closeSettings()");
         let _ = w.show();
         let _ = w.set_focus();
     }
 }
 
-// Force-show the popover (menu "설정 열기" / global shortcut). `settings` opens it straight in the
-// settings panel via the page's window.openSettings() hook (or a ?settings=1 reload if not loaded yet).
+// Force-show the popover (menu "설정 열기" / global shortcut), anchored under the icon. `settings`
+// opens it straight in the settings panel via the page's window.openSettings() hook — retried
+// briefly in case the page is still loading.
 fn open_popover(app: &AppHandle, settings: bool) {
     if let Some(w) = ensure_popover(app) {
-        place_popover(&w, None);
+        place_popover(&w, last_icon_rect());
         let _ = w.show();
         let _ = w.set_focus();
-        if settings {
-            let _ = w.eval("if(window.openSettings){openSettings()}else{location.search='?settings=1'}");
-        }
+        let _ = w.eval(if settings {
+            "(function r(n){if(window.openSettings){openSettings()}else if(n<40){setTimeout(function(){r(n+1)},50)}})(0)"
+        } else {
+            "window.closeSettings&&closeSettings()"
+        });
     }
 }
 

@@ -263,8 +263,15 @@ $('pop').addEventListener('click', e => {
   const b = e.target.closest('.tgl'); if (!b) return;   // boolean toggle
   applyCfg(b.dataset.c, !cfg[b.dataset.c]);
 });
-// called from Rust (tray "설정 열기…" / global shortcut) to jump straight into settings
+// called from Rust: tray "설정 열기…" jumps into settings; a plain icon-click resets to the dashboard
 window.openSettings = () => { settingsOpen = true; pullConfig(); render(); };
+window.closeSettings = () => { if (settingsOpen) { settingsOpen = false; render(); } };
+// ESC closes the settings panel (→ dashboard); on the dashboard, blur so the window auto-hides
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (settingsOpen) { settingsOpen = false; render(); }
+  else { window.blur(); }
+});
 
 render();
 pull(); pullProcs(); pullDetail(); pullConfig();
