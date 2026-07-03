@@ -45,7 +45,7 @@ let sparkCache = { at: 0, data: [] };    // /api/spark cache (recent %, for the 
 
 // tray.json = the settings the menu-bar (Rust) and the popover settings panel both share.
 // The Rust ticker re-reads it every 2s, so a popover change applies to the menu bar live.
-const TRAY_DEFAULTS = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: false };
+const TRAY_DEFAULTS = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true };
 const trayPath = () => path.join(userDataDir(), 'tray.json');
 function readTray() {
   try { return { ...TRAY_DEFAULTS, ...JSON.parse(fs.readFileSync(trayPath(), 'utf8')) }; } catch { return { ...TRAY_DEFAULTS }; }
@@ -232,14 +232,16 @@ export function startServer({ root, port } = {}) {
     // user's real samples, downsampled. Cached ~20s (samples only change each minute anyway).
     if (url.pathname === '/api/spark') {
       try {
-        if (Date.now() - sparkCache.at > 20000) {
+        const raw = url.searchParams.get('h');   // window hours (0 = all); keep an explicit 0
+        const h = raw === null ? 6 : Math.max(0, Math.min(720, +raw || 0));
+        if (Date.now() - sparkCache.at > 20000 || sparkCache.h !== h) {
           const file = path.join(userDataDir(), 'samples.jsonl');
           const all = fs.existsSync(file) ? readSamples(file) : [];
           const last = all.length ? all[all.length - 1].t : 0;
-          let recent = all.filter(s => s.pct != null && s.t >= last - 6 * 3600);
-          const N = 64;
+          let recent = all.filter(s => s.pct != null && (h === 0 || s.t >= last - h * 3600));
+          const N = 72;
           if (recent.length > N) { const step = recent.length / N; recent = Array.from({ length: N }, (_, i) => recent[Math.floor(i * step)]); }
-          sparkCache = { at: Date.now(), data: recent.map(s => ({ t: s.t, pct: s.pct, chg: !!s.charging })) };
+          sparkCache = { at: Date.now(), h, data: recent.map(s => ({ t: s.t, pct: s.pct, w: s.watts, chg: !!s.charging })) };
         }
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(JSON.stringify(sparkCache.data));

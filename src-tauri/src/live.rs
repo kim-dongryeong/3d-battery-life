@@ -94,7 +94,7 @@ pub struct Cfg {
     #[serde(default = "d_high")] pub high_pct: u8,  // charge-complete alert at ≥ this % (0 = off)
     #[serde(default = "d_widget")] pub widget: String, // menu-bar widget: "icon" | "bar" | "text"
     #[serde(default)] pub glyph_xl: bool,           // draw the glyph at a larger body size
-    #[serde(default)] pub shortcut: bool,           // register a global ⌥⌘B to open the popover
+    #[serde(default = "d_true")] pub shortcut: bool, // register a global ⌥⌃B to open the popover (default on)
 }
 fn d_info() -> u8 { 4 }
 fn d_true() -> bool { true }
@@ -102,7 +102,7 @@ fn d_low() -> u8 { 20 }
 fn d_high() -> u8 { 80 }
 fn d_widget() -> String { "icon".into() }
 impl Default for Cfg {
-    fn default() -> Self { Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: "icon".into(), glyph_xl: false, shortcut: false } }
+    fn default() -> Self { Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: "icon".into(), glyph_xl: false, shortcut: true } }
 }
 pub fn cfg_path() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())

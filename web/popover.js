@@ -13,7 +13,9 @@ let theme = qs('theme') || ls('battTheme', 'dark');   // dark | light | system
 let unit = ls('battUnit', 'system');                  // system | c | f
 let timeFmt = ls('battTimeFmt', 'long');              // short(1:20) | long(1시간 20분)
 let procN = +ls('battProcN', '6');                    // top-processes count · 0 = hide
-let cfg = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: false };
+let sparkMode = ls('battSparkMode', 'pct');           // mini-chart metric: pct | w
+let sparkH = +ls('battSparkH', '6');                  // mini-chart window hours: 6 | 24 | 0(all)
+let cfg = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true };
 let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
 
 const resolveTheme = () => theme === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme;
@@ -85,7 +87,7 @@ async function pullDetail() {
   if (!settingsOpen) render();
 }
 async function pullSpark() {
-  try { const r = await fetch('/api/spark', { cache: 'no-store' }); if (r.ok) spark = await r.json(); } catch { /* keep */ }
+  try { const r = await fetch(`/api/spark?h=${sparkH}`, { cache: 'no-store' }); if (r.ok) spark = await r.json(); } catch { /* keep */ }
   if (!settingsOpen) render();
 }
 
@@ -152,27 +154,35 @@ function detailHTML(s) {
   if (detail.serial) rows.push(['배터리 시리얼', esc(detail.serial)]);
   return rows.length ? `<div class="sec">상세</div>${kvHTML(rows)}` : '';
 }
-// mini "3D 리포트" preview: a recent battery-% sparkline; click opens the full report
+// mini "3D 리포트" preview — selectable 2D charts: 잔량(%) area · 전력(W) line, over 6h/24h/전체.
+// Clicking the chart / "전체 3D 그래프 →" opens the full 3D report.
 function sparkHTML() {
-  if (!Array.isArray(spark) || spark.length < 3) return '';
+  const modeBtns = [['pct', '잔량'], ['w', '전력']].map(([m, l]) => `<button data-sm="${m}" class="${sparkMode === m ? 'on' : ''}">${l}</button>`).join('');
+  const winBtns = [[6, '6시간'], [24, '24시간'], [0, '전체']].map(([w, l]) => `<button data-sh="${w}" class="${sparkH === w ? 'on' : ''}">${l}</button>`).join('');
+  const head = `<div class="sec">최근 추세</div><div class="spbtns"><span class="spseg">${modeBtns}</span><span class="spseg">${winBtns}</span></div>`;
+  const pts = spark.filter(p => (sparkMode === 'w' ? p.w : p.pct) != null);
+  if (!Array.isArray(spark) || pts.length < 3) return head + `<div class="note spnote">기록 데이터가 쌓이면 표시돼요.</div>`;
   const W = 296, H = 44, pad = 3;
-  const ps = spark.map(p => p.pct), ts = spark.map(p => p.t);
+  const vs = pts.map(p => sparkMode === 'w' ? p.w : p.pct), ts = pts.map(p => p.t);
   const t0 = ts[0], t1 = ts[ts.length - 1];
-  const pmin = Math.min(...ps), pmax = Math.max(...ps);
-  const tr = Math.max(1, t1 - t0), pr = Math.max(1, pmax - pmin);
+  const vmin = Math.min(...vs), vmax = Math.max(...vs);
+  const tr = Math.max(1, t1 - t0), vr = Math.max(sparkMode === 'w' ? 0.5 : 1, vmax - vmin);
   const X = t => pad + (t - t0) / tr * (W - 2 * pad);
-  const Y = p => pad + (1 - (p - pmin) / pr) * (H - 2 * pad);
-  const line = spark.map(p => `${X(p.t).toFixed(1)},${Y(p.pct).toFixed(1)}`).join(' ');
+  const Y = v => pad + (1 - (v - vmin) / vr) * (H - 2 * pad);
+  const line = pts.map(p => `${X(p.t).toFixed(1)},${Y(sparkMode === 'w' ? p.w : p.pct).toFixed(1)}`).join(' ');
   const area = `${X(t0).toFixed(1)},${H - pad} ${line} ${X(t1).toFixed(1)},${H - pad}`;
-  const hrs = Math.max(1, Math.round((t1 - t0) / 3600)), delta = ps[ps.length - 1] - ps[0];
-  return `<div class="sec">최근 추세 <small>${hrs}시간 · ${delta >= 0 ? '+' : ''}${delta}%p</small></div>` +
+  const hrs = Math.max(1, Math.round((t1 - t0) / 3600));
+  const sub = sparkMode === 'w'
+    ? `${vmin.toFixed(1)}–${vmax.toFixed(1)} W`
+    : `${(vs[vs.length - 1] - vs[0]) >= 0 ? '+' : ''}${(vs[vs.length - 1] - vs[0])}%p`;
+  return head +
     `<svg class="spark" data-report viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none">
       <defs><linearGradient id="sf" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stop-color="var(--accent)" stop-opacity=".32"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
-      <polygon points="${area}" fill="url(#sf)"/>
+      ${sparkMode === 'pct' ? `<polygon points="${area}" fill="url(#sf)"/>` : ''}
       <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
     </svg>` +
-    `<div class="spmore" data-report>전체 3D 그래프 →</div>`;
+    `<div class="spmore"><span class="spsub">${hrs}시간 · ${sub}</span><span data-report>전체 3D 그래프 →</span></div>`;
 }
 function tailHTML(s) { return sparkHTML() + detailHTML(s) + procsHTML(); }
 
@@ -326,6 +336,8 @@ $('pop').addEventListener('change', e => {
   else if (t.matches('select[data-c]')) applyCfg(t.dataset.c, coerce(t.dataset.c, t.value));
 });
 $('pop').addEventListener('click', e => {
+  const sm = e.target.closest('[data-sm]'); if (sm) { sparkMode = sm.dataset.sm; save('battSparkMode', sparkMode); render(); return; }
+  const sh = e.target.closest('[data-sh]'); if (sh) { sparkH = +sh.dataset.sh; save('battSparkH', String(sparkH)); pullSpark(); return; }
   if (e.target.closest('[data-report]')) { openReport(); return; }   // spark preview → full 3D report
   const b = e.target.closest('.tgl'); if (!b) return;   // boolean toggle
   applyCfg(b.dataset.c, !cfg[b.dataset.c]);
