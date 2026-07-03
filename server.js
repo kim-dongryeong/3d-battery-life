@@ -57,7 +57,7 @@ function sanitizeCfg(p) {
   if (typeof p.colorize === 'boolean') o.colorize = p.colorize;
   if (Number.isInteger(p.low_pct) && p.low_pct >= 0 && p.low_pct <= 100) o.low_pct = p.low_pct;
   if (Number.isInteger(p.high_pct) && p.high_pct >= 0 && p.high_pct <= 100) o.high_pct = p.high_pct;
-  if (['icon', 'bar', 'text'].includes(p.widget)) o.widget = p.widget;
+  if (['icon', 'iconpct', 'bar', 'text'].includes(p.widget)) o.widget = p.widget;
   if (typeof p.glyph_xl === 'boolean') o.glyph_xl = p.glyph_xl;
   if (typeof p.shortcut === 'boolean') o.shortcut = p.shortcut;
   return o;

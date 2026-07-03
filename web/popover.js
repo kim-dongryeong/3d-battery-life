@@ -26,6 +26,23 @@ const fmtTime = min => {
   if (timeFmt === 'short') return h ? `${h}:${String(m).padStart(2, '0')}` : `${m}분`;
   return h ? `${h}시간 ${m}분` : `${m}분`;
 };
+// physical rail relationship (approx — SMC sensors don't perfectly sum): shown under 전원
+const powerLegend = s => s.ac ? '어댑터 = 시스템 소비 + 배터리 충전' : '시스템 소비 = 배터리 방전';
+
+// Tauri window handle (available because app.withGlobalTauri = true) — lets the popover hide itself
+// on ESC and resize to fit its content so there's never a scrollbar. Falls back gracefully if absent.
+const twin = () => { try { return window.__TAURI__?.window?.getCurrentWindow?.() || null; } catch { return null; } };
+const hideWindow = () => { const w = twin(); if (w && w.hide) w.hide(); else window.blur(); };
+let lastWinH = 0;
+function fitWindow() {
+  const w = twin(); if (!w || !w.setSize) return;
+  const LS = window.__TAURI__?.dpi?.LogicalSize || window.__TAURI__?.window?.LogicalSize;
+  if (!LS) return;
+  const h = Math.min(Math.ceil(document.body.scrollHeight), Math.round((screen.availHeight || 900) * 0.94));
+  if (Math.abs(h - lastWinH) < 3) return;   // avoid churn on tiny value changes
+  lastWinH = h;
+  try { w.setSize(new LS(320, h)); } catch { /* ignore */ }
+}
 const stateOf = s => s.charging ? '충전 중' : s.full ? '완충' : s.ac ? 'AC 연결(유휴)' : '배터리 사용';
 const stateIcon = s => s.charging ? '⚡' : s.ac ? '🔌' : '🔋';
 const ago = ms => { const t = (Date.now() - ms) / 1000; return t < 3 ? '방금' : `${Math.round(t)}초 전`; };
@@ -139,10 +156,10 @@ function settingsHTML() {
 
     <div class="sec">메뉴바</div>
     <div class="srow"><span>표시 텍스트</span>${selEl('data-c', 'info', cfg.info, INFO_OPTS)}</div>
-    <div class="srow"><span>위젯 모양</span>${selEl('data-c', 'widget', cfg.widget, [['icon', '아이콘'], ['bar', '막대'], ['text', '텍스트']])}</div>
+    <div class="srow"><span>위젯 모양</span>${selEl('data-c', 'widget', cfg.widget, [['icon', '아이콘'], ['iconpct', '아이콘+숫자'], ['bar', '막대'], ['text', '텍스트']])}</div>
     <div class="srow"><span>아이콘 색상</span>${tglEl('colorize', cfg.colorize)}</div>
     <div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>
-    <div class="srow"><span>열기 단축키 <kbd>⌥⌘B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>
+    <div class="srow"><span>열기 단축키 <kbd>⌥⌃B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>
 
     <div class="sec">알림</div>
     <div class="srow"><span>배터리 부족</span>${selEl('data-c', 'low_pct', cfg.low_pct, pctOpts([0, 10, 15, 20, 25, 30]))}</div>
@@ -161,7 +178,8 @@ function procsHTML() {
     `<b>${(+p.power || 0).toFixed(1)}</b></div>`).join('');
 }
 
-function render() {
+function render() { paint(); requestAnimationFrame(fitWindow); }   // fit the window to content after each paint
+function paint() {
   const el = $('pop');
   document.documentElement.className = resolveTheme();
   document.body.dataset.pv = pv;
@@ -198,6 +216,7 @@ function render() {
       <div class="kv"><span>온도</span><b>${fmtTemp(s.tempC)}${s.smc ? ' <i class="ld"></i>' : ''}</b></div>
       <div class="sec">전원</div>
       ${kvHTML(rowsPower(s))}
+      <div class="leg">${powerLegend(s)}</div>
       <div class="sec">배터리</div>
       <div class="hbar"><i style="width:${s.healthPct != null ? Math.min(100, s.healthPct) : 0}%"></i></div>
       ${kvHTML(rowsHealth(s))}${tailHTML(s)}`;
@@ -214,6 +233,7 @@ function render() {
       </div>
       <div class="sec">전원</div>
       ${kvHTML(rowsPower(s))}
+      <div class="leg">${powerLegend(s)}</div>
       <div class="sec">배터리</div>
       ${kvHTML([['만충 / 설계', (s.rawMax != null && s.design != null ? s.rawMax + ' / ' + s.design : '–') + ' mAh']])}
       ${tailHTML(s)}`;
@@ -225,6 +245,7 @@ function render() {
       ${kvHTML(statusRows(s))}
       <div class="sec">전원</div>
       ${kvHTML(rowsPower(s))}
+      <div class="leg">${powerLegend(s)}</div>
       <div class="sec">배터리</div>
       ${kvHTML(rowsHealth(s))}
       ${tailHTML(s)}`;
@@ -269,8 +290,8 @@ window.closeSettings = () => { if (settingsOpen) { settingsOpen = false; render(
 // ESC closes the settings panel (→ dashboard); on the dashboard, blur so the window auto-hides
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  if (settingsOpen) { settingsOpen = false; render(); }
-  else { window.blur(); }
+  if (settingsOpen) { settingsOpen = false; render(); }   // ESC closes settings → dashboard
+  else { hideWindow(); }                                   // ESC on dashboard closes the popover
 });
 
 render();

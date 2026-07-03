@@ -135,13 +135,64 @@ fn fill_color(l: &Live, colorize: bool, lpm: bool) -> (u8, u8, u8, u8) {
     else { (74, 200, 120, 255) }
 }
 
-// Which menu-bar glyph to draw: "text" → None (title only), "bar" → vertical bar, else the battery.
+// Which menu-bar glyph to draw: "text" → None (title only), "bar" → vertical bar,
+// "iconpct" → battery outline with the % number inside (one compact slot), else the battery.
 pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool) -> Option<(Vec<u8>, u32, u32)> {
     match widget {
         "text" => None,
         "bar" => Some(bar_glyph(l, colorize, lpm)),
+        "iconpct" => Some(battery_pct_icon(l, colorize, lpm)),
         _ => Some(battery_icon(l, colorize, xl, lpm)),
     }
+}
+
+// 3×5 pixel font for 0-9 (each row's low 3 bits, MSB = leftmost pixel).
+const DIGITS: [[u8; 5]; 10] = [
+    [7, 5, 5, 5, 7], [2, 6, 2, 2, 7], [7, 1, 7, 4, 7], [7, 1, 7, 1, 7], [5, 5, 7, 1, 1],
+    [7, 4, 7, 1, 7], [7, 4, 7, 5, 7], [7, 1, 2, 2, 2], [7, 5, 7, 5, 7], [7, 5, 7, 1, 7],
+];
+
+// Battery outline with the % number inside, digits colored by state (macOS "show percentage in
+// icon" style). Compact: the number lives in the icon, so no separate title text is needed.
+pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
+    let (w, h) = (40u32, 20u32);
+    let mut buf = vec![0u8; (w * h * 4) as usize];
+    let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
+        if x < 0 || y < 0 || x as u32 >= w || y as u32 >= h { return; }
+        let i = ((y as u32 * w + x as u32) * 4) as usize;
+        buf[i] = c.0; buf[i + 1] = c.1; buf[i + 2] = c.2; buf[i + 3] = c.3;
+    };
+    let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
+        for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
+    };
+    let outline = (170u8, 176u8, 188u8, 255u8);
+    let ink = fill_color(l, colorize, lpm);   // number colored by level / LPM
+    // thin battery outline + cap
+    let (bx0, by0, bx1, by1) = (1i32, 2i32, 33i32, 18i32);
+    rect(&mut buf, bx0, by0, bx1, by0 + 1, outline);
+    rect(&mut buf, bx0, by1 - 1, bx1, by1, outline);
+    rect(&mut buf, bx0, by0, bx0 + 1, by1, outline);
+    rect(&mut buf, bx1 - 1, by0, bx1, by1, outline);
+    rect(&mut buf, bx1, 7, bx1 + 3, 13, outline);
+    // % digits, 2× scale, centered inside the body
+    let digits: Vec<u8> = (l.pct.clamp(0.0, 100.0).round() as u32).to_string().bytes().map(|b| b - b'0').collect();
+    let (scale, gap) = (2i32, 1i32);
+    let dw = 3 * scale + gap;
+    let total = digits.len() as i32 * dw - gap;
+    let mut x = (bx0 + bx1) / 2 - total / 2;
+    let y0 = (h as i32 - 5 * scale) / 2;
+    for &d in &digits {
+        let g = DIGITS[d as usize % 10];
+        for (row, bits) in g.iter().enumerate() {
+            for col in 0..3i32 {
+                if bits & (1 << (2 - col)) != 0 {
+                    rect(&mut buf, x + col * scale, y0 + row as i32 * scale, x + col * scale + scale, y0 + row as i32 * scale + scale, ink);
+                }
+            }
+        }
+        x += dw;
+    }
+    (buf, w, h)
 }
 
 // ---- menu-bar battery GLYPH (like Stats): a battery outline filling proportional to charge,

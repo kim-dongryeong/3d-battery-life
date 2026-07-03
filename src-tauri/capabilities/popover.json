@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "popover",
+  "description": "Let the battery popover resize itself to fit its content and hide on ESC / shortcut.",
+  "windows": ["popover"],
+  "remote": { "urls": ["http://localhost:4317", "http://localhost:4317/*"] },
+  "permissions": ["core:window:allow-hide", "core:window:allow-set-size"]
+}

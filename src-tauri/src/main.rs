@@ -225,10 +225,11 @@ fn main() {
                     if c.shortcut != sc_on {
                         use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
                         let gs = handle.global_shortcut();
-                        let hk = Shortcut::new(Some(Modifiers::ALT | Modifiers::SUPER), Code::KeyB);
+                        let hk = Shortcut::new(Some(Modifiers::ALT | Modifiers::CONTROL), Code::KeyB); // ⌥⌃B
                         if c.shortcut {
                             let _ = gs.on_shortcut(hk, |app, _s, ev| {
-                                if ev.state() == ShortcutState::Pressed { open_popover(app, false); }
+                                // toggle: pressing it again (or ESC) closes the popover
+                                if ev.state() == ShortcutState::Pressed { toggle_popover(app, None); }
                             });
                         } else {
                             let _ = gs.unregister(hk);
@@ -248,8 +249,9 @@ fn main() {
                     if let Some(tray) = handle.tray_by_id("tray") {
                         // menu-bar "W" = live system draw (SMC) when we have it, else battery-rail watts
                         let mut title = live::tray_title(&l, c.info, sys_w.unwrap_or(l.watts));
+                        if c.widget == "iconpct" { title = String::new(); }   // % is drawn inside the icon
                         // text-only widget must never be blank (no glyph to fall back on)
-                        if c.widget == "text" && title.is_empty() { title = format!("{}%", l.pct.round() as i64); }
+                        else if c.widget == "text" && title.is_empty() { title = format!("{}%", l.pct.round() as i64); }
                         let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
                         // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm)
                         let key = format!("{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm);
@@ -325,7 +327,7 @@ fn ensure_popover(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         WebviewUrl::External("http://localhost:4317/popover.html".parse().unwrap()),
     )
     .title("배터리")
-    .inner_size(320.0, 560.0)
+    .inner_size(320.0, 700.0)   // roomy fallback; popover.js fitWindow() trims it to content when it can
     .decorations(false)
     .resizable(false)
     .always_on_top(true)
