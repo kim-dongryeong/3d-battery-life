@@ -213,14 +213,18 @@ fn main() {
                     }
                     if let Some(tray) = handle.tray_by_id("tray") {
                         // menu-bar "W" = live system draw (SMC) when we have it, else battery-rail watts
-                        let title = live::tray_title(&l, c.info, sys_w.unwrap_or(l.watts));
+                        let mut title = live::tray_title(&l, c.info, sys_w.unwrap_or(l.watts));
+                        // text-only widget must never be blank (no glyph to fall back on)
+                        if c.widget == "text" && title.is_empty() { title = format!("{}%", l.pct.round() as i64); }
                         let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
-                        // redraw the glyph when the visible state changes (level / charging / colorize)
-                        let key = format!("{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize);
+                        // redraw the glyph only when something visible changes (level/charge/widget/color/xl)
+                        let key = format!("{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl);
                         if l.ok && key != last_key {
                             last_key = key;
-                            let (rgba, w, h) = live::battery_icon(&l, c.colorize);
-                            let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h)));
+                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl) {
+                                Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
+                                None => { let _ = tray.set_icon(None); }   // text-only widget
+                            }
                         }
                     }
                     std::thread::sleep(std::time::Duration::from_secs(2));

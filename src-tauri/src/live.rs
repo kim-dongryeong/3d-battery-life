@@ -122,10 +122,31 @@ fn time_str(l: &Live) -> String {
     }
 }
 
+// Level → fill color (shared by the icon + bar glyphs). red <20% always, else amber <40% / green,
+// teal while charging/full; monochrome gray when colorize is off.
+fn fill_color(l: &Live, colorize: bool) -> (u8, u8, u8, u8) {
+    let pct = l.pct.clamp(0.0, 100.0);
+    if pct <= 20.0 { (229, 72, 77, 255) }
+    else if !colorize { (170, 176, 188, 255) }
+    else if l.charging || l.full { (77, 208, 192, 255) }
+    else if pct <= 40.0 { (232, 133, 12, 255) }
+    else { (74, 200, 120, 255) }
+}
+
+// Which menu-bar glyph to draw: "text" → None (title only), "bar" → vertical bar, else the battery.
+pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool) -> Option<(Vec<u8>, u32, u32)> {
+    match widget {
+        "text" => None,
+        "bar" => Some(bar_glyph(l, colorize)),
+        _ => Some(battery_icon(l, colorize, xl)),
+    }
+}
+
 // ---- menu-bar battery GLYPH (like Stats): a battery outline filling proportional to charge,
-// colored by level (red <20% / orange <40% / green), teal + bolt while charging. Returns raw
-// RGBA + dims; main.rs wraps it in tauri::image::Image and calls tray.set_icon().
-pub fn battery_icon(l: &Live, colorize: bool) -> (Vec<u8>, u32, u32) {
+// teal + bolt while charging, plug while plugged-and-holding. `xl` shrinks the vertical margin so
+// the body fills more of the canvas — since macOS scales the tray image to the menu-bar height,
+// that renders the glyph visibly larger. Returns raw RGBA + dims.
+pub fn battery_icon(l: &Live, colorize: bool, xl: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (40u32, 20u32);
     let mut buf = vec![0u8; (w * h * 4) as usize];
     let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
@@ -137,21 +158,17 @@ pub fn battery_icon(l: &Live, colorize: bool) -> (Vec<u8>, u32, u32) {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
     let outline = (170u8, 176u8, 188u8, 255u8); // mid-gray: readable on light & dark menu bars
-    let mono = (170u8, 176u8, 188u8, 255u8);
     let pct = l.pct.clamp(0.0, 100.0);
-    let fill = if pct <= 20.0 { (229, 72, 77, 255) }   // red <20% regardless (Stats behavior)
-        else if !colorize { mono }
-        else if l.charging || l.full { (77, 208, 192, 255) }
-        else if pct <= 40.0 { (232, 133, 12, 255) }
-        else { (74, 200, 120, 255) };
+    let fill = fill_color(l, colorize);
 
-    // body outline (2px) from (1,3) to (33,17); nub cap at right
-    let (bx0, by0, bx1, by1) = (1i32, 3i32, 33i32, 17i32);
+    // body outline (2px). XL uses a smaller vertical margin so the body is taller.
+    let m = if xl { 1i32 } else { 3 };
+    let (bx0, by0, bx1, by1) = (1i32, m, 33i32, h as i32 - m);
     rect(&mut buf, bx0, by0, bx1, by0 + 2, outline);         // top
     rect(&mut buf, bx0, by1 - 2, bx1, by1, outline);         // bottom
     rect(&mut buf, bx0, by0, bx0 + 2, by1, outline);         // left
     rect(&mut buf, bx1 - 2, by0, bx1, by1, outline);         // right
-    rect(&mut buf, bx1, 7, bx1 + 3, 13, outline);            // cap
+    rect(&mut buf, bx1, 7, bx1 + 3, 13, outline);            // nub cap (vertically centered)
 
     // inner fill proportional to %
     let (ix0, iy0, ix1, iy1) = (bx0 + 3, by0 + 3, bx1 - 3, by1 - 3);
@@ -159,20 +176,48 @@ pub fn battery_icon(l: &Live, colorize: bool) -> (Vec<u8>, u32, u32) {
     let fw = (full_w * pct / 100.0).round() as i32;
     rect(&mut buf, ix0, iy0, ix0 + fw.max(1), iy1, fill);
 
-    // charging bolt (dark, over the fill) — a tiny lightning
+    // charging bolt / plug (dark, over the fill), roughly centered in the body
     if l.charging {
         let bolt = (20u8, 24u8, 30u8, 255u8);
         for &(x, y) in &[(18, 6), (17, 7), (16, 8), (18, 8), (17, 9), (16, 10), (15, 11), (18, 10), (19, 9), (20, 8)] {
             px(&mut buf, x, y, bolt); px(&mut buf, x, y + 1, bolt);
         }
     } else if l.full {
-        // plugged-but-done: a tiny power-plug (two prongs + body) — like Stats, so the glyph
-        // distinguishes "plugged & holding" from "on battery" (which draws nothing).
         let plug = (20u8, 24u8, 30u8, 255u8);
         for &(x, y) in &[(15, 6), (15, 7), (18, 6), (18, 7)] { px(&mut buf, x, y, plug); } // prongs
         rect(&mut buf, 14, 8, 20, 12, plug);                                               // body
         for y in 12..15 { px(&mut buf, 16, y, plug); px(&mut buf, 17, y, plug); }           // cord
     }
+    (buf, w, h)
+}
+
+// ---- vertical bar glyph (Stats' "bar_chart"): a thin upright cell filling from the bottom.
+pub fn bar_glyph(l: &Live, colorize: bool) -> (Vec<u8>, u32, u32) {
+    let (w, h) = (14u32, 20u32);
+    let mut buf = vec![0u8; (w * h * 4) as usize];
+    let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
+        if x < 0 || y < 0 || x as u32 >= w || y as u32 >= h { return; }
+        let i = ((y as u32 * w + x as u32) * 4) as usize;
+        buf[i] = c.0; buf[i + 1] = c.1; buf[i + 2] = c.2; buf[i + 3] = c.3;
+    };
+    let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
+        for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
+    };
+    let outline = (170u8, 176u8, 188u8, 255u8);
+    let pct = l.pct.clamp(0.0, 100.0);
+    let fill = fill_color(l, colorize);
+    let (bx0, by0, bx1, by1) = (3i32, 1i32, 11i32, 19i32);   // upright cell
+    rect(&mut buf, bx0, by0, bx1, by0 + 2, outline);
+    rect(&mut buf, bx0, by1 - 2, bx1, by1, outline);
+    rect(&mut buf, bx0, by0, bx0 + 2, by1, outline);
+    rect(&mut buf, bx1 - 2, by0, bx1, by1, outline);
+    rect(&mut buf, bx0 + 2, by0 - 2, bx1 - 2, by0, outline); // top terminal
+    // fill from the bottom
+    let (ix0, ix1) = (bx0 + 2, bx1 - 2);
+    let inner_top = by0 + 2;
+    let inner_bot = by1 - 2;
+    let fh = ((inner_bot - inner_top) as f64 * pct / 100.0).round() as i32;
+    rect(&mut buf, ix0, inner_bot - fh.max(1), ix1, inner_bot, fill);
     (buf, w, h)
 }
 
