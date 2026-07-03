@@ -14,7 +14,7 @@ let unit = ls('battUnit', 'system');                  // system | c | f
 let timeFmt = ls('battTimeFmt', 'long');              // short(1:20) | long(1시간 20분)
 let procN = +ls('battProcN', '6');                    // top-processes count · 0 = hide
 let cfg = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: false };
-let live = null, procs = [], detail = {}, lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
+let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
 
 const resolveTheme = () => theme === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme;
 // "system" temperature unit → °F only in the handful of Fahrenheit locales, else °C
@@ -28,6 +28,15 @@ const fmtTime = min => {
 };
 // physical rail relationship (approx — SMC sensors don't perfectly sum): shown under 전원
 const powerLegend = s => s.ac ? '어댑터 = 시스템 소비 + 배터리 충전' : '시스템 소비 = 배터리 방전';
+// clock time the countdown lands on (empty when discharging / full when charging)
+const etaClock = min => {
+  const d = new Date(Date.now() + min * 60000);
+  let h = d.getHours(); const m = String(d.getMinutes()).padStart(2, '0');
+  const ap = h < 12 ? '오전' : '오후'; h = h % 12 || 12;
+  return `${ap} ${h}:${m}`;
+};
+// "5시간 40분 · 오후 9:45" — remaining duration + the clock time it ends
+const timeVal = s => s.timeRemain == null ? '–' : `${fmtTime(s.timeRemain)} · ${etaClock(s.timeRemain)}`;
 
 // The Tauri webview IPC isn't reliable for this external-localhost window, so report the content
 // height (and hide requests) to the tray app through the node bridge, which resizes/hides the
@@ -75,6 +84,10 @@ async function pullDetail() {
   try { const r = await fetch('/api/detail', { cache: 'no-store' }); if (r.ok) detail = await r.json(); } catch { /* keep */ }
   if (!settingsOpen) render();
 }
+async function pullSpark() {
+  try { const r = await fetch('/api/spark', { cache: 'no-store' }); if (r.ok) spark = await r.json(); } catch { /* keep */ }
+  if (!settingsOpen) render();
+}
 
 function batterySVG(pct, s) {
   const w = 46, fill = Math.max(4, pct / 100 * (w - 7));
@@ -116,7 +129,7 @@ function rowsPower(s) {
 // 상태 rows shared by list/gauge: remaining time + live temperature.
 function statusRows(s) {
   return [
-    [s.charging ? '완충까지' : '남은 시간', fmtTime(s.timeRemain)],
+    [s.charging ? '완충까지' : '남은 시간', timeVal(s)],
     ['온도', fmtTemp(s.tempC) + (s.smc ? ' <i class="ld"></i>' : '')],
   ];
 }
@@ -139,7 +152,29 @@ function detailHTML(s) {
   if (detail.serial) rows.push(['배터리 시리얼', esc(detail.serial)]);
   return rows.length ? `<div class="sec">상세</div>${kvHTML(rows)}` : '';
 }
-function tailHTML(s) { return detailHTML(s) + procsHTML(); }
+// mini "3D 리포트" preview: a recent battery-% sparkline; click opens the full report
+function sparkHTML() {
+  if (!Array.isArray(spark) || spark.length < 3) return '';
+  const W = 296, H = 44, pad = 3;
+  const ps = spark.map(p => p.pct), ts = spark.map(p => p.t);
+  const t0 = ts[0], t1 = ts[ts.length - 1];
+  const pmin = Math.min(...ps), pmax = Math.max(...ps);
+  const tr = Math.max(1, t1 - t0), pr = Math.max(1, pmax - pmin);
+  const X = t => pad + (t - t0) / tr * (W - 2 * pad);
+  const Y = p => pad + (1 - (p - pmin) / pr) * (H - 2 * pad);
+  const line = spark.map(p => `${X(p.t).toFixed(1)},${Y(p.pct).toFixed(1)}`).join(' ');
+  const area = `${X(t0).toFixed(1)},${H - pad} ${line} ${X(t1).toFixed(1)},${H - pad}`;
+  const hrs = Math.max(1, Math.round((t1 - t0) / 3600)), delta = ps[ps.length - 1] - ps[0];
+  return `<div class="sec">최근 추세 <small>${hrs}시간 · ${delta >= 0 ? '+' : ''}${delta}%p</small></div>` +
+    `<svg class="spark" data-report viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none">
+      <defs><linearGradient id="sf" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--accent)" stop-opacity=".32"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+      <polygon points="${area}" fill="url(#sf)"/>
+      <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>` +
+    `<div class="spmore" data-report>전체 3D 그래프 →</div>`;
+}
+function tailHTML(s) { return sparkHTML() + detailHTML(s) + procsHTML(); }
 
 // ── settings panel (gear) ──────────────────────────────────────────────
 // data-k = a localStorage display pref (popover-only) · data-c = a server cfg key (menu-bar/alerts)
@@ -219,7 +254,7 @@ function paint() {
           <text x="70" y="88" text-anchor="middle" class="gsub">${stateIcon(s)} ${(s.systemW ?? s.watts) != null ? (s.systemW ?? s.watts).toFixed(1) + 'W' : ''}</text>
         </svg>
         <div class="gstate">${stateOf(s)}</div> ${lpm ? `<div style="margin-top:6px">${lpm}</div>` : ''}
-        <div class="gtime">${timeLbl} <b>${fmtTime(s.timeRemain)}</b></div>
+        <div class="gtime">${timeLbl} <b>${timeVal(s)}</b></div>
       </div>
       <div class="sec">상태</div>
       <div class="kv"><span>온도</span><b>${fmtTemp(s.tempC)}${s.smc ? ' <i class="ld"></i>' : ''}</b></div>
@@ -233,7 +268,7 @@ function paint() {
     el.innerHTML =
       `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pctLbl}</div>
         <div class="st">${stateOf(s)} ${lpm}</div></div></div>
-      <div class="card"><div class="ct">${timeLbl}</div><div class="cv">${fmtTime(s.timeRemain)}</div></div>
+      <div class="card"><div class="ct">${timeLbl}</div><div class="cv">${timeVal(s)}</div></div>
       <div class="cards2">
         <div class="card"><div class="ct">${s.systemW != null ? '시스템 전력' : '전력'}</div><div class="cv">${s.systemW != null ? s.systemW.toFixed(1) : (s.watts != null ? s.watts.toFixed(1) : '–')}<small>W</small></div></div>
         <div class="card"><div class="ct">온도</div><div class="cv">${fmtTemp(s.tempC).replace(/ °[CF]/,'')}<small>°${resolveUnit()==='f'?'F':'C'}</small></div></div>
@@ -291,6 +326,7 @@ $('pop').addEventListener('change', e => {
   else if (t.matches('select[data-c]')) applyCfg(t.dataset.c, coerce(t.dataset.c, t.value));
 });
 $('pop').addEventListener('click', e => {
+  if (e.target.closest('[data-report]')) { openReport(); return; }   // spark preview → full 3D report
   const b = e.target.closest('.tgl'); if (!b) return;   // boolean toggle
   applyCfg(b.dataset.c, !cfg[b.dataset.c]);
 });
@@ -341,7 +377,8 @@ document.addEventListener('keydown', e => {
 });
 
 render();
-pull(); pullProcs(); pullDetail(); pullConfig();
+pull(); pullProcs(); pullDetail(); pullConfig(); pullSpark();
 setInterval(() => { if (!document.hidden) pull(); }, 2000);
 setInterval(() => { if (!document.hidden) pullProcs(); }, 5000);
 setInterval(() => { if (!document.hidden) pullDetail(); }, 12000);
+setInterval(() => { if (!document.hidden) pullSpark(); }, 30000);

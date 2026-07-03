@@ -41,6 +41,7 @@ function demoFile(sp, assetDir) {
 let procsCache = { at: 0, data: [] };   // /api/procs cache (shared across requests)
 let procsInflight = false;
 let detailCache = { at: 0, data: {} };  // /api/detail cache (slow-changing fields)
+let sparkCache = { at: 0, data: [] };    // /api/spark cache (recent %, for the popover mini-graph)
 
 // tray.json = the settings the menu-bar (Rust) and the popover settings panel both share.
 // The Rust ticker re-reads it every 2s, so a popover change applies to the menu bar live.
@@ -224,6 +225,25 @@ export function startServer({ root, port } = {}) {
       }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(readTray()));
+      return;
+    }
+
+    // recent battery % for the popover's mini "3D 리포트 미리보기" sparkline — the last ~6h of the
+    // user's real samples, downsampled. Cached ~20s (samples only change each minute anyway).
+    if (url.pathname === '/api/spark') {
+      try {
+        if (Date.now() - sparkCache.at > 20000) {
+          const file = path.join(userDataDir(), 'samples.jsonl');
+          const all = fs.existsSync(file) ? readSamples(file) : [];
+          const last = all.length ? all[all.length - 1].t : 0;
+          let recent = all.filter(s => s.pct != null && s.t >= last - 6 * 3600);
+          const N = 64;
+          if (recent.length > N) { const step = recent.length / N; recent = Array.from({ length: N }, (_, i) => recent[Math.floor(i * step)]); }
+          sparkCache = { at: Date.now(), data: recent.map(s => ({ t: s.t, pct: s.pct, chg: !!s.charging })) };
+        }
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(sparkCache.data));
+      } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
       return;
     }
 

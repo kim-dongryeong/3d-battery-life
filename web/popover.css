@@ -30,7 +30,8 @@ body {
     radial-gradient(125% 70% at 50% -12%, color-mix(in srgb, var(--state) 16%, transparent), transparent 62%),
     var(--bg);
 }
-html.light body { background: var(--bg); }   /* light mode = flat pure white (no glow tint) */
+/* light mode: keep just a whisper of the green glow (아주 약간) over pure white */
+html.light body { background: radial-gradient(120% 60% at 50% -10%, color-mix(in srgb, var(--state) 6%, transparent), transparent 50%), var(--bg); }
 html { scrollbar-width: none; }
 ::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }   /* never a scrollbar; the window fits its content */
 #pop { min-height: 90px; }
@@ -73,6 +74,10 @@ html { scrollbar-width: none; }
 .kv > b { font-variant-numeric: tabular-nums; font-weight: 650; font-size: 12.5px; letter-spacing: -.1px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
 .leg { color: var(--faint); font-size: 10px; margin: 4px 0 1px; }   /* 전원 rail relationship */
+/* recent-% mini sparkline (a peek at the 3D report) */
+.spark { display: block; margin: 3px 0 0; cursor: pointer; overflow: visible; }
+.spmore { text-align: right; color: var(--accent); font-size: 10px; font-weight: 650; cursor: pointer; margin: 1px 0 2px; }
+.spmore:hover { text-decoration: underline; }
 
 /* live badge / heartbeat dot — replaces the 🔴 emoji */
 .ld {
