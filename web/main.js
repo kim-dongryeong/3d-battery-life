@@ -9,7 +9,7 @@ let X = X_BASE;                                          // effective time-axis 
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', crosshair: '3d', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
@@ -34,6 +34,7 @@ try {
 try { const w = +localStorage.getItem('battRateWin'); if ([120, 300, 600, 1200].includes(w)) state.rateWin = w; } catch { /* ignore */ }
 try { const m = +localStorage.getItem('battMarkerSize'); if ([0.12, 0.2, 0.32].includes(m)) state.markerSize = m; } catch { /* ignore */ }
 try { const r = localStorage.getItem('battWattsRail'); if (['battery', 'system', 'adapter'].includes(r)) state.wattsRail = r; } catch { /* ignore */ }
+try { const c = localStorage.getItem('battCrosshair'); if (['3d', 'vert', 'off'].includes(c)) state.crosshair = c; } catch { /* ignore */ }
 try { const l = localStorage.getItem('battRateLevel'); if (l === 'pct' || l === 'rawcap') state.rateLevel = l; } catch { /* ignore */ }   // '정수% 사용' 전역 설정
 try { const q = new URLSearchParams(location.search).get('level'); if (q === 'pct' || q === 'rawcap') state.rateLevel = q; } catch { /* ignore */ }   // ?level= deep-link (overrides)
 
@@ -780,8 +781,11 @@ const HI = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opa
 // stock-chart-style hover cue: a dot on the exact point + a vertical drop line to the base plane
 const marker = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
 marker.scale.setScalar(state.markerSize);   // adjustable in the gear settings (default smaller than before)
-const dropLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0x4dd0c0, transparent: true, opacity: 0.7 }));
-overlay.add(marker, dropLine);
+const mkGuide = op => new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0x4dd0c0, transparent: true, opacity: op }));
+const dropLine = mkGuide(0.7);   // vertical: value
+const xLine = mkGuide(0.5);      // floor → 하루 중 시각(X) 축
+const zLine = mkGuide(0.5);      // floor → 날짜(Z) 축
+overlay.add(marker, dropLine, xLine, zLine);
 
 addEventListener('pointermove', e => {
   if (e.target !== renderer.domElement) {                       // pointer is over a panel — don't raycast through it
@@ -809,8 +813,16 @@ addEventListener('pointermove', e => {
     const idx = dj < di ? j : i;
     const vp = new THREE.Vector3(pos.getX(idx), pos.getY(idx), pos.getZ(idx)); line.localToWorld(vp);
     marker.position.copy(vp);
-    const baseY = state.y === 'rate' ? Y / 2 : 0;               // drop to the 0-rate plane in rate mode, else the floor
-    dropLine.geometry.setFromPoints([vp.clone(), new THREE.Vector3(vp.x, baseY, vp.z)]);
+    const baseY = isSignedY() ? Y / 2 : 0;                      // floor plane: 0-rate/0-power plane in signed modes, else the floor
+    const fp = new THREE.Vector3(vp.x, baseY, vp.z);            // point projected onto the floor
+    const ch = state.crosshair;                                // '3d' | 'vert' | 'off'
+    dropLine.visible = ch !== 'off';
+    if (ch !== 'off') dropLine.geometry.setFromPoints([vp.clone(), fp.clone()]);   // vertical → value
+    xLine.visible = zLine.visible = ch === '3d';
+    if (ch === '3d') {
+      xLine.geometry.setFromPoints([fp.clone(), new THREE.Vector3(vp.x, baseY, -Z / 2)]);   // 바닥선 → 하루 중 시각(X) 축
+      zLine.geometry.setFromPoints([fp.clone(), new THREE.Vector3(-X / 2, baseY, vp.z)]);    // 바닥선 → 날짜(Z) 축
+    }
     overlay.visible = true;
     showTip(line.userData.dayIndex, pts[idx], e.clientX, e.clientY);
   } else {
@@ -892,6 +904,7 @@ document.querySelectorAll('.seg').forEach(seg => {
     else if (group === 'wattsRail') { state.wattsRail = val; try { localStorage.setItem('battWattsRail', val); } catch { /* ignore */ } rebuild(); }
     else if (group === 'markerSize') { state.markerSize = +val; marker.scale.setScalar(+val); try { localStorage.setItem('battMarkerSize', val); } catch { /* ignore */ } }
     else if (group === 'rateLevel') { state.rateLevel = val; try { localStorage.setItem('battRateLevel', val); } catch { /* ignore */ } load(); }   // 전역 정밀도: 리포트+속도패널+그래프 전부 재계산
+    else if (group === 'crosshair') { state.crosshair = val; try { localStorage.setItem('battCrosshair', val); } catch { /* ignore */ } }   // 다음 호버부터 적용
     else { state[group] = val; rebuild(); }
   });
 });
