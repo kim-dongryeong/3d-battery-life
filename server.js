@@ -139,26 +139,8 @@ export function startServer({ root, port } = {}) {
         const s = sample();
         // whether the launchd sampler is installed (so the popover's recording toggle shows the right label)
         try { s.recording = fs.existsSync(path.join(process.env.HOME || '', 'Library/LaunchAgents/com.kdr.3d-battery-life.sampler.plist')); } catch { /* ignore */ }
-        try {
-          const smc = JSON.parse(fs.readFileSync(path.join(userDataDir(), 'live-smc.json'), 'utf8'));
-          if (smc && Date.now() / 1000 - smc.at < 6) {        // fresh (app running)
-            if (smc.tempC != null) s.tempC = smc.tempC;        // live battery temp
-            if (smc.systemW != null) s.systemW = smc.systemW;  // live system power draw
-            if (smc.adapterW != null) s.adapterW = smc.adapterW;
-            s.smc = true;
-            // Live battery rail: ioreg's Amperage/Voltage are 60s-quantized (stale right after
-            // (un)plugging), so when SMC gives us the battery power magnitude (PPBR) use it, signed
-            // by whether the adapter is running a surplus (charging +) or deficit (discharging −),
-            // and derive the current from the (stable) battery voltage.
-            if (smc.batteryW != null && smc.systemW != null) {
-              const charging = (smc.adapterW ?? 0) - smc.systemW >= 0;
-              const signed = charging ? smc.batteryW : -smc.batteryW;
-              s.powerW = +signed.toFixed(3);
-              if (s.voltage) s.amperage = Math.round(signed / s.voltage * 1000);
-              s.batLive = true;
-            }
-          }
-        } catch { /* no bridge / app not running → ioreg only */ }
+        // systemW/adapterW + the live battery rail are merged inside sample() now (applyLiveSMC),
+        // so both /api/live AND the launchd sampler record them when the app is running.
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(JSON.stringify(s));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }

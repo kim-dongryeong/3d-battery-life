@@ -9,7 +9,7 @@ let X = X_BASE;                                          // effective time-axis 
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
@@ -33,6 +33,7 @@ try {
 } catch { /* ignore */ }
 try { const w = +localStorage.getItem('battRateWin'); if ([120, 300, 600, 1200].includes(w)) state.rateWin = w; } catch { /* ignore */ }
 try { const m = +localStorage.getItem('battMarkerSize'); if ([0.12, 0.2, 0.32].includes(m)) state.markerSize = m; } catch { /* ignore */ }
+try { const r = localStorage.getItem('battWattsRail'); if (['battery', 'system', 'adapter'].includes(r)) state.wattsRail = r; } catch { /* ignore */ }
 try { const l = localStorage.getItem('battRateLevel'); if (l === 'pct' || l === 'rawcap') state.rateLevel = l; } catch { /* ignore */ }   // '정수% 사용' 전역 설정
 try { const q = new URLSearchParams(location.search).get('level'); if (q === 'pct' || q === 'rawcap') state.rateLevel = q; } catch { /* ignore */ }   // ?level= deep-link (overrides)
 
@@ -217,7 +218,7 @@ function buildLines(report) {
     const mags = runRates.flat().filter(v => v != null && Number.isFinite(v)).map(Math.abs);
     yMax = mags.length ? Math.max(0.1, percentile(mags, 0.98)) : 1;   // symmetric ±yMax; p98 so one spike doesn't flatten it
   } else {
-    const yMaxRaw = state.y === 'pct' ? 100 : percentile(runs.flatMap(r => r.points.map(p => p.watts ?? 0)), 0.98);
+    const yMaxRaw = state.y === 'pct' ? 100 : percentile(runs.flatMap(r => r.points.map(p => p[wattField()] ?? 0)), 0.98);
     yMax = state.y === 'pct' ? 100 : Math.max(5, yMaxRaw);  // value (depth) max
   }
 
@@ -239,7 +240,7 @@ function buildLines(report) {
     };
     for (const p of run.points) {
       pi++;
-      const yv = state.y === 'rate' ? (rates ? rates[pi] : null) : (state.y === 'pct' ? levelPct(p) : p.watts);   // 배터리 %도 전역 정밀도 설정을 따름
+      const yv = state.y === 'rate' ? (rates ? rates[pi] : null) : (state.y === 'pct' ? levelPct(p) : p[wattField()]);   // 배터리 %는 정밀도 설정, 전력은 선택 레일
       if (yv == null || !Number.isFinite(yv)) continue;         // skip null/NaN -> no bad vertices
       const d = dayOfT(p.t);
       if (curDay !== null && d !== curDay) flush();             // split at midnight: no cross-day diagonal
@@ -261,17 +262,23 @@ function buildLines(report) {
 // ---- rebuild everything for current state -------------------------------
 const COLOR_META = { state: { label: '상태', unit: '' }, lowPower: { label: '저전력 모드', unit: '' }, tempC: { label: '온도', unit: '°C' }, loadPct: { label: 'CPU 부하(load avg)', unit: '%' }, watts: { label: '전력', unit: 'W' } };
 const Y_LABEL = { pct: '배터리 %', watts: '전력 W', rate: '잔량 변화 %/min (+충전/−방전)' };
+const WRAIL = { battery: 'watts', system: 'systemW', adapter: 'adapterW' };   // '전력 W' 그래프의 레일 → 포인트 필드
+const WLABEL = { battery: '배터리 전력 W', system: '시스템 전력 W', adapter: '어댑터 전력 W' };
+const yLabel = () => state.y === 'watts' ? WLABEL[state.wattsRail] : (Y_LABEL[state.y] || '배터리 %');
+const wattField = () => WRAIL[state.wattsRail] || 'watts';
 const GRAD_NUM = 'linear-gradient(90deg, hsl(215,45%,45%), hsl(260,56%,49%), hsl(305,68%,52%), hsl(350,80%,56%), hsl(35,95%,60%))';
 const GRAD_STATE = 'linear-gradient(90deg, hsl(7,85%,55%) 0 33%, hsl(198,45%,50%) 50%, hsl(119,80%,50%) 66% 100%)';
 
 function rebuild() {
   const rwg = document.getElementById('rateWinGrp');
   if (rwg) rwg.hidden = state.y !== 'rate';   // 평활 창 컨트롤은 방전속도(rate) 모드에서만
+  const wrg = document.getElementById('wattsRailGrp');
+  if (wrg) wrg.hidden = state.y !== 'watts';  // 전력 레일(배터리/시스템/어댑터)은 전력 W 모드에서만
   const r = state.report;
   document.getElementById('empty').hidden = !(r && (!r.runs || r.runs.length === 0));
   if (!r) return;
   const { yMax, maxDay, cMin, cMax } = buildLines(r);
-  buildAxes(yMax, Y_LABEL[state.y] || '배터리 %', maxDay, r.firstT);
+  buildAxes(yMax, yLabel(), maxDay, r.firstT);
 
   const cm = COLOR_META[state.color];
   document.getElementById('legLbl').textContent = cm.label;
@@ -814,7 +821,9 @@ function showTip(dayIndex, p, x, y) {
     <div><span class="big">${p.cap != null ? p.cap.toFixed(1) : (p.pct ?? '?')}%</span> <span class="tsm">정수 ${p.pct ?? '?'}%</span> &nbsp; ${st}</div>
     <table>
       ${state.y === 'rate' && p._rate != null ? `<tr><td class="k">변화율</td><td>${p._rate >= 0 ? '+' : ''}${p._rate.toFixed(3)} %/min</td></tr>` : ''}
-      <tr><td class="k">전력</td><td>${p.watts ?? '?'} W</td></tr>
+      ${p.systemW != null ? `<tr><td class="k">시스템</td><td>${p.systemW.toFixed(1)} W</td></tr>` : ''}
+      ${p.adapterW != null ? `<tr><td class="k">어댑터</td><td>${p.adapterW.toFixed(1)} W</td></tr>` : ''}
+      <tr><td class="k">배터리</td><td>${p.powerW != null ? `${p.powerW >= 0 ? '+' : '−'}${Math.abs(p.powerW).toFixed(2)} W` : (p.watts != null ? `${p.watts} W` : '?')}${p.voltage != null ? ` · ${p.voltage.toFixed(2)} V` : ''}${p.amperage != null ? ` · ${p.amperage} mA` : ''}</td></tr>
       <tr><td class="k">온도</td><td>${p.tempC ?? '?'}°C</td></tr>
       <tr><td class="k">CPU 부하</td><td>${p.loadPct ?? '?'}%</td></tr>
       ${p.lowPower != null ? `<tr><td class="k">저전력</td><td>${p.lowPower ? '🟡 켜짐' : '꺼짐'}</td></tr>` : ''}
@@ -874,6 +883,7 @@ document.querySelectorAll('.seg').forEach(seg => {
     else if (group === 'layout') { applyLayout(val); }
     else if (group === 'xScale') { setXScale(+val); }
     else if (group === 'rateWin') { state.rateWin = +val; try { localStorage.setItem('battRateWin', val); } catch { /* ignore */ } rebuild(); }
+    else if (group === 'wattsRail') { state.wattsRail = val; try { localStorage.setItem('battWattsRail', val); } catch { /* ignore */ } rebuild(); }
     else if (group === 'markerSize') { state.markerSize = +val; marker.scale.setScalar(+val); try { localStorage.setItem('battMarkerSize', val); } catch { /* ignore */ } }
     else if (group === 'rateLevel') { state.rateLevel = val; try { localStorage.setItem('battRateLevel', val); } catch { /* ignore */ } load(); }   // 전역 정밀도: 리포트+속도패널+그래프 전부 재계산
     else { state[group] = val; rebuild(); }
