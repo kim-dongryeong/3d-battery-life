@@ -113,7 +113,7 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   background: rgba(9,13,20,.82); border: 1px solid currentColor;
   box-shadow: 0 2px 12px rgba(0,0,0,.45); backdrop-filter: blur(4px); }
 
-#tip { position: fixed; z-index: 20; pointer-events: none; max-width: 366px; overflow: hidden;
+#tip { position: fixed; z-index: 50; pointer-events: none; max-width: 366px; overflow: hidden;   /* 예상 도달시각 태그(.projTag z46)보다 위에 떠야 함 */
   background: var(--tip); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px;
   box-shadow: 0 8px 30px rgba(0,0,0,.5); }
 #tip.pinned { pointer-events: auto; cursor: move; }   /* 고정 시 드래그로 이동 가능 */
@@ -171,12 +171,13 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
 #trendchart .tbtns button.more { font-weight: 700; letter-spacing: 1px; padding: 2px 7px; }
 #trendchart .tbtns button.more.on { background: var(--accent); color: var(--onfg); border-color: var(--accent); }
-/* fold/collapse: bigger, top-right corner */
-#trendchart .tcollapse { position: absolute; top: 8px; right: 10px; z-index: 3;
+/* fold/collapse: bigger, top-right corner — shared by both bottom panels */
+#trendchart .tcollapse, #buckets .pcollapse { position: absolute; top: 8px; right: 10px; z-index: 3;
   border: 1px solid var(--line); background: var(--btn); color: var(--fg);
   border-radius: 7px; width: 30px; height: 26px; font-size: 15px; line-height: 1; cursor: pointer; padding: 0; }
-#trendchart .tcollapse:hover { border-color: var(--accent); color: var(--accent); }
-#trendchart h2 { padding-right: 38px; }   /* room for the top-right collapse button */
+#trendchart .tcollapse:hover, #buckets .pcollapse:hover { border-color: var(--accent); color: var(--accent); }
+#trendchart h2, #buckets h2 { padding-right: 38px; }   /* room for the top-right collapse button */
+#trendchart h2 .fviews { color: var(--dim); font-weight: 400; font-size: 10px; }   /* 접힘 상태 부제 (small과 달리 접혀도 보임) */
 #trendchart .tlegend { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 7px; font-size: 10px; color: var(--dim); }
 #trendchart .tlegend span { display: flex; align-items: center; gap: 4px; }
 #trendchart .tlegend i { width: 11px; height: 3px; border-radius: 2px; display: inline-block; }

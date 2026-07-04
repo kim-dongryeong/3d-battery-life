@@ -622,7 +622,7 @@ function renderRates() {
     ? `<b>온도(°C) = 방전 중 평균 배터리 온도</b><br>발열/스트레스 지표. 높은 온도가 지속되면 노화를 가속.`
     : `<b>%/min = 분당 떨어지는 배터리 %</b><br>음수 = 방전. 부하 + 노화가 섞인 "체감 속도".`;
   const infoBadge = `<span class="info">i<span class="ftip">${infoTip}</span></span>`;
-  const bFold = `<button class="fold" data-bfold title="${state.foldBuckets ? '펼치기' : '접기'}">${state.foldBuckets ? '▸' : '▾'}</button>`;
+  const bFold = `<button class="pcollapse" data-bfold title="${state.foldBuckets ? '펼치기' : '접기(최소화)'}">${state.foldBuckets ? '▸' : '▾'}</button>`;
   el.innerHTML =
     `<h2>${bFold}구간별 ${isRate() ? '방전 속도' : M().label} <small>${metricUnit()} · ${M().hint}</small>${infoBadge}</h2>` +
     `<div class="rseg" data-rgroup="rm">${metBtns}</div>` +
@@ -678,7 +678,9 @@ function renderTrend() {
   const sub = `${metricUnit()}${state.delta ? ' · Δ기준대비' : ''} · ${VIEWS[view]}`;
   const tg = (g, gl, label) => `<span class="tickg">${label}<span class="seg2">${[1, 2, 3].map(v => `<button data-tick="${g}" data-v="${v}" class="${state[gl] === v ? 'on' : ''}">${['적', '중', '촘'][v - 1]}</button>`).join('')}</span></span>`;
   const tickRow = (showExtras && state.showTicks) ? `<div class="trow">눈금 ${tg('date', 'tickDate', '날짜')} ${tg('band', 'tickBand', '잔량')}${view !== 'heat' ? ' ' + tg('val', 'tickVal', '속도') : ''}</div>` : '';
-  const title = state.trendAll
+  const title = state.foldTrend
+    ? `<h2>구간별 ${what} 추세 <span class="fviews">(3D · 2D · 히트맵)</span></h2>`   // 접힘: 무엇인지 알아보게 뷰 종류를 함께 표기
+    : state.trendAll
     ? `<h2>구간별 ${what} 추세 <small>${sub}</small>${ctrls}</h2>`
     : `<h2>${series[0]?.label ?? ''} ${what} 추세 <small>${metricUnit()}${state.delta ? ' · Δ' : ''}${series[0] ? ' · ' + series[0].pts.length + periodLabel() : ''}</small>${ctrls}</h2>`;
   const head = title + tickRow;
@@ -1366,6 +1368,7 @@ document.getElementById('trendchart').addEventListener('click', e => {
   else if (b.hasAttribute('data-tmore')) state.trendMore = !state.trendMore;
   else if (b.hasAttribute('data-tfold')) {
     state.foldTrend = !state.foldTrend;
+    if (state.foldTrend) state.trendBig = false;   // 확대 상태에서 최소화 → 가운데가 아니라 아래(기본 위치)로
     try { localStorage.setItem('battFoldT', state.foldTrend ? '1' : '0'); } catch { /* ignore */ }
   }
   else if (b.hasAttribute('data-tbig')) state.trendBig = !state.trendBig;
