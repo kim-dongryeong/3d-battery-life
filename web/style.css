@@ -47,6 +47,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #panel { top: 16px; right: 16px; width: 248px; display: flex; flex-direction: column; gap: 12px; }
 .grp { display: flex; flex-direction: column; gap: 6px; }
 .grp[hidden] { display: none; }   /* attribute hidden must beat .grp's display:flex */
+#viewerSettings { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 9px; border-top: 1px solid var(--line); }
+#viewerSettings[hidden] { display: none; }
+#gear.on { color: var(--accent); border-color: var(--accent); }
 .grp.row { flex-direction: row; align-items: center; justify-content: space-between; }
 .lbl { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
 .seg { display: flex; gap: 4px; background: var(--btn); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }

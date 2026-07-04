@@ -9,7 +9,7 @@ let X = X_BASE;                                          // effective time-axis 
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
@@ -32,6 +32,9 @@ try {
   if (['state', 'lowPower', 'tempC', 'loadPct', 'watts'].includes(q.get('color'))) state.color = q.get('color');
 } catch { /* ignore */ }
 try { const w = +localStorage.getItem('battRateWin'); if ([120, 300, 600, 1200].includes(w)) state.rateWin = w; } catch { /* ignore */ }
+try { const m = +localStorage.getItem('battMarkerSize'); if ([0.12, 0.2, 0.32].includes(m)) state.markerSize = m; } catch { /* ignore */ }
+try { const l = localStorage.getItem('battRateLevel'); if (l === 'pct' || l === 'rawcap') state.rateLevel = l; } catch { /* ignore */ }   // '정수% 사용' 전역 설정
+try { const q = new URLSearchParams(location.search).get('level'); if (q === 'pct' || q === 'rawcap') state.rateLevel = q; } catch { /* ignore */ }   // ?level= deep-link (overrides)
 
 // ---- color themes (dark / light) for WebGL scenes + SVG charts -----------
 const THEMES = {
@@ -162,8 +165,11 @@ const C_LPM_OFF = new THREE.Color(0x51617a);                    // 저전력 off
 // per-point SIGNED rate d(잔량)/dt in %/min over a short backward window.
 // Uses the fine mAh-based level (p.cap, ~0.02% res) so the curve is smooth — pct is macOS's INTEGER %
 // (60s samples), whose Δ is a useless 0/±1 staircase. Sign: + 충전(잔량↑) · − 방전(잔량↓).
+// battery level for a point: precise mAh% (rawCap/rawMax, default) — or macOS integer % when the
+// global '정수%' option is on (state.rateLevel==='pct'). Every %-based calc goes through this.
+const levelPct = p => state.rateLevel === 'pct' ? p.pct : (p.cap != null ? p.cap : p.pct);
 function windowedRates(points, winSec = 300) {
-  const lvl = p => (p.cap != null ? p.cap : p.pct);   // fine mAh % if present, else fall back to integer %
+  const lvl = levelPct;
   const out = new Array(points.length).fill(null);
   for (let i = 0; i < points.length; i++) {
     if (lvl(points[i]) == null) continue;
@@ -233,7 +239,7 @@ function buildLines(report) {
     };
     for (const p of run.points) {
       pi++;
-      const yv = state.y === 'rate' ? (rates ? rates[pi] : null) : (state.y === 'pct' ? (p.cap ?? p.pct) : p.watts);   // 배터리 %도 정밀 mAh 기반(p.cap), 없으면 정수%
+      const yv = state.y === 'rate' ? (rates ? rates[pi] : null) : (state.y === 'pct' ? levelPct(p) : p.watts);   // 배터리 %도 전역 정밀도 설정을 따름
       if (yv == null || !Number.isFinite(yv)) continue;         // skip null/NaN -> no bad vertices
       const d = dayOfT(p.t);
       if (curDay !== null && d !== curDay) flush();             // split at midnight: no cross-day diagonal
@@ -394,7 +400,6 @@ function renderRates() {
   const metBtns = [['rate', '속도'], ['wh', '노화Wh/%'], ['watts', '전력W'], ['temp', '온도°C']].map(([k, l]) => `<button data-rm="${k}" class="${k === state.metric ? 'on' : ''}">${l}</button>`).join('');
   const perBtns = PERIODS.map(([k, l]) => `<button data-rp="${k}" class="${k === state.period ? 'on' : ''}">${l}</button>`).join('');
   const verBtns = RATE_VERS.map(([k, lbl]) => `<button data-rv="${k}" class="${k === state.rateVersion ? 'on' : ''}">${lbl}</button>`).join('');
-  const lvlBtns = [['rawcap', 'mAh정밀', '원시 배터리 용량(mAh) 기반 · ~0.02% 해상도 · 부드럽고 정확 (권장)'], ['pct', '정수%', 'macOS 표시 %(정수·1% 계단) — 메뉴바 숫자 기준. 표시% 관점일 때만']].map(([k, l, t]) => `<button data-rl="${k}" title="${t}" class="${k === state.rateLevel ? 'on' : ''}">${l}</button>`).join('');
   const body = rt.byBand.map(b => {
     const v = bandVal(b), sel = b.band === state.selectedBand ? ' class="sel"' : '';
     if (v == null) return `<tr data-band="${b.band}"${sel}><td>${b.label}</td><td class="rt">–</td><td></td></tr>`;
@@ -415,7 +420,6 @@ function renderRates() {
     `<div class="rseg" data-rgroup="rm">${metBtns}</div>` +
     `<div class="rseg" data-rgroup="rp"><span class="rlbl">기간</span>${perBtns}</div>` +
     (isRate() ? `<div class="rseg" data-rgroup="rv">${verBtns}</div>` : '') +
-    `<div class="rseg" data-rgroup="rl"><span class="rlbl">레벨</span>${lvlBtns}</div>` +
     `<table><tr><th>구간</th><th>${isRate() ? '속도' : metricUnit()}</th><th></th></tr>${body}</table>` +
     `<div class="note">${periodLabel()}별 중앙값 · ${isRate() ? (state.rateVersion === 'v4a_pooled' ? 'V4a' : state.rateVersion.split('_')[0].toUpperCase()) : M().label} · ${rt.spans} spans · 행 클릭→추세</div>`;
   renderTrend();
@@ -761,7 +765,8 @@ const tip = document.getElementById('tip');
 let hovered = null;
 const HI = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1 });
 // stock-chart-style hover cue: a dot on the exact point + a vertical drop line to the base plane
-const marker = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+const marker = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+marker.scale.setScalar(state.markerSize);   // adjustable in the gear settings (default smaller than before)
 const dropLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0x4dd0c0, transparent: true, opacity: 0.7 }));
 overlay.add(marker, dropLine);
 
@@ -840,7 +845,7 @@ function scheduleLive() {
 
 async function load() {
   try {
-    const res = await fetch(`/api/report?source=${state.source}`);
+    const res = await fetch(`/api/report?source=${state.source}&level=${state.rateLevel}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     state.report = await res.json();
     document.getElementById('empty').innerHTML = emptyDefaultHTML;
@@ -869,6 +874,8 @@ document.querySelectorAll('.seg').forEach(seg => {
     else if (group === 'layout') { applyLayout(val); }
     else if (group === 'xScale') { setXScale(+val); }
     else if (group === 'rateWin') { state.rateWin = +val; try { localStorage.setItem('battRateWin', val); } catch { /* ignore */ } rebuild(); }
+    else if (group === 'markerSize') { state.markerSize = +val; marker.scale.setScalar(+val); try { localStorage.setItem('battMarkerSize', val); } catch { /* ignore */ } }
+    else if (group === 'rateLevel') { state.rateLevel = val; try { localStorage.setItem('battRateLevel', val); } catch { /* ignore */ } load(); }   // 전역 정밀도: 리포트+속도패널+그래프 전부 재계산
     else { state[group] = val; rebuild(); }
   });
 });
@@ -898,6 +905,11 @@ document.querySelectorAll('.seg').forEach(seg => {
 
 document.getElementById('spin').addEventListener('change', e => { controls.autoRotate = e.target.checked; controls.autoRotateSpeed = 0.6; });
 document.getElementById('reset').addEventListener('click', () => { camera.position.copy(HOME).multiplyScalar(0.6 + 0.4 * state.xScale); controls.target.copy(LOOK); });
+document.getElementById('gear').addEventListener('click', () => {   // ⚙ 뷰어 설정 (마커 크기 · 정밀도)
+  const s = document.getElementById('viewerSettings');
+  s.hidden = !s.hidden;
+  document.getElementById('gear').classList.toggle('on', !s.hidden);
+});
 
 // stretch the 하루 중 시각 (X) axis so a day's curve spreads out horizontally; dolly the camera out to keep it framed
 function setXScale(v) {
@@ -993,7 +1005,6 @@ document.getElementById('buckets').addEventListener('click', e => {
     else if (btn.dataset.rm) { state.metric = btn.dataset.rm; renderRates(); }
     else if (btn.dataset.rp) { state.period = btn.dataset.rp; state.selectedPeriod = null; loadRates(); }
     else if (btn.dataset.rv) { state.rateVersion = btn.dataset.rv; renderRates(); }
-    else if (btn.dataset.rl) { state.rateLevel = btn.dataset.rl; loadRates(); }
     return;
   }
   const tr = e.target.closest('tr[data-band]');

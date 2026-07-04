@@ -75,6 +75,24 @@
       <label><input type="checkbox" id="spin" /> 자동회전</label>
       <button id="theme" class="btn">🌙 다크</button>
       <button id="reset" class="btn">시점 리셋</button>
+      <button id="gear" class="btn" title="뷰어 설정" aria-label="뷰어 설정">⚙</button>
+    </div>
+    <div id="viewerSettings" hidden>
+      <div class="grp">
+        <span class="lbl">포인터 마커 크기</span>
+        <div class="seg" data-group="markerSize">
+          <button data-val="0.12">작게</button>
+          <button data-val="0.2" class="on">보통</button>
+          <button data-val="0.32">크게</button>
+        </div>
+      </div>
+      <div class="grp">
+        <span class="lbl">계산 정밀도</span>
+        <div class="seg" data-group="rateLevel">
+          <button data-val="rawcap" class="on" title="원시 배터리 용량(mAh) 기반 · ~0.02% 해상도 · 부드럽고 정확 (권장) — 모든 계산의 기본값입니다.">정밀 mAh</button>
+          <button data-val="pct" title="macOS가 1% 단위 정수로 주는 표시 %입니다. 정밀하지 않고 권장하지 않습니다 — 이 값으로 한 분석은 유의미한 insight를 주지 못합니다. 켜면 배터리 %·잔량 변화·구간별 방전 속도 등 모든 계산이 정밀 mAh 없이 거친 정수%가 됩니다.">정수%</button>
+        </div>
+      </div>
     </div>
     <div id="legend">
       <div class="bar"></div>

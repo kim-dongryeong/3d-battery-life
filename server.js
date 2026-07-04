@@ -112,7 +112,8 @@ export function startServer({ root, port } = {}) {
 
     if (url.pathname === '/api/report') {
       try {
-        const report = buildReport(readSource(url.searchParams.get('source'), assetDir));
+        const level = url.searchParams.get('level') === 'pct' ? 'pct' : 'rawcap';   // HUD 10%-trend precision
+        const report = buildReport(readSource(url.searchParams.get('source'), assetDir), { level });
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify(report));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
