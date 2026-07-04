@@ -439,12 +439,7 @@ function computeCharge() {
   const rLin = rateAt(Math.min(100, Math.ceil((L0 + 1e-6) / 10) * 10)), linMin = (100 - L0) / rLin;
   const pts = [{ t: 0, lvl: L0 }]; let t = 0, lvl = L0, guard = 0;
   while (lvl < 99.99 && guard++ < 40) { const hi = Math.min(100, Math.ceil((lvl + 1e-6) / 10) * 10); t += (hi - lvl) / rateAt(hi); lvl = hi; pts.push({ t, lvl }); }
-  let adapter = null;                                        // 최근 쓰던 충전기 (라벨/툴팁 맥락용)
-  for (let ri = r.runs.length - 1; ri >= 0 && !adapter; ri--) {
-    const ps = r.runs[ri].points;
-    for (let i = ps.length - 1; i >= 0; i--) if (ps[i].adapterWnom != null || ps[i].adapterName) { adapter = { name: ps[i].adapterName, w: ps[i].adapterWnom }; break; }
-  }
-  return { L0, target: 100, rLin, linMin, curveMin: t, pts, baseT: (L && L.t) ? L.t : Date.now() / 1000, adapter };
+  return { L0, target: 100, rLin, linMin, curveMin: t, pts, baseT: (L && L.t) ? L.t : Date.now() / 1000 };
 }
 function renderProjection() {
   const box = document.getElementById('projChart'); if (!box) return;
