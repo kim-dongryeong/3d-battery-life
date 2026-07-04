@@ -936,6 +936,7 @@ function powerRowsHTML(p) {
   if (p.ioregW != null) rows.push(['배터리 · ioreg V×I' + tag('ioreg'), sw(p.ioregW, V, p.ioregA, true)]);
   if (p.ppbrW != null) rows.push(['배터리 · PPBR 방전' + tag('ppbr'), charging ? '충전 중 ~0' : sw(-Math.abs(p.ppbrW), V, V ? -Math.abs(p.ppbrW) / V * 1000 : null, true)]);
   if (p.systemW != null) rows.push(['시스템 PSTR', `${p.systemW.toFixed(1)} W`]);
+  if (p.adapterName) rows.push(['어댑터 종류', p.adapterName]);
   if (p.adapterWnom != null) rows.push(['어댑터 · ioreg 공칭', sw(p.adapterWnom, p.adapterVnom, (p.adapterWnom && p.adapterVnom) ? p.adapterWnom / p.adapterVnom * 1000 : null, false)]);
   if (p.adapterW != null) rows.push(['어댑터 · SMC 실측 PDTR', sw(p.adapterW, p.dcInV, p.dcInA != null ? p.dcInA * 1000 : null, false)]);
   return rows.map(([k, v]) => `<tr><td class="k">${k}</td><td>${v}</td></tr>`).join('');
