@@ -908,7 +908,7 @@ function showTip(dayIndex, p, x, y, isPinned) {
     <h3>${isPinned ? '📌 ' : ''}${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${dayIndex}일차</h3>
     <div><span class="big">${state.rateLevel === 'pct' ? (p.pct ?? '?') : (p.cap != null ? p.cap.toFixed(1) : (p.pct ?? '?'))}%</span> <span class="tsm">${state.rateLevel === 'pct' ? (p.cap != null ? `정밀 ${p.cap.toFixed(1)}%` : '') : `정수 ${p.pct ?? '?'}%`}</span> &nbsp; ${st}</div>
     <table>
-      ${state.y === 'rate' && p._rate != null ? `<tr><td class="k">변화율</td><td>${p._rate >= 0 ? '+' : ''}${p._rate.toFixed(3)} %/min</td></tr>` : ''}
+      ${state.y === 'rate' && p._rate != null ? `<tr><td class="k">변화율 <small class="tsm">과거 ${Math.round(state.rateWin / 60)}분 평균</small></td><td>${p._rate >= 0 ? '+' : ''}${p._rate.toFixed(3)} %/min</td></tr>` : ''}
       ${p.systemW != null ? `<tr><td class="k">시스템</td><td>${p.systemW.toFixed(1)} W</td></tr>` : ''}
       ${p.adapterW != null ? `<tr><td class="k">어댑터</td><td>${p.adapterW.toFixed(1)} W</td></tr>` : ''}
       <tr><td class="k">배터리</td><td>${p.powerW != null ? `${p.powerW >= 0 ? '+' : '−'}${Math.abs(p.powerW).toFixed(2)} W` : (p.watts != null ? `${p.watts} W` : '?')}${p.voltage != null ? ` · ${p.voltage.toFixed(2)} V` : ''}${p.amperage != null ? ` · ${p.amperage} mA` : ''}</td></tr>
