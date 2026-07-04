@@ -435,8 +435,21 @@ function renderProjection() {
 
 // 3D 방전 예상선: 현재 지점에서 앞으로 시간을 진행시키며 %가 0으로 떨어지는 곡선/직선을 3D 그래프에 겹쳐
 // 그림. X=시각(자정을 지나면 감기며 Z(날짜)가 +1), Y=배터리 %(과거 데이터와 같은 축). 배터리 % 모드에서만.
+// 예상선의 0% 도달 지점은 다음날(격자 밖) 바닥 구석으로 내려가 코너 패널에 가리므로, 3D 스프라이트
+// 라벨로는 화면 각도에 따라 안 보인다. 대신 그 월드좌표를 매 프레임 화면좌표로 투영해, 패널 위에
+// 항상 뜨는 HTML 태그(#projTags)로 도착 시각을 표기한다 → 카메라·패널과 무관하게 "확실히 인지".
+let proj3DTags = [];   // [{vp: THREE.Vector3, el, yBias}]
+function clearProjTags() { for (const t of proj3DTags) t.el.remove(); proj3DTags = []; }
+function addProjTag(vp, text, color, yBias = 0) {
+  const el = document.createElement('div');
+  el.className = 'projTag'; el.textContent = text;
+  el.style.color = color; el.style.borderColor = color;
+  document.body.appendChild(el);
+  proj3DTags.push({ vp, el, yBias });
+}
 function drawProjection3D() {
   disposeGroup(projGroup);
+  clearProjTags();
   const r = state.report;
   if (state.projLine !== 'on' || state.y !== 'pct' || !r) return;
   try { drawProjection3DInner(r); } catch (e) { /* projection is non-essential — never let it break the 3D graph */ }
@@ -475,18 +488,16 @@ function drawProjection3DInner(r) {
   const dot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), new THREE.MeshBasicMaterial({ color: 0x4dd0c0 }));
   dot.position.copy(sp); projGroup.add(dot);
   const lab = makeLabel('예상', { size: 26, color: '#4dd0c0' }); lab.position.copy(sp).add(new THREE.Vector3(0, 1, 0)); projGroup.add(lab);
-  // 0% 도달 지점(곡선/직선이 바닥면과 만나는 곳)에 도착 시각을 표기 — 2D 카드의 ETA와 동일.
-  // 두 종점이 화면상 거의 겹치므로(예상선이 격자 밖 좁은 구석으로 수렴) 세로로 크게 벌려 표기.
-  const markEnd = (endMin, prefix, colHex, colStr, off) => {
+  // 0% 도달 지점(곡선/직선이 바닥면과 만나는 곳): 작은 종점 점 + 화면좌표로 항상 뜨는 시각 태그.
+  const markEnd = (endMin, colHex, colStr, prefix, yBias) => {
     const rt = P.baseT + endMin * 60;
     const p = new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(0, yMax), zFromDay(dayOfT(rt), maxDay));
     const d = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), new THREE.MeshBasicMaterial({ color: colHex }));
     d.position.copy(p); projGroup.add(d);
-    const t = makeLabel(`${prefix} ${fmtWhen(rt * 1000)}`, { size: 21, color: colStr });
-    t.position.copy(p).add(off); projGroup.add(t);
+    addProjTag(p.clone(), `${prefix} 0% · ${fmtWhen(rt * 1000)}`, colStr, yBias);
   };
-  markEnd(P.curveMin, '곡선', 0x4dd0c0, '#4dd0c0', new THREE.Vector3(0, 0.55, 0));   // 곡선 도착(청록) — 아래
-  markEnd(P.linMin, '직선', 0x8aa0b8, '#9fb2c6', new THREE.Vector3(0, 3.1, 0.8));    // 직선 도착(회청) — 위+뒤로 크게 벌려 겹침 방지
+  markEnd(P.curveMin, 0x4dd0c0, '#4dd0c0', '곡선', 0);     // 청록 실선 종점
+  markEnd(P.linMin, 0x8aa0b8, '#9fb2c6', '직선', 24);      // 회청 점선 종점 — 세로로 조금 내려 겹침 방지
 }
 
 function updateHud(r) {
@@ -1333,6 +1344,14 @@ addEventListener('resize', () => {
   if (pinned && !tipManual) {   // 고정 마커를 화면좌표로 투영해 툴팁이 따라붙게 (단, 직접 드래그로 옮겼으면 그 자리 유지)
     const s = pinned.vp.clone().project(camera);
     positionTip((s.x * 0.5 + 0.5) * innerWidth, (-s.y * 0.5 + 0.5) * innerHeight - 16);
+  }
+  for (const t of proj3DTags) {   // 예상 종료시각 태그를 3D 크로싱 지점에 화면좌표로 붙여 항상 위에 표시
+    const s = t.vp.clone().project(camera);
+    if (s.z > 1) { t.el.style.display = 'none'; continue; }   // 카메라 뒤면 숨김
+    t.el.style.display = '';
+    const x = (s.x * 0.5 + 0.5) * innerWidth, y = (-s.y * 0.5 + 0.5) * innerHeight, r = t.el.getBoundingClientRect();
+    t.el.style.left = Math.min(Math.max(6, x - r.width / 2), innerWidth - r.width - 6) + 'px';
+    t.el.style.top = Math.min(Math.max(6, y + 10 + t.yBias), innerHeight - r.height - 6) + 'px';
   }
   renderer.render(scene, camera);
 })();
