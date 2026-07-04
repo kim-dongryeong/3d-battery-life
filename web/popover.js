@@ -135,7 +135,7 @@ function rowsPower(s) {
 function statusRows(s) {
   return [
     [s.charging ? '완충까지' : '남은 시간', timeVal(s)],
-    ['온도', fmtTemp(s.tempC) + (s.smc ? ' <i class="ld"></i>' : '')],
+    ['배터리 온도', fmtTemp(s.tempC) + (s.smc ? ' <i class="ld"></i>' : '')],
   ];
 }
 function rowsHealth(s) {
@@ -345,7 +345,7 @@ function paint() {
         <div class="gtime">${timeLbl} <b>${timeVal(s)}</b></div>
       </div>
       <div class="sec">상태</div>
-      <div class="kv"><span>온도</span><b>${fmtTemp(s.tempC)}${s.smc ? ' <i class="ld"></i>' : ''}</b></div>
+      <div class="kv"><span>배터리 온도</span><b>${fmtTemp(s.tempC)}${s.smc ? ' <i class="ld"></i>' : ''}</b></div>
       <div class="sec">전원</div>
       ${kvHTML(rowsPower(s))}
       <div class="leg">${powerLegend(s)}</div>
@@ -359,7 +359,7 @@ function paint() {
       <div class="card"><div class="ct">${timeLbl}</div><div class="cv">${timeVal(s)}</div></div>
       <div class="cards2">
         <div class="card"><div class="ct">${s.systemW != null ? '시스템 전력' : '전력'}</div><div class="cv">${s.systemW != null ? s.systemW.toFixed(1) : (s.watts != null ? s.watts.toFixed(1) : '–')}<small>W</small></div></div>
-        <div class="card"><div class="ct">온도</div><div class="cv">${fmtTemp(s.tempC).replace(/ °[CF]/,'')}<small>°${resolveUnit()==='f'?'F':'C'}</small></div></div>
+        <div class="card"><div class="ct">배터리 온도</div><div class="cv">${fmtTemp(s.tempC).replace(/ °[CF]/,'')}<small>°${resolveUnit()==='f'?'F':'C'}</small></div></div>
         <div class="card"><div class="ct">건강</div><div class="cv">${s.healthPct != null ? Math.min(100, Math.round(s.healthPct)) : '–'}<small>%</small></div></div>
         <div class="card"><div class="ct">사이클</div><div class="cv">${s.cycles ?? '–'}</div></div>
       </div>

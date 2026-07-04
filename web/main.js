@@ -912,7 +912,7 @@ function showTip(dayIndex, p, x, y, isPinned) {
       ${p.systemW != null ? `<tr><td class="k">시스템</td><td>${p.systemW.toFixed(1)} W</td></tr>` : ''}
       ${p.adapterW != null ? `<tr><td class="k">어댑터</td><td>${p.adapterW.toFixed(1)} W</td></tr>` : ''}
       <tr><td class="k">배터리</td><td>${p.powerW != null ? `${p.powerW >= 0 ? '+' : '−'}${Math.abs(p.powerW).toFixed(2)} W` : (p.watts != null ? `${p.watts} W` : '?')}${p.voltage != null ? ` · ${p.voltage.toFixed(2)} V` : ''}${p.amperage != null ? ` · ${p.amperage} mA` : ''}</td></tr>
-      <tr><td class="k">온도</td><td>${p.tempC ?? '?'}°C</td></tr>
+      <tr><td class="k">배터리 온도</td><td>${p.tempC ?? '?'}°C</td></tr>
       <tr><td class="k">CPU 부하</td><td>${p.loadPct ?? '?'}%</td></tr>
       ${p.lowPower != null ? `<tr><td class="k">저전력</td><td>${p.lowPower ? '🟡 켜짐' : '꺼짐'}</td></tr>` : ''}
     </table>`;
