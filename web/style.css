@@ -44,6 +44,18 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .hcHdr { color: var(--dim); font-size: 10px; font-weight: 600; margin-bottom: 3px; }
 .hcHdr small { font-weight: 400; opacity: .85; }
 .hcSvg { display: block; width: 100%; height: auto; }
+/* 방전 예상(projection) */
+#projChart { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+#projChart:empty { display: none; }
+.prjF { margin-top: 4px; font-size: 10.5px; line-height: 1.5; }
+.prjR { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+.prjR b { font-variant-numeric: tabular-nums; }
+.prjK { color: var(--dim); display: inline-flex; align-items: center; gap: 5px; }
+.prjL { display: inline-block; width: 12px; height: 0; border-top: 2px solid var(--accent); }
+.prjL.dash { border-top-style: dashed; border-color: var(--dim); }
+.prjEq { color: var(--dim); font-size: 9.5px; margin-top: 2px; }
+.prjEq b { color: var(--fg); font-weight: 600; }
+.prjMuted { opacity: .7; }
 .hcAx { fill: var(--dim); font-size: 8px; font-variant-numeric: tabular-nums; }
 .hcAx2 { stroke: var(--line); stroke-width: 1; }
 .hcRef { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 2; opacity: .7; }   /* 100% 기준선 */

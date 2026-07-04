@@ -9,7 +9,7 @@ let X = X_BASE;                                          // effective time-axis 
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, detail: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
@@ -370,6 +370,66 @@ function healthChartHTML(health) {
     </svg>`;
 }
 
+// ── 방전 예상: 현재 잔량 → 0% 까지를 과거 방전 속도로 투영 (직선 등속 + 구간별 곡선) ──
+// 팝오버의 "남은 시간"은 macOS(ioreg TimeRemaining)의 자체 추정치(공식 비공개)라, 여기선 우리 방식을
+// 투명하게 계산해 그래프로 보여준다. 직선 = 현재 구간의 과거 평균 방전율로 등속 가정 · 곡선 = 각 10%
+// 구간의 실제 과거 방전율을 이어붙임(구간마다 속도가 달라 휜다). rate는 lib/bucketRates의 구간별 pooled.
+function projRates(rt) {
+  const m = {};
+  for (const b of (rt && rt.byBand || [])) {
+    // 표에 보이는 그 구간 속도(선택된 버전)와 동일하게 — 없으면 pooled로 대체. %/min·방전은 음수→크기만
+    const r = (b.versions && b.versions[state.rateVersion] != null) ? b.versions[state.rateVersion] : b.typicalMinute_pooled;
+    if (r != null && Number.isFinite(r) && Math.abs(r) > 1e-4) m[b.band] = Math.abs(r);
+  }
+  return m;
+}
+function renderProjection() {
+  const box = document.getElementById('projChart'); if (!box) return;
+  const L = state.report && state.report.latest, rates = projRates(state.rates);
+  // L0 basis must match the band rates' basis (/api/rates?level=…): 정밀 mAh% 기본, 정수% 옵션
+  const L0 = state.rateLevel === 'pct' ? (L && L.pct != null ? L.pct : null)
+    : (L && L.rawCap > 0 && L.rawMax > 0) ? +(L.rawCap / L.rawMax * 100).toFixed(1) : (L && L.pct != null ? L.pct : null);
+  if (L0 == null || L0 <= 0 || !Object.keys(rates).length) { box.innerHTML = ''; return; }
+  const sorted = Object.values(rates).sort((a, b) => a - b);
+  const fallback = sorted[sorted.length >> 1];           // median band rate fills any missing band
+  const rateAt = lvl => rates[Math.min(100, Math.max(10, Math.ceil(lvl / 10) * 10))] ?? fallback;
+  const rLin = rateAt(L0), linMin = L0 / rLin;            // 직선: 현재 구간 기울기로 등속
+  const pts = [{ t: 0, lvl: L0 }];                        // 곡선: 구간별 실제 속도로 하강
+  let t = 0, lvl = L0, guard = 0;
+  while (lvl > 0.01 && guard++ < 40) {
+    const lo = Math.max(0, Math.floor((lvl - 1e-6) / 10) * 10);
+    t += (lvl - lo) / rateAt(lvl); lvl = lo; pts.push({ t, lvl });
+  }
+  const curveMin = t, Tmax = Math.max(linMin, curveMin, 1);
+  const baseT = (L && L.t) ? L.t : Date.now() / 1000;
+  const dur = min => fmtDur(min * 60), eta = min => fmtWhen((baseT + min * 60) * 1000);
+  const W = 248, H = 104, pL = 30, pR = 8, pT = 8, pB = 16;
+  const xOf = tt => pL + tt / Tmax * (W - pL - pR), yOf = v => pT + (1 - v / L0) * (H - pT - pB);
+  const curve = pts.map(p => `${xOf(p.t).toFixed(1)},${yOf(p.lvl).toFixed(1)}`).join(' ');
+  const linePts = `${xOf(0).toFixed(1)},${yOf(L0).toFixed(1)} ${xOf(linMin).toFixed(1)},${yOf(0).toFixed(1)}`;
+  const yLab = v => `<text x="${pL - 3}" y="${(yOf(v) + 2.6).toFixed(1)}" text-anchor="end" class="hcAx">${v.toFixed(0)}</text>`;
+  const macos = (L && L.timeRemain != null && !L.charging) ? L.timeRemain : null;
+  box.innerHTML = `
+    <div class="hcHdr">방전 예상 <small>현재 ${L0.toFixed(0)}% → 0% · 과거 방전 속도 기준${L && L.charging ? ' (지금 뽑으면)' : ''}</small></div>
+    <svg class="hcSvg" viewBox="0 0 ${W} ${H}" width="100%">
+      <line x1="${pL}" y1="${pT}" x2="${pL}" y2="${(H - pB).toFixed(1)}" class="hcAx2"/>
+      <line x1="${pL}" y1="${yOf(0).toFixed(1)}" x2="${W - pR}" y2="${yOf(0).toFixed(1)}" class="hcAx2"/>
+      ${yLab(L0)}${yLab(L0 / 2)}${yLab(0)}
+      <polyline points="${linePts}" fill="none" stroke="var(--dim)" stroke-width="1.3" stroke-dasharray="4 3" opacity=".85"/>
+      <polyline points="${curve}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${xOf(0).toFixed(1)}" cy="${yOf(L0).toFixed(1)}" r="2.4" fill="var(--accent)"/>
+      <text x="${pL}" y="${H - 3}" class="hcAx">지금</text>
+      <text x="${W - pR}" y="${H - 3}" text-anchor="end" class="hcAx">${dur(Tmax)} 뒤</text>
+    </svg>
+    <div class="prjF">
+      <div class="prjR"><span class="prjK"><i class="prjL solid"></i>구간별(곡선)</span><b>${dur(curveMin)}</b> · ${eta(curveMin)}</div>
+      <div class="prjR"><span class="prjK"><i class="prjL dash"></i>직선 등속</span><b>${dur(linMin)}</b> · ${eta(linMin)}</div>
+      <div class="prjEq">직선 기울기 = 현재 ${L0.toFixed(0)}% 구간 방전율 <b>${rLin.toFixed(3)}%/분</b> → ${L0.toFixed(0)} ÷ ${rLin.toFixed(3)} = ${dur(linMin)}</div>
+      <div class="prjEq">곡선 = Σ (각 10% 구간 ÷ 그 구간 방전율) — 구간마다 속도가 달라 휨</div>
+      ${macos != null ? `<div class="prjEq">macOS 추정(ioreg): <b>${dur(macos)}</b> · ${eta(macos)} <span class="prjMuted">— 참고(공식 비공개)</span></div>` : ''}
+    </div>`;
+}
+
 function updateHud(r) {
   const L = r.latest, stats = document.getElementById('stats');
 
@@ -403,11 +463,17 @@ function updateHud(r) {
     rows.push(['배터리 건강도', `${L.healthPct}%`]);
     rows.push(['사이클', `${L.cycles}회`]);
     rows.push(['만충 용량', `${L.rawMax} / ${L.design} mAh`]);
+    const d = state.detail;   // 팝오버에서 이관: 시리얼 · 설계 사이클 한도 (내 데이터에서만)
+    if (d) {
+      if (d.designCycleCount) rows.push(['설계 사이클 한도', `${+d.designCycleCount}회`]);
+      if (d.serial) rows.push(['배터리 시리얼', String(d.serial).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]))]);
+    }
   }
   rows.push(['기록 기간', `${r.spanDays}일 · ${r.sessions.length}방전세션`]);
   rows.push(['샘플 수', `${r.sampleCount.toLocaleString()}개`]);
   stats.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd${k === '기준 시각' ? ' id="asof"' : ''}>${v}</dd>`).join('');
   document.getElementById('healthChart').innerHTML = healthChartHTML(r.health);
+  renderProjection();   // 방전 예상(직선+구간별 곡선) — 과거 방전 속도로 현재%→0% 투영
 
   renderRates();  // rigorous per-band discharge-rate panel (lib/bucketRates.js, /api/rates)
   if (typeof renderInsight === 'function') renderInsight();   // E 카드 레이아웃 값 갱신
@@ -817,6 +883,7 @@ async function loadRates() {
     state.selectedBand = best ? best.band : null;
   }
   renderRates();
+  renderProjection();   // rates 로드 후 방전 예상 갱신(구간별 곡선은 byBand 필요)
 }
 
 // ---- hover (raycast lines) ---------------------------------------------
@@ -998,6 +1065,10 @@ async function load() {
   }
   rebuild();
   loadRates();                 // per-band rate panel (concurrent)
+  // 배터리 상세(시리얼·설계 사이클 한도) — 내 데이터에서만, 팝오버에서 뷰어로 이관
+  if (state.source === 'real') {
+    fetch('/api/detail').then(res => res.ok ? res.json() : null).then(d => { state.detail = d; if (state.report) updateHud(state.report); }).catch(() => {});
+  } else if (state.detail) { state.detail = null; if (state.report) updateHud(state.report); }
   scheduleLive();              // (re)arm the 60s live refresh for '내 데이터'
 }
 
