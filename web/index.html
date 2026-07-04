@@ -19,15 +19,15 @@
 
   <!-- top-left: live status -->
   <header id="hud">
-    <h1>🔋 3D 분석 리포트 <a class="help-link" id="helpBtn" href="/help.html" title="지표·방법 과학 안내">?안내</a></h1>
+    <h1 data-i18n>🔋 3D 분석 리포트 <a class="help-link" id="helpBtn" href="/help.html" title="지표·방법 과학 안내">?안내</a></h1>
     <div id="healthBig" class="healthBig" title="현재 최대 용량 (= macOS 배터리 성능의 Maximum Capacity) · 사이클"></div>
     <div id="trend" class="trend">불러오는 중…</div>
     <dl id="stats"></dl>
     <div id="healthChart"></div>
   </header>
 
-  <!-- top-right: controls -->
-  <section id="panel">
+  <!-- top-right: controls (data-i18n = translate static labels/buttons/titles inside at load) -->
+  <section id="panel" data-i18n>
     <div class="grp">
       <span class="lbl">데이터</span>
       <div class="seg" data-group="source">
@@ -133,6 +133,10 @@
           <button data-val="ioreg" title="ioreg 배터리 셀의 전압×전류(V×I). 정확하지만 macOS가 ~60초마다 갱신해 지연이 있습니다.">ioreg V×I</button>
           <button data-val="hybrid" title="방전 중엔 PPBR(배터리 버스 방전 전력 직접 측정), 충전 중엔 수지(PDTR−PSTR). PPBR은 충전 중 ~0이라 충전은 수지로 대체합니다.">혼합</button>
         </div>
+      </div>
+      <div class="grp row">
+        <span class="lbl">언어 / Language</span>
+        <select id="langSel" class="btn" style="min-width:120px"></select>
       </div>
     </div>
     <div id="legend">

@@ -1,0 +1,72 @@
+{
+  "_comment": "English translation. KEY = the Korean source string (verbatim). To add your language: copy this file to web/locales/<code>.json, translate every VALUE (keep the keys), and add {\"code\":\"<code>\",\"name\":\"<name>\"} to web/locales/index.json. Untranslated/missing keys fall back to Korean.",
+
+  "3D 분석 리포트": "3D Analysis Report",
+  "🔋 3D 분석 리포트": "🔋 3D Analysis Report",
+  "?안내": "?Guide",
+
+  "데이터": "Data",
+  "데모2 ✨": "Demo 2 ✨",
+  "데모1": "Demo 1",
+  "내 데이터": "My data",
+
+  "세로축 (Y · 높이)": "Vertical axis (Y · height)",
+  "배터리 %": "Battery %",
+  "전력 W": "Power W",
+  "잔량 변화 %/min": "Δ charge %/min",
+
+  "평활 창 · 후행 (좁을수록 예민)": "Smoothing window · trailing (narrower = twitchier)",
+  "2분": "2 min",
+  "5분": "5 min",
+  "10분": "10 min",
+  "20분": "20 min",
+
+  "전력 레일": "Power rail",
+  "배터리": "Battery",
+  "시스템": "System",
+  "어댑터": "Adapter",
+
+  "시각 축 (X · 가로 폭)": "Time axis (X · width)",
+
+  "색상": "Color",
+  "충/방전": "Charge/Discharge",
+  "저전력": "Low Power",
+  "온도": "Temperature",
+  "CPU부하": "CPU load",
+  "전력": "Power",
+
+  "자동회전": "Auto-rotate",
+  "🌙 다크": "🌙 Dark",
+  "시점 리셋": "Reset view",
+  "언어": "Language",
+
+  "포인터 마커 크기": "Pointer marker size",
+  "작게": "Small",
+  "보통": "Medium",
+  "크게": "Large",
+
+  "바닥 안내선 (시각·날짜축)": "Floor guides (time · date)",
+  "켜기": "On",
+  "끄기": "Off",
+
+  "값 안내선 (z축=세로)": "Value guide (vertical)",
+  "대각선": "Diagonal",
+  "직각": "Right-angle",
+  "점": "Dot",
+  "면": "Plane",
+
+  "방전·충전 예상선 (3D · 배터리 % 모드)": "Discharge · Charge projection (3D · Battery % mode)",
+  "방전": "Discharge",
+  "충전": "Charge",
+
+  "계산 정밀도": "Precision",
+  "정밀 mAh": "Precise mAh",
+  "정수%": "Integer %",
+
+  "배터리 전력 측정 방식": "Battery power method",
+  "(전력 W 그래프 · 구간별전력)": "(Power W graph · per-band power)",
+  "수지 PDTR−PSTR": "Balance PDTR−PSTR",
+  "혼합": "Hybrid",
+
+  "드래그=회전 · 휠=줌 · 우클릭드래그=이동 · 곡선에 마우스를 올리면 그 세션 정보가 보입니다.": "Drag = rotate · Wheel = zoom · Right-drag = pan · Hover a curve for that session's info."
+}
