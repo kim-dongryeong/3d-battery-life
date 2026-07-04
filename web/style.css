@@ -49,6 +49,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .grp[hidden] { display: none; }   /* attribute hidden must beat .grp's display:flex */
 #viewerSettings { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 9px; border-top: 1px solid var(--line); }
 #viewerSettings[hidden] { display: none; }
+#gear { font-size: 17px; line-height: 1; padding: 5px 10px; }
 #gear.on { color: var(--accent); border-color: var(--accent); }
 .grp.row { flex-direction: row; align-items: center; justify-content: space-between; }
 .lbl { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
@@ -85,6 +86,7 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   box-shadow: 0 8px 30px rgba(0,0,0,.5); }
 #tip h3 { margin: 0 0 6px; font-size: 13px; }
 #tip .big { font-size: 20px; color: var(--accent); font-weight: 700; }
+#tip .tsm { color: var(--dim); font-size: 11px; font-weight: 600; }
 #tip table { width: 100%; border-collapse: collapse; margin-top: 6px; }
 #tip td { padding: 1px 0; }
 #tip td:last-child { text-align: right; font-variant-numeric: tabular-nums; }

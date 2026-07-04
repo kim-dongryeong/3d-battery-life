@@ -5,6 +5,7 @@
 :root {
   --bg: #0d1016; --fg: #eef1f8; --dim: #8b94a7; --faint: #616b80;
   --line: #232a3a; --accent: #a8ff33; --card: #161c28; --onfg: #0b1705;   /* very bright 연두 */
+  --chg: #eafff2;   /* charging bolt/plug glyph — bright in dark so it shows on the empty (dark) battery too */
   --acclite: #d9ff96;               /* bright end of the accent gradient */
   --state: var(--accent);           /* overridden each render by popover.js */
   --live: var(--accent);            /* live markers = the same fresh green */
@@ -13,6 +14,7 @@
 html.light {
   --bg: #ffffff; --fg: #131926; --dim: #5a6478; --faint: #8b95a9;   /* pure white */
   --line: #e7edf5; --accent: #83e00f; --card: #ffffff; --onfg: #163609;   /* 봄 싱그러운 밝은 연두 + dark text on it */
+  --chg: #143307;   /* light mode: dark glyph on the light/green battery */
   --acclite: #c4f27a;
   --rec: #e5342a;
 }
@@ -44,6 +46,7 @@ html { scrollbar-width: none; }
   font-size: 29px; font-weight: 800; line-height: 1; letter-spacing: -1.1px;
   font-variant-numeric: tabular-nums;
 }
+.psm { color: var(--dim); font-size: 11px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .st {
   display: inline-flex; align-items: center; gap: 5px; margin-top: 5px;
   font-size: 11.5px; font-weight: 650; color: var(--state);

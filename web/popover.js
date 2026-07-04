@@ -98,9 +98,9 @@ function batterySVG(pct, s) {
   const w = 46, fill = Math.max(4, pct / 100 * (w - 7));
   // charging → bolt · plugged-but-not-charging → plug · on battery → nothing (like Stats)
   const glyph = s.charging
-    ? `<path d="M23.6 6.3 L16.4 15.8 H21 L19.4 21.7 L27.2 11.7 H22.4 L24.6 6.3 Z" fill="var(--onfg)"/>`
+    ? `<path d="M23.6 6.3 L16.4 15.8 H21 L19.4 21.7 L27.2 11.7 H22.4 L24.6 6.3 Z" fill="var(--chg)" stroke="var(--onfg)" stroke-width=".5" stroke-linejoin="round"/>`
     : s.ac
-      ? `<g fill="var(--onfg)"><rect x="18.5" y="6" width="1.7" height="3.4" rx=".8"/><rect x="23.8" y="6" width="1.7" height="3.4" rx=".8"/><rect x="16.5" y="9" width="11" height="6.2" rx="1.6"/><rect x="20.4" y="15.2" width="3.2" height="4" rx="1"/></g>`
+      ? `<g fill="var(--chg)" stroke="var(--onfg)" stroke-width=".4"><rect x="18.5" y="6" width="1.7" height="3.4" rx=".8"/><rect x="23.8" y="6" width="1.7" height="3.4" rx=".8"/><rect x="16.5" y="9" width="11" height="6.2" rx="1.6"/><rect x="20.4" y="15.2" width="3.2" height="4" rx="1"/></g>`
       : '';
   return `<svg viewBox="0 0 60 28" width="58" height="27" aria-hidden="true">
     <defs><linearGradient id="bf" x1="0" y1="0" x2="0" y2="1">
@@ -320,6 +320,9 @@ function paint() {
   const known = s.pct != null;
   const pct = known ? Math.round(s.pct) : 0;   // unknown → gauge shows 0 fill but label reads "?"
   const pctLbl = known ? `${pct}%` : '?';
+  // 팝오버는 대중용 → 정수%가 기본, 정밀%(rawCap/rawMax)는 작게 병기
+  const capPct = (s.rawCap > 0 && s.rawMax > 0) ? s.rawCap / s.rawMax * 100 : null;
+  const precSmall = capPct != null ? `<div class="psm">정밀 ${capPct.toFixed(1)}%</div>` : '';
   document.documentElement.style.setProperty('--state', stateColor(s, pct));   // tint whole UI to battery state
   const timeLbl = s.charging ? '완충까지' : '남은 시간';
   const lpm = s.lowPower ? `<span class="lpm">🟡 저전력 모드</span>` : '';
@@ -338,7 +341,7 @@ function paint() {
           <text x="70" y="66" text-anchor="middle" class="gpct">${pctLbl}</text>
           <text x="70" y="88" text-anchor="middle" class="gsub">${stateIcon(s)} ${(s.systemW ?? s.watts) != null ? (s.systemW ?? s.watts).toFixed(1) + 'W' : ''}</text>
         </svg>
-        <div class="gstate">${stateOf(s)}</div> ${lpm ? `<div style="margin-top:6px">${lpm}</div>` : ''}
+        <div class="gstate">${stateOf(s)}</div>${precSmall} ${lpm ? `<div style="margin-top:6px">${lpm}</div>` : ''}
         <div class="gtime">${timeLbl} <b>${timeVal(s)}</b></div>
       </div>
       <div class="sec">상태</div>
@@ -351,7 +354,7 @@ function paint() {
       ${kvHTML(rowsHealth(s))}`;
   } else if (pv === 'cards') {
     el.innerHTML =
-      `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pctLbl}</div>
+      `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pctLbl}</div>${precSmall}
         <div class="st">${stateOf(s)} ${lpm}</div></div></div>
       <div class="card"><div class="ct">${timeLbl}</div><div class="cv">${timeVal(s)}</div></div>
       <div class="cards2">
@@ -367,7 +370,7 @@ function paint() {
       ${kvHTML([['만충 / 설계', (s.rawMax != null && s.design != null ? s.rawMax + ' / ' + s.design : '–') + ' mAh']])}`;
   } else { // list (Stats-like dense)
     el.innerHTML =
-      `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pctLbl}</div>
+      `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pctLbl}</div>${precSmall}
         <div class="st">${stateOf(s)} ${lpm}</div></div></div>
       <div class="sec">상태</div>
       ${kvHTML(statusRows(s))}

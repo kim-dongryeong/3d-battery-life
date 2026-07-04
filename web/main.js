@@ -811,7 +811,7 @@ function showTip(dayIndex, p, x, y) {
   const st = p.charging ? '⚡ 충전 중' : p.ac ? '🔌 만충/유휴' : '🔋 방전 중';
   tip.innerHTML = `
     <h3>${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${dayIndex}일차</h3>
-    <div><span class="big">${p.pct}%</span> &nbsp; ${st}</div>
+    <div><span class="big">${p.cap != null ? p.cap.toFixed(1) : (p.pct ?? '?')}%</span> <span class="tsm">정수 ${p.pct ?? '?'}%</span> &nbsp; ${st}</div>
     <table>
       ${state.y === 'rate' && p._rate != null ? `<tr><td class="k">변화율</td><td>${p._rate >= 0 ? '+' : ''}${p._rate.toFixed(3)} %/min</td></tr>` : ''}
       <tr><td class="k">전력</td><td>${p.watts ?? '?'} W</td></tr>
