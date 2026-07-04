@@ -95,7 +95,7 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .ftip-portal[hidden] { display: none; }
 .ftip-portal b { color: var(--accent); }
 
-#tip { position: fixed; z-index: 20; pointer-events: none; max-width: 260px;
+#tip { position: fixed; z-index: 20; pointer-events: none; max-width: 320px;
   background: var(--tip); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px;
   box-shadow: 0 8px 30px rgba(0,0,0,.5); }
 #tip.pinned { pointer-events: auto; cursor: move; }   /* 고정 시 드래그로 이동 가능 */
@@ -106,7 +106,10 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #tip table { width: 100%; border-collapse: collapse; margin-top: 6px; }
 #tip td { padding: 1px 0; }
 #tip td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
-#tip td.k { color: var(--dim); }
+#tip td.k { color: var(--dim); padding-right: 10px; white-space: nowrap; }
+#tip td:last-child { white-space: nowrap; }
+#tip .pmg { display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 5px; font-size: 9px;
+  font-weight: 700; color: #04110b; background: var(--good, #46d17f); vertical-align: middle; }
 
 #buckets { position: fixed; z-index: 10; left: 16px; bottom: 16px; padding: 12px 14px;
   background: var(--panel); backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: 14px;

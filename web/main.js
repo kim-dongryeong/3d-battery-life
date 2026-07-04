@@ -9,7 +9,7 @@ let X = X_BASE;                                          // effective time-axis 
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', floorGuide: 'on', valGuide: 'step', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
@@ -37,6 +37,7 @@ try { const r = localStorage.getItem('battWattsRail'); if (['battery', 'system',
 try { const c = localStorage.getItem('battFloorGuide'); if (['on', 'off'].includes(c)) state.floorGuide = c; } catch { /* ignore */ }
 try { const c = localStorage.getItem('battValGuide'); if (['diag', 'step', 'dot', 'plane', 'off'].includes(c)) state.valGuide = c; } catch { /* ignore */ }
 try { const l = localStorage.getItem('battRateLevel'); if (l === 'pct' || l === 'rawcap') state.rateLevel = l; } catch { /* ignore */ }   // '정수% 사용' 전역 설정
+try { const m = localStorage.getItem('battPowerMethod'); if (['balance', 'ioreg', 'hybrid'].includes(m)) state.powerMethod = m; } catch { /* ignore */ }   // 배터리 전력 측정 방식(그래프+구간별)
 try { const q = new URLSearchParams(location.search).get('level'); if (q === 'pct' || q === 'rawcap') state.rateLevel = q; } catch { /* ignore */ }   // ?level= deep-link (overrides)
 
 // ---- color themes (dark / light) for WebGL scenes + SVG charts -----------
@@ -224,8 +225,8 @@ function buildLines(report) {
   } else if (state.y === 'pct') {
     yMax = 100;
   } else {   // watts: 배터리는 부호축이라 |값|의 p98(대칭 ±yMax), 시스템/어댑터는 값 그대로
-    const f = wattField(), sgn = isSignedY();
-    const vals = runs.flatMap(r => r.points.map(p => p[f])).filter(v => v != null).map(v => sgn ? Math.abs(v) : v);
+    const sgn = isSignedY();
+    const vals = runs.flatMap(r => r.points.map(wattValueOf)).filter(v => v != null).map(v => sgn ? Math.abs(v) : v);
     yMax = Math.max(5, vals.length ? percentile(vals, 0.98) : 5);
   }
 
@@ -247,7 +248,7 @@ function buildLines(report) {
     };
     for (const p of run.points) {
       pi++;
-      const yv = state.y === 'rate' ? (rates ? rates[pi] : null) : (state.y === 'pct' ? levelPct(p) : p[wattField()]);   // 배터리 %는 정밀도 설정, 전력은 선택 레일
+      const yv = state.y === 'rate' ? (rates ? rates[pi] : null) : (state.y === 'pct' ? levelPct(p) : wattValueOf(p));   // 배터리 %는 정밀도, 전력은 레일+측정방식 설정
       if (yv == null || !Number.isFinite(yv)) continue;         // skip null/NaN -> no bad vertices
       const d = dayOfT(p.t);
       if (curDay !== null && d !== curDay) flush();             // split at midnight: no cross-day diagonal
@@ -272,8 +273,25 @@ const Y_LABEL = { pct: '배터리 %', watts: '전력 W', rate: '잔량 변화 %/
 // 배터리 레일은 부호 있는 powerW(방전 −/충전 +) — 시스템/어댑터는 단방향이라 크기 그대로.
 const WRAIL = { battery: 'powerW', system: 'systemW', adapter: 'adapterW' };   // '전력 W' 그래프의 레일 → 포인트 필드
 const WLABEL = { battery: '배터리 전력 W (+충전/−방전)', system: '시스템 전력 W', adapter: '어댑터 전력 W' };
-const yLabel = () => state.y === 'watts' ? WLABEL[state.wattsRail] : (Y_LABEL[state.y] || '배터리 %');
+const PM_LABEL = { balance: '수지 PDTR−PSTR', ioreg: 'ioreg V×I', hybrid: '혼합(방전 PPBR·충전 수지)' };
+const yLabel = () => state.y === 'watts'
+  ? (state.wattsRail === 'battery' ? `배터리 전력 W · ${PM_LABEL[state.powerMethod]} (+충전/−방전)` : WLABEL[state.wattsRail])
+  : (Y_LABEL[state.y] || '배터리 %');
 const wattField = () => WRAIL[state.wattsRail] || 'watts';
+// Signed battery power W for the selected measurement method (배터리 레일). balance=PDTR−PSTR(=powerW),
+// ioreg=ioreg V×I(ioregW), hybrid=방전 PPBR(음수)·충전 수지. Legacy rows missing a field fall back to
+// powerW (old data's powerW already = ioreg V×I). Mirrors lib/bucketRates.js battWMag.
+function battWatt(p) {
+  const bal = p.powerW;
+  if (state.powerMethod === 'ioreg') return p.ioregW != null ? p.ioregW : bal;
+  if (state.powerMethod === 'hybrid') {
+    const charging = bal != null ? bal > 0.05 : !!p.charging;
+    if (!charging && p.ppbrW != null) return -Math.abs(p.ppbrW);
+    return bal;
+  }
+  return bal;
+}
+const wattValueOf = p => state.wattsRail === 'battery' ? battWatt(p) : p[wattField()];
 // 부호축(0을 중앙, 아래=음수)이 필요한 모드: 잔량 변화율 · 배터리 전력
 const isSignedY = () => state.y === 'rate' || (state.y === 'watts' && state.wattsRail === 'battery');
 const GRAD_NUM = 'linear-gradient(90deg, hsl(215,45%,45%), hsl(260,56%,49%), hsl(305,68%,52%), hsl(350,80%,56%), hsl(35,95%,60%))';
@@ -791,7 +809,7 @@ function buildTrend3D(series) {
 
 async function loadRates() {
   try {
-    const res = await fetch(`/api/rates?source=${state.source}&level=${state.rateLevel}&period=${state.period}`);
+    const res = await fetch(`/api/rates?source=${state.source}&level=${state.rateLevel}&period=${state.period}&method=${state.powerMethod}`);
     state.rates = await res.json();
   } catch { state.rates = null; }
   if (state.rates && state.rates.byBand && !state.rates.byBand.some(b => b.band === state.selectedBand)) {
@@ -901,6 +919,28 @@ tip.addEventListener('pointermove', e => {
 });
 tip.addEventListener('pointerup', () => { tipDrag = null; });
 
+// All battery/adapter power measurement METHODS shown separately (직접 비교), like the popover.
+// The row actually feeding the 전력 W graph is badged 그래프 (in hybrid mode the badge follows
+// charge↔discharge). Rows whose method-field is absent (old data / on battery) are omitted.
+function powerRowsHTML(p) {
+  const V = p.voltage;
+  const sw = (w, v, a, signed) => {
+    if (w == null) return '–';
+    const wt = signed ? `${w >= 0 ? '+' : '−'}${Math.abs(w).toFixed(2)}` : w.toFixed(2);
+    return [`${wt} W`, v != null ? `${v.toFixed(2)} V` : null, a != null ? `${Math.round(a)} mA` : null].filter(Boolean).join(' · ');
+  };
+  const charging = p.powerW != null ? p.powerW > 0.05 : !!p.charging;
+  const graphIs = state.powerMethod === 'hybrid' ? (charging ? 'balance' : 'ppbr') : state.powerMethod;
+  const tag = k => graphIs === k ? ' <span class="pmg">그래프</span>' : '';
+  const rows = [['배터리 · 수지 PDTR−PSTR' + tag('balance'), sw(p.powerW, V, p.amperage, true)]];
+  if (p.ioregW != null) rows.push(['배터리 · ioreg V×I' + tag('ioreg'), sw(p.ioregW, V, p.ioregA, true)]);
+  if (p.ppbrW != null) rows.push(['배터리 · PPBR 방전' + tag('ppbr'), charging ? '충전 중 ~0' : sw(-Math.abs(p.ppbrW), V, V ? -Math.abs(p.ppbrW) / V * 1000 : null, true)]);
+  if (p.systemW != null) rows.push(['시스템 PSTR', `${p.systemW.toFixed(1)} W`]);
+  if (p.adapterWnom != null) rows.push(['어댑터 · ioreg 공칭', sw(p.adapterWnom, p.adapterVnom, (p.adapterWnom && p.adapterVnom) ? p.adapterWnom / p.adapterVnom * 1000 : null, false)]);
+  if (p.adapterW != null) rows.push(['어댑터 · SMC 실측 PDTR', sw(p.adapterW, p.dcInV, p.dcInA != null ? p.dcInA * 1000 : null, false)]);
+  return rows.map(([k, v]) => `<tr><td class="k">${k}</td><td>${v}</td></tr>`).join('');
+}
+
 function showTip(dayIndex, p, x, y, isPinned) {
   const d = new Date(p.t * 1000);
   const st = p.charging ? '⚡ 충전 중' : p.ac ? '🔌 만충/유휴' : '🔋 방전 중';
@@ -909,9 +949,7 @@ function showTip(dayIndex, p, x, y, isPinned) {
     <div><span class="big">${state.rateLevel === 'pct' ? (p.pct ?? '?') : (p.cap != null ? p.cap.toFixed(1) : (p.pct ?? '?'))}%</span> <span class="tsm">${state.rateLevel === 'pct' ? (p.cap != null ? `정밀 ${p.cap.toFixed(1)}%` : '') : `정수 ${p.pct ?? '?'}%`}</span> &nbsp; ${st}</div>
     <table>
       ${state.y === 'rate' && p._rate != null ? `<tr><td class="k">변화율 <small class="tsm">과거 ${Math.round(state.rateWin / 60)}분 평균</small></td><td>${p._rate >= 0 ? '+' : ''}${p._rate.toFixed(3)} %/min</td></tr>` : ''}
-      ${p.systemW != null ? `<tr><td class="k">시스템</td><td>${p.systemW.toFixed(1)} W</td></tr>` : ''}
-      ${p.adapterW != null ? `<tr><td class="k">어댑터</td><td>${p.adapterW.toFixed(1)} W</td></tr>` : ''}
-      <tr><td class="k">배터리</td><td>${p.powerW != null ? `${p.powerW >= 0 ? '+' : '−'}${Math.abs(p.powerW).toFixed(2)} W` : (p.watts != null ? `${p.watts} W` : '?')}${p.voltage != null ? ` · ${p.voltage.toFixed(2)} V` : ''}${p.amperage != null ? ` · ${p.amperage} mA` : ''}</td></tr>
+      ${powerRowsHTML(p)}
       <tr><td class="k">배터리 온도</td><td>${p.tempC ?? '?'}°C</td></tr>
       <tr><td class="k">CPU 부하</td><td>${p.loadPct ?? '?'}%</td></tr>
       ${p.lowPower != null ? `<tr><td class="k">저전력</td><td>${p.lowPower ? '🟡 켜짐' : '꺼짐'}</td></tr>` : ''}
@@ -975,6 +1013,7 @@ document.querySelectorAll('.seg').forEach(seg => {
     else if (group === 'xScale') { setXScale(+val); }
     else if (group === 'rateWin') { state.rateWin = +val; try { localStorage.setItem('battRateWin', val); } catch { /* ignore */ } rebuild(); }
     else if (group === 'wattsRail') { state.wattsRail = val; try { localStorage.setItem('battWattsRail', val); } catch { /* ignore */ } rebuild(); }
+    else if (group === 'powerMethod') { state.powerMethod = val; try { localStorage.setItem('battPowerMethod', val); } catch { /* ignore */ } rebuild(); loadRates(); }   // 그래프 배터리 전력 + 구간별전력 재계산
     else if (group === 'markerSize') { state.markerSize = +val; marker.scale.setScalar(+val); try { localStorage.setItem('battMarkerSize', val); } catch { /* ignore */ } }
     else if (group === 'rateLevel') { state.rateLevel = val; try { localStorage.setItem('battRateLevel', val); } catch { /* ignore */ } load(); }   // 전역 정밀도: 리포트+속도패널+그래프 전부 재계산
     else if (group === 'floorGuide') { state.floorGuide = val; try { localStorage.setItem('battFloorGuide', val); } catch { /* ignore */ } if (pinned || curHover) { placeGuides((pinned || curHover).vp); overlay.visible = true; } }

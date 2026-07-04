@@ -119,6 +119,14 @@
           <button data-val="pct" title="macOS가 1% 단위 정수로 주는 표시 %입니다. 정밀하지 않고 권장하지 않습니다 — 이 값으로 한 분석은 유의미한 insight를 주지 못합니다. 켜면 배터리 %·잔량 변화·구간별 방전 속도 등 모든 계산이 정밀 mAh 없이 거친 정수%가 됩니다.">정수%</button>
         </div>
       </div>
+      <div class="grp">
+        <span class="lbl">배터리 전력 측정 방식 <small>(전력 W 그래프 · 구간별전력)</small></span>
+        <div class="seg" data-group="powerMethod">
+          <button data-val="balance" class="on" title="에너지 수지: 어댑터 입력(PDTR) − 시스템 소비(PSTR). 실시간 부호값(+충전/−방전). 권장 기본값.">수지 PDTR−PSTR</button>
+          <button data-val="ioreg" title="ioreg 배터리 셀의 전압×전류(V×I). 정확하지만 macOS가 ~60초마다 갱신해 지연이 있습니다.">ioreg V×I</button>
+          <button data-val="hybrid" title="방전 중엔 PPBR(배터리 버스 방전 전력 직접 측정), 충전 중엔 수지(PDTR−PSTR). PPBR은 충전 중 ~0이라 충전은 수지로 대체합니다.">혼합</button>
+        </div>
+      </div>
     </div>
     <div id="legend">
       <div class="bar"></div>

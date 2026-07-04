@@ -123,8 +123,10 @@ export function startServer({ root, port } = {}) {
     if (url.pathname === '/api/rates') {
       const level = url.searchParams.get('level') === 'rawcap' ? 'rawcap' : 'pct';
       const period = url.searchParams.get('period');
+      const mq = url.searchParams.get('method');
+      const method = mq === 'ioreg' || mq === 'hybrid' ? mq : 'balance';   // 배터리 전력 측정 방식(구간별전력)
       try {
-        const r = analyzeRates(readSource(url.searchParams.get('source'), assetDir), { level, period });
+        const r = analyzeRates(readSource(url.searchParams.get('source'), assetDir), { level, period, method });
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ opt: r.opt, spans: r.spans, atoms: r.atoms, byBand: r.byBand, periods: r.periods, perCell: r.perCell }));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
