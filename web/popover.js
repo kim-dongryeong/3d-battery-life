@@ -162,22 +162,24 @@ function statusRows(s) {
   ];
 }
 function rowsHealth(s) {
-  return [
+  const rows = [
     ['최대 용량(건강)', s.healthPct != null ? `${Math.min(100, Math.round(s.healthPct))}%` : '–'],
+  ];
+  if (detail.condition) rows.push(['상태(컨디션)', esc(detail.condition)]);   // 건강 지표 옆에 배치
+  rows.push(
     ['사이클', s.cycles != null ? `${s.cycles}회` : '–'],
     ['만충 / 설계', (s.rawMax != null && s.design != null) ? `${s.rawMax} / ${s.design} mAh` : '–'],
-  ];
+  );
+  return rows;
 }
 const kvHTML = rows => rows.map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('');
 
 function detailHTML(s) {
+  // 컨디션은 '배터리' 건강 섹션으로 이동 · 설계 사이클 한도/시리얼은 뷰어로 이동(팝오버에서 제거)
   const rows = [];
-  if (detail.condition) rows.push(['상태(컨디션)', esc(detail.condition)]);
-  if (detail.designCycleCount) rows.push(['설계 사이클 한도', `${+detail.designCycleCount}회`]);
   if (detail.manufactureDate) rows.push(['제조일', `${esc(detail.manufactureDate)}${detail.ageDays ? ` · ${Math.floor(detail.ageDays / 365)}년 ${Math.round((detail.ageDays % 365) / 30)}개월` : ''}`]);
   if (s.ac && detail.adapterWatts) rows.push(['전원 어댑터', `${+detail.adapterWatts} W${detail.adapterName ? ' · ' + esc(detail.adapterName) : ''}`]);
   if (detail.onHold) rows.push(['충전 상태', '🔵 최적화 충전(대기 중)']);
-  if (detail.serial) rows.push(['배터리 시리얼', esc(detail.serial)]);
   return rows.length ? `<div class="sec">상세</div>${kvHTML(rows)}` : '';
 }
 // ── mini trend preview ─────────────────────────────────────────────────────────────
@@ -390,7 +392,7 @@ function paint() {
       ${kvHTML(rowsPower(s))}
       <div class="leg">${powerLegend(s)}</div>
       <div class="sec">배터리</div>
-      ${kvHTML([['만충 / 설계', (s.rawMax != null && s.design != null ? s.rawMax + ' / ' + s.design : '–') + ' mAh']])}`;
+      ${kvHTML([...(detail.condition ? [['상태(컨디션)', esc(detail.condition)]] : []), ['만충 / 설계', (s.rawMax != null && s.design != null ? s.rawMax + ' / ' + s.design : '–') + ' mAh']])}`;
   } else { // list (Stats-like dense)
     el.innerHTML =
       `<div class="hero">${batterySVG(pct, s)}<div><div class="big">${pctLbl}</div>${precSmall}
@@ -411,7 +413,6 @@ function paint() {
 $('foot').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.pv) { pv = b.dataset.pv; save('battPV', pv); settingsOpen = false; render(); }
-  else if (b.id === 'reportBtn') openReport();
   else if (b.id === 'moreBtn') { moreOpen = !moreOpen; renderMenu(); }
 });
 
@@ -453,6 +454,7 @@ function renderMenu() {
   if (!moreOpen) { el.hidden = true; el.innerHTML = ''; return; }
   const recLabel = (live && live.recording) ? '⏸  배터리 기록 중지' : '▶  배터리 기록 시작';
   el.innerHTML =
+    `<button data-m="report">📊  3D 분석 리포트</button>` +
     `<button data-m="settings">⚙  설정<span class="mk">⌘,</span></button>` +
     `<button data-m="record">${recLabel}</button>` +
     `<button data-m="quit" class="danger">⏻  앱 종료</button>`;

@@ -39,7 +39,7 @@ fn plist_path() -> PathBuf { home().join("Library/LaunchAgents").join(format!("{
 fn data_dir() -> PathBuf { home().join("Library/Application Support/3d-battery-life") }
 
 fn status_text(on: bool) -> &'static str {
-    if on { "● 배터리 기록: 켜짐 (백그라운드 · 앱과 무관)" } else { "○ 배터리 기록: 꺼짐" }
+    if on { "🟢 배터리 기록: 켜짐 (백그라운드 · 앱과 무관)" } else { "⚪ 배터리 기록: 꺼짐" }
 }
 
 // The sidecar binary sits next to this executable inside the .app (Contents/MacOS/battery-life).
@@ -274,7 +274,14 @@ fn main() {
                     if let Some(tray) = handle.tray_by_id("tray") {
                         // menu-bar "W" = live system draw (SMC) when we have it, else battery-rail watts
                         let mut title = live::tray_title(&l, c.info, sys_w.unwrap_or(l.watts));
-                        if c.widget == "iconpct" { title = String::new(); }   // % is drawn inside the icon
+                        if c.widget == "iconpct" {
+                            // the % is drawn INSIDE the icon → strip only the %-part of the title, but KEEP
+                            // the time/W so 표시 텍스트(info) still applies and the live W keeps updating.
+                            // (was: force-blank the whole title → info was a no-op and W never showed.)
+                            let pctp = format!("{}%", l.pct.round() as i64);
+                            if let Some(rest) = title.strip_prefix(&format!("{pctp} · ")) { title = rest.to_string(); }
+                            else if title == pctp { title = String::new(); }
+                        }
                         // text-only widget must never be blank (no glyph to fall back on)
                         else if c.widget == "text" && title.is_empty() { title = format!("{}%", l.pct.round() as i64); }
                         let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
