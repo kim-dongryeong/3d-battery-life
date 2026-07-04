@@ -9,7 +9,7 @@ let X = X_BASE;                                          // effective time-axis 
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, detail: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, detail: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', projLine: 'on', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
@@ -38,6 +38,7 @@ try { const c = localStorage.getItem('battFloorGuide'); if (['on', 'off'].includ
 try { const c = localStorage.getItem('battValGuide'); if (['diag', 'step', 'dot', 'plane', 'off'].includes(c)) state.valGuide = c; } catch { /* ignore */ }
 try { const l = localStorage.getItem('battRateLevel'); if (l === 'pct' || l === 'rawcap') state.rateLevel = l; } catch { /* ignore */ }   // '정수% 사용' 전역 설정
 try { const m = localStorage.getItem('battPowerMethod'); if (['balance', 'ioreg', 'hybrid'].includes(m)) state.powerMethod = m; } catch { /* ignore */ }   // 배터리 전력 측정 방식(그래프+구간별)
+try { const p = localStorage.getItem('battProjLine'); if (['on', 'off'].includes(p)) state.projLine = p; } catch { /* ignore */ }   // 3D 방전 예상선 표시
 try { const q = new URLSearchParams(location.search).get('level'); if (q === 'pct' || q === 'rawcap') state.rateLevel = q; } catch { /* ignore */ }   // ?level= deep-link (overrides)
 
 // ---- color themes (dark / light) for WebGL scenes + SVG charts -----------
@@ -73,6 +74,8 @@ const key = new THREE.DirectionalLight(0xffffff, 0.8); key.position.set(20, 40, 
 const sceneRoot = new THREE.Group(); scene.add(sceneRoot);   // axes + grid (rebuilt on mode change)
 const lineRoot = new THREE.Group(); scene.add(lineRoot);     // session curves
 const overlay = new THREE.Group(); overlay.visible = false; scene.add(overlay);   // hover marker + guide lines (persists across rebuilds)
+const projGroup = new THREE.Group(); scene.add(projGroup);   // 방전 예상선(현재→0%) — 배터리 % 모드에서만
+let projYMax = 100, projMaxDay = 1;   // stashed from the last buildLines so loadRates can redraw the projection alone
 let pinned = null, curHover = null;   // 마커 고정 상태 · 현재 호버 결과 {vp,point,dayIndex,line}
 let tipManual = false;                // 고정 툴팁을 드래그해 직접 배치했는지 → 그러면 마커 추적 중단
 
@@ -307,6 +310,7 @@ function rebuild() {
   if (!r) return;
   const { yMax, maxDay, cMin, cMax } = buildLines(r);
   buildAxes(yMax, yLabel(), maxDay, r.firstT);
+  projYMax = yMax; projMaxDay = maxDay; drawProjection3D();   // 방전 예상선(현재→0%) 겹쳐 그리기
 
   const cm = COLOR_META[state.color];
   document.getElementById('legLbl').textContent = cm.label;
@@ -383,38 +387,37 @@ function projRates(rt) {
   }
   return m;
 }
-function renderProjection() {
-  const box = document.getElementById('projChart'); if (!box) return;
+// Shared projection math (used by the 2D card AND the 3D line). Per-band rates = what the table shows.
+function computeProjection() {
   const L = state.report && state.report.latest, rates = projRates(state.rates);
-  // L0 basis must match the band rates' basis (/api/rates?level=…): 정밀 mAh% 기본, 정수% 옵션
-  const L0 = state.rateLevel === 'pct' ? (L && L.pct != null ? L.pct : null)
+  const L0 = state.rateLevel === 'pct' ? (L && L.pct != null ? L.pct : null)   // basis matches /api/rates?level=…
     : (L && L.rawCap > 0 && L.rawMax > 0) ? +(L.rawCap / L.rawMax * 100).toFixed(1) : (L && L.pct != null ? L.pct : null);
-  if (L0 == null || L0 <= 0 || !Object.keys(rates).length) { box.innerHTML = ''; return; }
-  const sorted = Object.values(rates).sort((a, b) => a - b);
-  const fallback = sorted[sorted.length >> 1];           // median band rate fills any missing band
+  if (L0 == null || L0 <= 0 || !Object.keys(rates).length) return null;
+  const sorted = Object.values(rates).sort((a, b) => a - b), fallback = sorted[sorted.length >> 1];
   const rateAt = lvl => rates[Math.min(100, Math.max(10, Math.ceil(lvl / 10) * 10))] ?? fallback;
   const rLin = rateAt(L0), linMin = L0 / rLin;            // 직선: 현재 구간 기울기로 등속
-  const pts = [{ t: 0, lvl: L0 }];                        // 곡선: 구간별 실제 속도로 하강
-  let t = 0, lvl = L0, guard = 0;
-  while (lvl > 0.01 && guard++ < 40) {
-    const lo = Math.max(0, Math.floor((lvl - 1e-6) / 10) * 10);
-    t += (lvl - lo) / rateAt(lvl); lvl = lo; pts.push({ t, lvl });
-  }
-  const curveMin = t, Tmax = Math.max(linMin, curveMin, 1);
-  const baseT = (L && L.t) ? L.t : Date.now() / 1000;
+  const pts = [{ t: 0, lvl: L0 }]; let t = 0, lvl = L0, guard = 0;   // 곡선: 구간별 실제 속도로 하강
+  while (lvl > 0.01 && guard++ < 40) { const lo = Math.max(0, Math.floor((lvl - 1e-6) / 10) * 10); t += (lvl - lo) / rateAt(lvl); lvl = lo; pts.push({ t, lvl }); }
+  return { L, L0, rLin, linMin, curveMin: t, pts, baseT: (L && L.t) ? L.t : Date.now() / 1000,
+    macos: (L && L.timeRemain != null && !L.charging) ? L.timeRemain : null };
+}
+function renderProjection() {
+  const box = document.getElementById('projChart'); if (!box) return;
+  const P = computeProjection(); if (!P) { box.innerHTML = ''; return; }
+  const { L, L0, rLin, linMin, curveMin, pts, baseT, macos } = P;
+  const Tmax = Math.max(linMin, curveMin, 1);
   const dur = min => fmtDur(min * 60), eta = min => fmtWhen((baseT + min * 60) * 1000);
   const W = 248, H = 104, pL = 30, pR = 8, pT = 8, pB = 16;
   const xOf = tt => pL + tt / Tmax * (W - pL - pR), yOf = v => pT + (1 - v / L0) * (H - pT - pB);
   const curve = pts.map(p => `${xOf(p.t).toFixed(1)},${yOf(p.lvl).toFixed(1)}`).join(' ');
   const linePts = `${xOf(0).toFixed(1)},${yOf(L0).toFixed(1)} ${xOf(linMin).toFixed(1)},${yOf(0).toFixed(1)}`;
-  const yLab = v => `<text x="${pL - 3}" y="${(yOf(v) + 2.6).toFixed(1)}" text-anchor="end" class="hcAx">${v.toFixed(0)}</text>`;
-  const macos = (L && L.timeRemain != null && !L.charging) ? L.timeRemain : null;
+  const yLab = (v, lab) => `<text x="${pL - 3}" y="${(yOf(v) + 2.6).toFixed(1)}" text-anchor="end" class="hcAx">${lab ?? v.toFixed(0)}</text>`;
   box.innerHTML = `
-    <div class="hcHdr">방전 예상 <small>현재 ${L0.toFixed(0)}% → 0% · 과거 방전 속도 기준${L && L.charging ? ' (지금 뽑으면)' : ''}</small></div>
+    <div class="hcHdr">방전 예상 <small>현재 ${L0.toFixed(1)}% → 0% · 과거 방전 속도 기준${L && L.charging ? ' (지금 뽑으면)' : ''}</small></div>
     <svg class="hcSvg" viewBox="0 0 ${W} ${H}" width="100%">
       <line x1="${pL}" y1="${pT}" x2="${pL}" y2="${(H - pB).toFixed(1)}" class="hcAx2"/>
       <line x1="${pL}" y1="${yOf(0).toFixed(1)}" x2="${W - pR}" y2="${yOf(0).toFixed(1)}" class="hcAx2"/>
-      ${yLab(L0)}${yLab(L0 / 2)}${yLab(0)}
+      ${yLab(L0, L0.toFixed(1))}${yLab(L0 / 2)}${yLab(0, '0')}
       <polyline points="${linePts}" fill="none" stroke="var(--dim)" stroke-width="1.3" stroke-dasharray="4 3" opacity=".85"/>
       <polyline points="${curve}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
       <circle cx="${xOf(0).toFixed(1)}" cy="${yOf(L0).toFixed(1)}" r="2.4" fill="var(--accent)"/>
@@ -424,10 +427,54 @@ function renderProjection() {
     <div class="prjF">
       <div class="prjR"><span class="prjK"><i class="prjL solid"></i>구간별(곡선)</span><b>${dur(curveMin)}</b> · ${eta(curveMin)}</div>
       <div class="prjR"><span class="prjK"><i class="prjL dash"></i>직선 등속</span><b>${dur(linMin)}</b> · ${eta(linMin)}</div>
-      <div class="prjEq">직선 기울기 = 현재 ${L0.toFixed(0)}% 구간 방전율 <b>${rLin.toFixed(3)}%/분</b> → ${L0.toFixed(0)} ÷ ${rLin.toFixed(3)} = ${dur(linMin)}</div>
+      <div class="prjEq">직선 기울기 = 현재 ${L0.toFixed(1)}% 구간 방전율 <b>${rLin.toFixed(3)}%/분</b> → ${L0.toFixed(1)} ÷ ${rLin.toFixed(3)} = ${dur(linMin)}</div>
       <div class="prjEq">곡선 = Σ (각 10% 구간 ÷ 그 구간 방전율) — 구간마다 속도가 달라 휨</div>
       ${macos != null ? `<div class="prjEq">macOS 추정(ioreg): <b>${dur(macos)}</b> · ${eta(macos)} <span class="prjMuted">— 참고(공식 비공개)</span></div>` : ''}
     </div>`;
+}
+
+// 3D 방전 예상선: 현재 지점에서 앞으로 시간을 진행시키며 %가 0으로 떨어지는 곡선/직선을 3D 그래프에 겹쳐
+// 그림. X=시각(자정을 지나면 감기며 Z(날짜)가 +1), Y=배터리 %(과거 데이터와 같은 축). 배터리 % 모드에서만.
+function drawProjection3D() {
+  disposeGroup(projGroup);
+  const r = state.report;
+  if (state.projLine !== 'on' || state.y !== 'pct' || !r) return;
+  try { drawProjection3DInner(r); } catch (e) { /* projection is non-essential — never let it break the 3D graph */ }
+}
+function drawProjection3DInner(r) {
+  const P = computeProjection(); if (!P) return;
+  const d0 = new Date((r.firstT || 0) * 1000); d0.setHours(0, 0, 0, 0);
+  const t0 = d0.getTime() / 1000, dayOfT = t => Math.floor((t - t0) / 86400);
+  const yMax = projYMax, maxDay = projMaxDay;
+  const lvlAtMin = tm => {                                  // interpolate the piecewise curve at projection-minute tm
+    const ps = P.pts;
+    for (let i = 1; i < ps.length; i++) if (tm <= ps[i].t) { const a = ps[i - 1], b = ps[i]; return a.lvl + (b.lvl - a.lvl) * (b.t === a.t ? 0 : (tm - a.t) / (b.t - a.t)); }
+    return 0;
+  };
+  const build = (endMin, isLinear, color, dashed, opacity) => {
+    const segs = [[]]; let prevDay = null;
+    for (let tm = 0; tm <= endMin + 1e-6; tm += Math.max(2, endMin / 90)) {
+      const mm = Math.min(tm, endMin);
+      const lvl = isLinear ? P.L0 * (1 - mm / endMin) : lvlAtMin(mm);
+      const rt = P.baseT + mm * 60, day = dayOfT(rt);
+      if (prevDay !== null && day !== prevDay) segs.push([]);   // 자정에서 분리 → 가로 점프선 방지
+      prevDay = day;
+      segs[segs.length - 1].push(new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(lvl, yMax), zFromDay(day, maxDay)));
+    }
+    for (const seg of segs) {
+      if (seg.length < 2) continue;
+      const g = new THREE.BufferGeometry().setFromPoints(seg);
+      const m = dashed ? new THREE.LineDashedMaterial({ color, dashSize: 0.7, gapSize: 0.5, transparent: true, opacity })
+        : new THREE.LineBasicMaterial({ color, transparent: true, opacity });
+      const line = new THREE.Line(g, m); if (dashed) line.computeLineDistances(); projGroup.add(line);
+    }
+  };
+  build(P.curveMin, false, 0x4dd0c0, false, 0.9);          // 구간별 곡선 (청록 실선)
+  build(P.linMin, true, 0x8aa0b8, true, 0.6);              // 직선 등속 (회청 점선)
+  const sp = new THREE.Vector3(xFromTod(todOf(P.baseT)), yFromVal(P.L0, yMax), zFromDay(dayOfT(P.baseT), maxDay));
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), new THREE.MeshBasicMaterial({ color: 0x4dd0c0 }));
+  dot.position.copy(sp); projGroup.add(dot);
+  const lab = makeLabel('예상', { size: 26, color: '#4dd0c0' }); lab.position.copy(sp).add(new THREE.Vector3(0, 1, 0)); projGroup.add(lab);
 }
 
 function updateHud(r) {
@@ -884,6 +931,7 @@ async function loadRates() {
   }
   renderRates();
   renderProjection();   // rates 로드 후 방전 예상 갱신(구간별 곡선은 byBand 필요)
+  drawProjection3D();   // 3D 예상선도 rates 로드 후 갱신
 }
 
 // ---- hover (raycast lines) ---------------------------------------------
@@ -1090,6 +1138,7 @@ document.querySelectorAll('.seg').forEach(seg => {
     else if (group === 'rateLevel') { state.rateLevel = val; try { localStorage.setItem('battRateLevel', val); } catch { /* ignore */ } load(); }   // 전역 정밀도: 리포트+속도패널+그래프 전부 재계산
     else if (group === 'floorGuide') { state.floorGuide = val; try { localStorage.setItem('battFloorGuide', val); } catch { /* ignore */ } if (pinned || curHover) { placeGuides((pinned || curHover).vp); overlay.visible = true; } }
     else if (group === 'valGuide') { state.valGuide = val; try { localStorage.setItem('battValGuide', val); } catch { /* ignore */ } if (pinned || curHover) { placeGuides((pinned || curHover).vp); overlay.visible = true; } }
+    else if (group === 'projLine') { state.projLine = val; try { localStorage.setItem('battProjLine', val); } catch { /* ignore */ } drawProjection3D(); }
     else { state[group] = val; rebuild(); }
   });
 });
