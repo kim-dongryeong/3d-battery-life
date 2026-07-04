@@ -274,7 +274,7 @@ fn main() {
                     if let Some(tray) = handle.tray_by_id("tray") {
                         // menu-bar "W" = live system draw (SMC) when we have it, else battery-rail watts
                         let mut title = live::tray_title(&l, c.info, sys_w.unwrap_or(l.watts));
-                        if c.widget == "iconpct" {
+                        if c.widget == "iconpct" || c.widget == "combo" || c.widget == "stack" {
                             // the % is drawn INSIDE the icon → strip only the %-part of the title, but KEEP
                             // the time/W so 표시 텍스트(info) still applies and the live W keeps updating.
                             // (was: force-blank the whole title → info was a no-op and W never showed.)

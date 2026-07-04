@@ -288,7 +288,7 @@ function tailHTML(s) { return powerCompareHTML(s) + detailHTML(s) + procsHTML();
 
 // ── settings panel (gear) ──────────────────────────────────────────────
 // data-k = a localStorage display pref (popover-only) · data-c = a server cfg key (menu-bar/alerts)
-const INFO_OPTS = [['0', '아이콘만'], ['1', '퍼센트'], ['2', '남은 시간'], ['3', '전력(W)'], ['4', '퍼센트+전력'], ['5', '퍼센트+시간']];
+const INFO_OPTS = [['0', '아이콘만'], ['1', '퍼센트(잔량)'], ['2', '남은/완충 시간'], ['3', '시스템 전력'], ['4', '퍼센트+시스템전력'], ['5', '퍼센트+시간'], ['6', '배터리 전력'], ['7', '퍼센트+배터리전력']];
 const selEl = (attr, key, cur, opts) => `<select ${attr}="${key}">` +
   opts.map(([v, l]) => `<option value="${v}"${String(v) === String(cur) ? ' selected' : ''}>${l}</option>`).join('') + `</select>`;
 const tglEl = (key, on) => `<button class="tgl${on ? ' on' : ''}" data-c="${key}" role="switch" aria-checked="${on}"><i></i></button>`;
@@ -305,7 +305,7 @@ function settingsHTML() {
 
     <div class="sec">메뉴바</div>
     <div class="srow"><span>표시 텍스트</span>${selEl('data-c', 'info', cfg.info, INFO_OPTS)}</div>
-    <div class="srow"><span>위젯 모양</span>${selEl('data-c', 'widget', cfg.widget, [['icon', '아이콘'], ['iconpct', '아이콘+숫자'], ['bar', '막대'], ['text', '텍스트']])}</div>
+    <div class="srow"><span>위젯 모양</span>${selEl('data-c', 'widget', cfg.widget, [['icon', '아이콘(채움)'], ['combo', '채움+숫자+상태'], ['iconpct', '아이콘+숫자'], ['stack', '숫자↑아이콘'], ['bar', '막대'], ['text', '텍스트']])}</div>
     <div class="srow"><span>아이콘 색상</span>${tglEl('colorize', cfg.colorize)}</div>
     <div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>
     <div class="srow"><span>열기 단축키 <kbd>⌥⌃B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>

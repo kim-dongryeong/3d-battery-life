@@ -112,7 +112,7 @@ pub fn cfg_path() -> std::path::PathBuf {
 // menu no longer mutates it, so we only ever READ it here.
 pub fn load_cfg() -> Cfg {
     let mut c: Cfg = std::fs::read_to_string(cfg_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-    if c.info > 5 { c.info = 4; }   // clamp the menu-bar text mode to a valid variant
+    if c.info > 7 { c.info = 4; }   // clamp the menu-bar text mode to a valid variant
     c
 }
 fn time_str(l: &Live) -> String {
@@ -135,13 +135,20 @@ fn fill_color(l: &Live, colorize: bool, lpm: bool) -> (u8, u8, u8, u8) {
     else { (74, 200, 120, 255) }
 }
 
-// Which menu-bar glyph to draw: "text" → None (title only), "bar" → vertical bar,
-// "iconpct" → battery outline with the % number inside (one compact slot), else the battery.
+// Which menu-bar glyph to draw. Packs varying amounts of info into a tight menu-bar slot:
+//   "text"    → None (title only)
+//   "bar"     → thin vertical cell filling from the bottom
+//   "iconpct" → battery outline with the % number inside (no fill)
+//   "combo"   → battery FILLED by % + number overlaid + charge status (max info, min width)
+//   "stack"   → % number stacked ABOVE a mini filled battery (narrowest footprint)
+//   _ (icon)  → filled battery + charge status
 pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool) -> Option<(Vec<u8>, u32, u32)> {
     match widget {
         "text" => None,
         "bar" => Some(bar_glyph(l, colorize, lpm)),
         "iconpct" => Some(battery_pct_icon(l, colorize, lpm)),
+        "combo" => Some(combo_icon(l, colorize, lpm)),
+        "stack" => Some(stack_icon(l, colorize, lpm)),
         _ => Some(battery_icon(l, colorize, xl, lpm)),
     }
 }
@@ -165,7 +172,7 @@ pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u
     let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
-    let outline = (238u8, 241u8, 247u8, 255u8);
+    let outline = (255u8, 255u8, 255u8, 255u8);
     let ink = fill_color(l, colorize, lpm);   // number colored by level / LPM
     // thin battery outline + cap
     let (bx0, by0, bx1, by1) = (1i32, 2i32, 33i32, 18i32);
@@ -206,6 +213,117 @@ pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u
     (buf, w, h)
 }
 
+// Compact single cell: battery FILLED proportional to % (color by level) + % number overlaid
+// (white with a dark shadow so it reads over both the fill and the empty part) + charge status
+// bolt/plug. Max info in one battery-width slot — no separate title text needed.
+pub fn combo_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
+    let (w, h) = (40u32, 20u32);
+    let mut buf = vec![0u8; (w * h * 4) as usize];
+    let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
+        if x < 0 || y < 0 || x as u32 >= w || y as u32 >= h { return; }
+        let i = ((y as u32 * w + x as u32) * 4) as usize;
+        buf[i] = c.0; buf[i + 1] = c.1; buf[i + 2] = c.2; buf[i + 3] = c.3;
+    };
+    let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
+        for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
+    };
+    let outline = (255u8, 255u8, 255u8, 255u8);
+    let pct = l.pct.clamp(0.0, 100.0);
+    let fill = fill_color(l, colorize, lpm);
+    // battery body + proportional fill (as battery_icon)
+    let (bx0, by0, bx1, by1) = (1i32, 2i32, 33i32, 18i32);
+    rect(&mut buf, bx0, by0, bx1, by0 + 2, outline);
+    rect(&mut buf, bx0, by1 - 2, bx1, by1, outline);
+    rect(&mut buf, bx0, by0, bx0 + 2, by1, outline);
+    rect(&mut buf, bx1 - 2, by0, bx1, by1, outline);
+    rect(&mut buf, bx1, 7, bx1 + 3, 13, outline);
+    let (ix0, iy0, ix1, iy1) = (bx0 + 2, by0 + 2, bx1 - 2, by1 - 2);
+    let fw = ((ix1 - ix0) as f64 * pct / 100.0).round() as i32;
+    rect(&mut buf, ix0, iy0, ix0 + fw.max(1), iy1, fill);
+    // charge status on the left of the body, dark ink so the number stays clear
+    let dark = (16u8, 20u8, 26u8, 255u8);
+    let ind_w = if l.charging || l.full { 7i32 } else { 0 };
+    if l.charging {
+        for &(x, y) in &[(6, 4), (5, 5), (5, 6), (7, 8), (6, 9), (6, 10), (5, 11)] { px(&mut buf, x, y, dark); }
+        rect(&mut buf, 4, 7, 8, 8, dark);
+    } else if l.full {
+        for &(x, y) in &[(4, 4), (6, 4)] { px(&mut buf, x, y, dark); }
+        rect(&mut buf, 3, 5, 8, 9, dark);
+        for y in 9..12 { px(&mut buf, 5, y, dark); }
+    }
+    // % number, 2×, centered in the space right of the indicator — drop-shadow then white on top
+    let digits: Vec<u8> = (pct.round() as u32).to_string().bytes().map(|b| b - b'0').collect();
+    let (scale, gap) = (2i32, 1i32);
+    let dw = 3 * scale + gap;
+    let total = digits.len() as i32 * dw - gap;
+    let (dl, dr) = (bx0 + 2 + ind_w, bx1 - 1);
+    let x0 = (dl + dr) / 2 - total / 2;
+    let y0 = (h as i32 - 5 * scale) / 2;
+    let shadow = (0u8, 0u8, 0u8, 205u8);
+    for (pass, col_c) in [(1i32, shadow), (0i32, (255u8, 255u8, 255u8, 255u8))] {   // shadow (offset) then white
+        let mut x = x0;
+        for &d in &digits {
+            let g = DIGITS[d as usize % 10];
+            for (row, bits) in g.iter().enumerate() {
+                for c in 0..3i32 {
+                    if bits & (1 << (2 - c)) != 0 {
+                        let (dx, dy) = (x + c * scale + pass, y0 + row as i32 * scale + pass);
+                        rect(&mut buf, dx, dy, dx + scale, dy + scale, col_c);
+                    }
+                }
+            }
+            x += dw;
+        }
+    }
+    (buf, w, h)
+}
+
+// % number stacked ABOVE a mini horizontal battery — narrowest horizontal footprint for a tight
+// menu bar (packs level graphic + number into ~1 battery width, using height instead of width).
+pub fn stack_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
+    let (w, h) = (26u32, 22u32);
+    let mut buf = vec![0u8; (w * h * 4) as usize];
+    let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
+        if x < 0 || y < 0 || x as u32 >= w || y as u32 >= h { return; }
+        let i = ((y as u32 * w + x as u32) * 4) as usize;
+        buf[i] = c.0; buf[i + 1] = c.1; buf[i + 2] = c.2; buf[i + 3] = c.3;
+    };
+    let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
+        for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
+    };
+    let outline = (255u8, 255u8, 255u8, 255u8);
+    let pct = l.pct.clamp(0.0, 100.0);
+    let fill = fill_color(l, colorize, lpm);
+    // number on top (2× tall but tight), centered; charging tint uses the fill color for the digits
+    let dcol = if l.charging || l.full || lpm { fill } else { outline };
+    let digits: Vec<u8> = (pct.round() as u32).to_string().bytes().map(|b| b - b'0').collect();
+    let (scale, gap) = (2i32, 1i32);
+    let dw = 3 * scale + gap;
+    let total = digits.len() as i32 * dw - gap;
+    let mut x = w as i32 / 2 - total / 2;
+    let ny = 0;
+    for &d in &digits {
+        let g = DIGITS[d as usize % 10];
+        for (row, bits) in g.iter().enumerate() {
+            for c in 0..3i32 {
+                if bits & (1 << (2 - c)) != 0 { rect(&mut buf, x + c * scale, ny + row as i32 * scale, x + c * scale + scale, ny + row as i32 * scale + scale, dcol); }
+            }
+        }
+        x += dw;
+    }
+    // mini horizontal battery below (fills proportional to %)
+    let (bx0, by0, bx1, by1) = (2i32, 13i32, 22i32, 22i32);
+    rect(&mut buf, bx0, by0, bx1, by0 + 1, outline);
+    rect(&mut buf, bx0, by1 - 1, bx1, by1, outline);
+    rect(&mut buf, bx0, by0, bx0 + 1, by1, outline);
+    rect(&mut buf, bx1 - 1, by0, bx1, by1, outline);
+    rect(&mut buf, bx1, by0 + 2, bx1 + 2, by1 - 2, outline);
+    let (ix0, iy0, ix1, iy1) = (bx0 + 1, by0 + 1, bx1 - 1, by1 - 1);
+    let fw = ((ix1 - ix0) as f64 * pct / 100.0).round() as i32;
+    rect(&mut buf, ix0, iy0, ix0 + fw.max(1), iy1, fill);
+    (buf, w, h)
+}
+
 // ---- menu-bar battery GLYPH (like Stats): a battery outline filling proportional to charge,
 // teal + bolt while charging, plug while plugged-and-holding. `xl` shrinks the vertical margin so
 // the body fills more of the canvas — since macOS scales the tray image to the menu-bar height,
@@ -221,7 +339,7 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool) -> (Vec<u8>, 
     let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
-    let outline = (238u8, 241u8, 247u8, 255u8); // mid-gray: readable on light & dark menu bars
+    let outline = (255u8, 255u8, 255u8, 255u8); // mid-gray: readable on light & dark menu bars
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
 
@@ -267,7 +385,7 @@ pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
-    let outline = (238u8, 241u8, 247u8, 255u8);
+    let outline = (255u8, 255u8, 255u8, 255u8);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
     let (bx0, by0, bx1, by1) = (3i32, 1i32, 11i32, 19i32);   // upright cell
@@ -294,11 +412,13 @@ pub fn tray_title(l: &Live, info: u8, watts: f64) -> String {
     }
     let pct = l.pct.round() as i64;
     match info {
-        0 => String::new(),                                   // icon only
-        1 => format!("{pct}%"),
-        2 => time_str(l),
-        3 => format!("{watts:.1}W"),
-        5 => format!("{pct}% · {}", time_str(l)),
-        _ => format!("{pct}% · {watts:.1}W"),                 // 4 = %+W (default)
+        0 => String::new(),                                   // 아이콘만
+        1 => format!("{pct}%"),                               // 잔량
+        2 => time_str(l),                                     // 남은/완충 예상시간
+        3 => format!("{watts:.1}W"),                          // 시스템 전력 (watts = 시스템 우선)
+        5 => format!("{pct}% · {}", time_str(l)),             // 잔량 + 예상시간
+        6 => format!("{:.1}W", l.watts.abs()),                // 배터리 전력 (배터리 레일 W)
+        7 => format!("{pct}% · {:.1}W", l.watts.abs()),       // 잔량 + 배터리 전력
+        _ => format!("{pct}% · {watts:.1}W"),                 // 4 = 잔량 + 시스템 전력 (기본)
     }
 }
