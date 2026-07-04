@@ -111,14 +111,14 @@ function axisLine(a, b, color) {
 // ---- axes / grid --------------------------------------------------------
 // X = 하루 중 시각, Y = 배터리 %/W (높이), Z = 경과 일수 (깊이)
 const zFromDay = (d, maxDay) => (d / Math.max(1, maxDay)) * Z - Z / 2;
-const yFromVal = (v, valMax) => state.y === 'rate'
+const yFromVal = (v, valMax) => isSignedY()
   ? clamp((v + valMax) / (2 * (valMax > 0 ? valMax : 1)), 0, 1) * Y   // signed: −valMax→floor, 0→중앙, +valMax→top
   : clamp(v / (valMax > 0 ? valMax : 1), 0, 1) * Y;
 
 function buildAxes(valMax, valLabel, maxDay, firstT) {
   disposeGroup(sceneRoot);
   const x0 = -X / 2, z0 = -Z / 2, z1 = Z / 2;
-  const signed = state.y === 'rate';                                // 잔량 변화율: 바닥·축·눈금을 0(충전↔방전 경계)에 붙인다
+  const signed = isSignedY();                                       // 잔량 변화율·배터리 전력: 바닥·축·눈금을 0(충전↔방전 경계)에 붙인다
   const baseY = signed ? Y / 2 : 0;
   const axC = signed ? 0x4dd0c0 : TH().axis;                        // 0 평면 축은 청록으로 강조
 
@@ -141,7 +141,7 @@ function buildAxes(valMax, valLabel, maxDay, firstT) {
   for (let i = 0; i <= 4; i++) {
     const v = signed ? valMax * (i / 2 - 1) : valMax * i / 4, y = Y * i / 4;
     sceneRoot.add(axisLine([x0 - 0.3, y, z0], [x0, y, z0], TH().axisTick));
-    const s = makeLabel(state.y === 'pct' ? `${Math.round(v)}%` : signed ? v.toFixed(2) : `${v.toFixed(0)}W`, { size: 28, color: TH().tickC });
+    const s = makeLabel(state.y === 'pct' ? `${Math.round(v)}%` : state.y === 'rate' ? v.toFixed(2) : `${v.toFixed(0)}W`, { size: 28, color: TH().tickC });
     s.position.set(x0 - 2.2, y, z0); sceneRoot.add(s);
   }
   const yt = makeLabel(valLabel, { color: TH().titleC }); yt.position.set(x0 - 4.5, Y + 1, z0); sceneRoot.add(yt);
@@ -217,9 +217,12 @@ function buildLines(report) {
   if (state.y === 'rate') {
     const mags = runRates.flat().filter(v => v != null && Number.isFinite(v)).map(Math.abs);
     yMax = mags.length ? Math.max(0.1, percentile(mags, 0.98)) : 1;   // symmetric ±yMax; p98 so one spike doesn't flatten it
-  } else {
-    const yMaxRaw = state.y === 'pct' ? 100 : percentile(runs.flatMap(r => r.points.map(p => p[wattField()] ?? 0)), 0.98);
-    yMax = state.y === 'pct' ? 100 : Math.max(5, yMaxRaw);  // value (depth) max
+  } else if (state.y === 'pct') {
+    yMax = 100;
+  } else {   // watts: 배터리는 부호축이라 |값|의 p98(대칭 ±yMax), 시스템/어댑터는 값 그대로
+    const f = wattField(), sgn = isSignedY();
+    const vals = runs.flatMap(r => r.points.map(p => p[f])).filter(v => v != null).map(v => sgn ? Math.abs(v) : v);
+    yMax = Math.max(5, vals.length ? percentile(vals, 0.98) : 5);
   }
 
   let ri = -1;
@@ -262,10 +265,13 @@ function buildLines(report) {
 // ---- rebuild everything for current state -------------------------------
 const COLOR_META = { state: { label: '상태', unit: '' }, lowPower: { label: '저전력 모드', unit: '' }, tempC: { label: '온도', unit: '°C' }, loadPct: { label: 'CPU 부하(load avg)', unit: '%' }, watts: { label: '전력', unit: 'W' } };
 const Y_LABEL = { pct: '배터리 %', watts: '전력 W', rate: '잔량 변화 %/min (+충전/−방전)' };
-const WRAIL = { battery: 'watts', system: 'systemW', adapter: 'adapterW' };   // '전력 W' 그래프의 레일 → 포인트 필드
-const WLABEL = { battery: '배터리 전력 W', system: '시스템 전력 W', adapter: '어댑터 전력 W' };
+// 배터리 레일은 부호 있는 powerW(방전 −/충전 +) — 시스템/어댑터는 단방향이라 크기 그대로.
+const WRAIL = { battery: 'powerW', system: 'systemW', adapter: 'adapterW' };   // '전력 W' 그래프의 레일 → 포인트 필드
+const WLABEL = { battery: '배터리 전력 W (+충전/−방전)', system: '시스템 전력 W', adapter: '어댑터 전력 W' };
 const yLabel = () => state.y === 'watts' ? WLABEL[state.wattsRail] : (Y_LABEL[state.y] || '배터리 %');
 const wattField = () => WRAIL[state.wattsRail] || 'watts';
+// 부호축(0을 중앙, 아래=음수)이 필요한 모드: 잔량 변화율 · 배터리 전력
+const isSignedY = () => state.y === 'rate' || (state.y === 'watts' && state.wattsRail === 'battery');
 const GRAD_NUM = 'linear-gradient(90deg, hsl(215,45%,45%), hsl(260,56%,49%), hsl(305,68%,52%), hsl(350,80%,56%), hsl(35,95%,60%))';
 const GRAD_STATE = 'linear-gradient(90deg, hsl(7,85%,55%) 0 33%, hsl(198,45%,50%) 50%, hsl(119,80%,50%) 66% 100%)';
 
