@@ -9,7 +9,7 @@ let X = X_BASE;                                          // effective time-axis 
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, detail: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', projLine: 'on', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, detail: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', projDis: 'on', projChg: 'on', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
@@ -38,7 +38,12 @@ try { const c = localStorage.getItem('battFloorGuide'); if (['on', 'off'].includ
 try { const c = localStorage.getItem('battValGuide'); if (['diag', 'step', 'dot', 'plane', 'off'].includes(c)) state.valGuide = c; } catch { /* ignore */ }
 try { const l = localStorage.getItem('battRateLevel'); if (l === 'pct' || l === 'rawcap') state.rateLevel = l; } catch { /* ignore */ }   // '정수% 사용' 전역 설정
 try { const m = localStorage.getItem('battPowerMethod'); if (['balance', 'ioreg', 'hybrid'].includes(m)) state.powerMethod = m; } catch { /* ignore */ }   // 배터리 전력 측정 방식(그래프+구간별)
-try { const p = localStorage.getItem('battProjLine'); if (['on', 'off'].includes(p)) state.projLine = p; } catch { /* ignore */ }   // 3D 방전 예상선 표시
+try {   // 3D 방전/충전 예상선 표시 (각각 독립 on/off) — 구버전 battProjLine을 방전 기본값으로 승계
+  const old = localStorage.getItem('battProjLine');
+  const pd = localStorage.getItem('battProjDis') ?? old, pc = localStorage.getItem('battProjChg');
+  if (['on', 'off'].includes(pd)) state.projDis = pd;
+  if (['on', 'off'].includes(pc)) state.projChg = pc;
+} catch { /* ignore */ }
 try { const q = new URLSearchParams(location.search).get('level'); if (q === 'pct' || q === 'rawcap') state.rateLevel = q; } catch { /* ignore */ }   // ?level= deep-link (overrides)
 
 // ---- color themes (dark / light) for WebGL scenes + SVG charts -----------
@@ -401,6 +406,45 @@ function computeProjection() {
   return { L, L0, rLin, linMin, curveMin: t, pts, baseT: (L && L.t) ? L.t : Date.now() / 1000,
     macos: (L && L.timeRemain != null && !L.charging) ? L.timeRemain : null };
 }
+// 과거 '충전' 구간에서 뽑은 구간별 충전 속도(양수 %/min). 충전은 상단(CV)에서 느려져 구간마다 다름.
+function chargeRatesByBand() {
+  const r = state.report; if (!r || !r.runs) return {};
+  const usePct = state.rateLevel === 'pct';
+  const lvlOf = p => usePct ? p.pct : (p.cap != null ? p.cap : p.pct);
+  const acc = {};
+  for (const run of r.runs) {
+    if (run.kind !== 'charge') continue;
+    const ps = run.points;
+    for (let i = 1; i < ps.length; i++) {
+      const la = lvlOf(ps[i - 1]), lb = lvlOf(ps[i]), dt = ps[i].t - ps[i - 1].t;
+      if (la == null || lb == null || !(dt > 0) || dt > 3600 || lb <= la) continue;   // 상승(충전)만
+      const band = Math.min(100, Math.max(10, Math.ceil((la + lb) / 2 / 10) * 10));   // 중간 레벨의 10% 밴드에 배분
+      (acc[band] ??= { rise: 0, time: 0 }); acc[band].rise += lb - la; acc[band].time += dt;
+    }
+  }
+  const m = {};
+  for (const band in acc) if (acc[band].time > 0 && acc[band].rise > 0) m[band] = acc[band].rise / acc[band].time * 60;
+  return m;
+}
+// 충전 예상: 현재 잔량 → 100% (구간별 곡선 + 현재구간 등속 직선). 완충/충전이력없음 → null.
+function computeCharge() {
+  const r = state.report, L = r && r.latest;
+  const L0 = state.rateLevel === 'pct' ? (L && L.pct != null ? L.pct : null)
+    : (L && L.rawCap > 0 && L.rawMax > 0) ? +(L.rawCap / L.rawMax * 100).toFixed(1) : (L && L.pct != null ? L.pct : null);
+  if (L0 == null || L0 >= 99.5) return null;                 // 완충/거의 완충 → 충전 예상선 없음
+  const rates = chargeRatesByBand(); if (!Object.keys(rates).length) return null;   // 충전 이력 없음
+  const sorted = Object.values(rates).sort((a, b) => a - b), fallback = sorted[sorted.length >> 1];
+  const rateAt = lvl => rates[Math.min(100, Math.max(10, Math.ceil(lvl / 10) * 10))] ?? fallback;
+  const rLin = rateAt(Math.min(100, Math.ceil((L0 + 1e-6) / 10) * 10)), linMin = (100 - L0) / rLin;
+  const pts = [{ t: 0, lvl: L0 }]; let t = 0, lvl = L0, guard = 0;
+  while (lvl < 99.99 && guard++ < 40) { const hi = Math.min(100, Math.ceil((lvl + 1e-6) / 10) * 10); t += (hi - lvl) / rateAt(hi); lvl = hi; pts.push({ t, lvl }); }
+  let adapter = null;                                        // 최근 쓰던 충전기 (라벨/툴팁 맥락용)
+  for (let ri = r.runs.length - 1; ri >= 0 && !adapter; ri--) {
+    const ps = r.runs[ri].points;
+    for (let i = ps.length - 1; i >= 0; i--) if (ps[i].adapterWnom != null || ps[i].adapterName) { adapter = { name: ps[i].adapterName, w: ps[i].adapterWnom }; break; }
+  }
+  return { L0, target: 100, rLin, linMin, curveMin: t, pts, baseT: (L && L.t) ? L.t : Date.now() / 1000, adapter };
+}
 function renderProjection() {
   const box = document.getElementById('projChart'); if (!box) return;
   const P = computeProjection(); if (!P) { box.innerHTML = ''; return; }
@@ -459,56 +503,70 @@ function drawProjection3D() {
   if (pinned && pinned.proj) { pinned = null; tipManual = false; tip.classList.remove('pinned'); tip.hidden = true; overlay.visible = false; }
   projLines = [];
   const r = state.report;
-  if (state.projLine !== 'on' || state.y !== 'pct' || !r) return;
+  if ((state.projDis !== 'on' && state.projChg !== 'on') || state.y !== 'pct' || !r) return;
   try { drawProjection3DInner(r); } catch (e) { /* projection is non-essential — never let it break the 3D graph */ }
 }
+// 방전(현재→0%)·충전(현재→100%) 예상선을 3D 그래프에 겹쳐 그림. 방향별로 곡선(구간별)+직선(등속),
+// 종점은 각 목표면(0% 또는 100%)에서 화면좌표 태그로 도착 시각 표기. 자정을 지나면 Z(날짜)가 +1.
 function drawProjection3DInner(r) {
-  const P = computeProjection(); if (!P) return;
   const d0 = new Date((r.firstT || 0) * 1000); d0.setHours(0, 0, 0, 0);
   const t0 = d0.getTime() / 1000, dayOfT = t => Math.floor((t - t0) / 86400);
   const yMax = projYMax, maxDay = projMaxDay;
-  const lvlAtMin = tm => {                                  // interpolate the piecewise curve at projection-minute tm
-    const ps = P.pts;
-    for (let i = 1; i < ps.length; i++) if (tm <= ps[i].t) { const a = ps[i - 1], b = ps[i]; return a.lvl + (b.lvl - a.lvl) * (b.t === a.t ? 0 : (tm - a.t) / (b.t - a.t)); }
-    return 0;
-  };
-  const build = (endMin, isLinear, color, dashed, opacity, kind) => {
-    const segs = [[]], metas = [[]]; let prevDay = null;     // metas: 정점별 {t, lvl, mm} — 호버 툴팁용
-    for (let tm = 0; tm <= endMin + 1e-6; tm += Math.max(2, endMin / 90)) {
-      const mm = Math.min(tm, endMin);
-      const lvl = isLinear ? P.L0 * (1 - mm / endMin) : lvlAtMin(mm);
-      const rt = P.baseT + mm * 60, day = dayOfT(rt);
-      if (prevDay !== null && day !== prevDay) { segs.push([]); metas.push([]); }   // 자정에서 분리 → 가로 점프선 방지
-      prevDay = day;
-      segs[segs.length - 1].push(new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(lvl, yMax), zFromDay(day, maxDay)));
-      metas[metas.length - 1].push({ t: rt, lvl, mm });
+  let startDrawn = false;
+
+  const drawSet = (P, dir) => {   // P: {L0, target, curveMin, linMin, pts, baseT}
+    const isChg = dir === 'charge';
+    const lvlAtMin = tm => {                                // interpolate the piecewise curve at projection-minute tm
+      const ps = P.pts;
+      for (let i = 1; i < ps.length; i++) if (tm <= ps[i].t) { const a = ps[i - 1], b = ps[i]; return a.lvl + (b.lvl - a.lvl) * (b.t === a.t ? 0 : (tm - a.t) / (b.t - a.t)); }
+      return P.target;
+    };
+    const build = (endMin, isLinear, color, dashed, opacity, kind) => {
+      const segs = [[]], metas = [[]]; let prevDay = null;   // metas: 정점별 {t, lvl, mm, dir} — 호버 툴팁용
+      for (let tm = 0; tm <= endMin + 1e-6; tm += Math.max(2, endMin / 90)) {
+        const mm = Math.min(tm, endMin);
+        const lvl = isLinear ? P.L0 + (P.target - P.L0) * (mm / endMin) : lvlAtMin(mm);
+        const rt = P.baseT + mm * 60, day = dayOfT(rt);
+        if (prevDay !== null && day !== prevDay) { segs.push([]); metas.push([]); }   // 자정에서 분리 → 가로 점프선 방지
+        prevDay = day;
+        segs[segs.length - 1].push(new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(lvl, yMax), zFromDay(day, maxDay)));
+        metas[metas.length - 1].push({ t: rt, lvl, mm, dir });
+      }
+      for (let si = 0; si < segs.length; si++) {
+        const seg = segs[si]; if (seg.length < 2) continue;
+        const g = new THREE.BufferGeometry().setFromPoints(seg);
+        const m = dashed ? new THREE.LineDashedMaterial({ color, dashSize: 0.7, gapSize: 0.5, transparent: true, opacity })
+          : new THREE.LineBasicMaterial({ color, transparent: true, opacity });
+        const line = new THREE.Line(g, m); if (dashed) line.computeLineDistances();
+        line.userData = { proj: true, kind, dir, meta: metas[si] };
+        projGroup.add(line); projLines.push(line);          // 레이캐스트 대상에 추가
+      }
+    };
+    const curveHex = isChg ? 0x46d17f : 0x4dd0c0, lineHex = isChg ? 0x8fd6a8 : 0x8aa0b8;
+    const curveStr = isChg ? '#46d17f' : '#4dd0c0', lineStr = isChg ? '#8fd6a8' : '#9fb2c6';
+    build(P.curveMin, false, curveHex, false, 0.9, isChg ? 'chgCurve' : 'disCurve');   // 구간별 곡선 (실선)
+    build(P.linMin, true, lineHex, true, 0.6, isChg ? 'chgLine' : 'disLine');           // 등속 직선 (점선)
+    if (!startDrawn) {   // 시작점(현재 잔량) 표식 + '예상' 라벨 — 방전·충전이 같은 지점에서 출발하므로 한 번만
+      startDrawn = true;
+      const sp = new THREE.Vector3(xFromTod(todOf(P.baseT)), yFromVal(P.L0, yMax), zFromDay(dayOfT(P.baseT), maxDay));
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      dot.position.copy(sp); projGroup.add(dot);
+      const lab = makeLabel('예상', { size: 26, color: '#dfeeea' }); lab.position.copy(sp).add(new THREE.Vector3(0, 1, 0)); projGroup.add(lab);
     }
-    for (let si = 0; si < segs.length; si++) {
-      const seg = segs[si]; if (seg.length < 2) continue;
-      const g = new THREE.BufferGeometry().setFromPoints(seg);
-      const m = dashed ? new THREE.LineDashedMaterial({ color, dashSize: 0.7, gapSize: 0.5, transparent: true, opacity })
-        : new THREE.LineBasicMaterial({ color, transparent: true, opacity });
-      const line = new THREE.Line(g, m); if (dashed) line.computeLineDistances();
-      line.userData = { proj: true, kind, meta: metas[si] };
-      projGroup.add(line); projLines.push(line);            // 레이캐스트 대상에 추가
-    }
+    // 목표면(0% 또는 100%) 도달 지점: 작은 종점 점 + 화면좌표로 항상 뜨는 시각 태그
+    const markEnd = (endMin, colHex, colStr, prefix, yBias) => {
+      const rt = P.baseT + endMin * 60;
+      const p = new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(P.target, yMax), zFromDay(dayOfT(rt), maxDay));
+      const d = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), new THREE.MeshBasicMaterial({ color: colHex }));
+      d.position.copy(p); projGroup.add(d);
+      addProjTag(p.clone(), `${prefix} ${P.target}% · ${fmtWhen(rt * 1000)}`, colStr, yBias);
+    };
+    markEnd(P.curveMin, curveHex, curveStr, '곡선', 0);
+    markEnd(P.linMin, lineHex, lineStr, '직선', 24);        // 세로로 조금 내려 겹침 방지
   };
-  build(P.curveMin, false, 0x4dd0c0, false, 0.9, 'curve');  // 구간별 곡선 (청록 실선)
-  build(P.linMin, true, 0x8aa0b8, true, 0.6, 'line');       // 직선 등속 (회청 점선)
-  const sp = new THREE.Vector3(xFromTod(todOf(P.baseT)), yFromVal(P.L0, yMax), zFromDay(dayOfT(P.baseT), maxDay));
-  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), new THREE.MeshBasicMaterial({ color: 0x4dd0c0 }));
-  dot.position.copy(sp); projGroup.add(dot);
-  const lab = makeLabel('예상', { size: 26, color: '#4dd0c0' }); lab.position.copy(sp).add(new THREE.Vector3(0, 1, 0)); projGroup.add(lab);
-  // 0% 도달 지점(곡선/직선이 바닥면과 만나는 곳): 작은 종점 점 + 화면좌표로 항상 뜨는 시각 태그.
-  const markEnd = (endMin, colHex, colStr, prefix, yBias) => {
-    const rt = P.baseT + endMin * 60;
-    const p = new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(0, yMax), zFromDay(dayOfT(rt), maxDay));
-    const d = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), new THREE.MeshBasicMaterial({ color: colHex }));
-    d.position.copy(p); projGroup.add(d);
-    addProjTag(p.clone(), `${prefix} 0% · ${fmtWhen(rt * 1000)}`, colStr, yBias);
-  };
-  markEnd(P.curveMin, 0x4dd0c0, '#4dd0c0', '곡선', 0);     // 청록 실선 종점
-  markEnd(P.linMin, 0x8aa0b8, '#9fb2c6', '직선', 24);      // 회청 점선 종점 — 세로로 조금 내려 겹침 방지
+
+  if (state.projDis === 'on') { const P = computeProjection(); if (P) drawSet({ ...P, target: 0 }, 'discharge'); }
+  if (state.projChg === 'on') { const C = computeCharge(); if (C) drawSet(C, 'charge'); }
 }
 
 function updateHud(r) {
@@ -1125,22 +1183,24 @@ function positionTip(x, y) {
   tip.style.left = Math.min(Math.max(8, x + 16), innerWidth - r.width - 8) + 'px';
   tip.style.top = Math.min(Math.max(8, y + 16), innerHeight - r.height - 8) + 'px';
 }
-// 예상선(곡선/직선) 위 호버 툴팁 — 실측 데이터가 아니라 미래 추정이므로 별도 서식(시각·%·경과).
+// 예상선(방전/충전 · 곡선/직선) 위 호버 툴팁 — 실측이 아니라 미래 추정이므로 별도 서식(시각·%·경과).
 function showProjTip(pj, x, y, isPinned) {
   const d = new Date(pj.t * 1000);
   const clock = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  const isCurve = pj.kind === 'curve';
-  const col = isCurve ? '#4dd0c0' : '#9fb2c6';
-  const way = isCurve ? '구간별 곡선 <small class="tsm">(각 구간 과거 속도)</small>' : '직선 등속 <small class="tsm">(현재 구간 속도로 외삽)</small>';
+  const isChg = pj.dir === 'charge', isCurve = /Curve$/.test(pj.kind || '');
+  const col = isChg ? (isCurve ? '#46d17f' : '#8fd6a8') : (isCurve ? '#4dd0c0' : '#9fb2c6');
+  const head = isChg ? '⚡ 충전 예상' : '📉 방전 예상';
+  const goal = isChg ? '완충(100%)까지' : '0%까지';
+  const kindSub = isCurve ? '(각 구간 과거 속도)' : `(현재 구간 ${isChg ? '충전' : '방전'}속도로 외삽)`;
   tip.innerHTML = `
-    <h3>${isPinned ? '📌 ' : ''}<span style="color:${col}">📈 방전 예상 · ${isCurve ? '곡선' : '직선'}</span></h3>
+    <h3>${isPinned ? '📌 ' : ''}<span style="color:${col}">${head} · ${isCurve ? '곡선' : '직선'}</span></h3>
     <div><span class="big" style="color:${col}">${pj.lvl.toFixed(1)}%</span> <span class="tsm">${d.getMonth() + 1}/${d.getDate()} ${clock} 예상</span></div>
     <table>
       <tr><td class="k">예상 시각</td><td>${d.getMonth() + 1}/${d.getDate()} ${clock}</td></tr>
       <tr><td class="k">지금부터</td><td>${fmtDur(pj.mm * 60)} 뒤</td></tr>
-      <tr><td class="k">방식</td><td>${way}</td></tr>
+      <tr><td class="k">${goal}</td><td>${isCurve ? '구간별 곡선' : '직선 등속'} <small class="tsm">${kindSub}</small></td></tr>
     </table>
-    <div class="tsm" style="margin-top:6px; opacity:.8">과거 방전 속도 기반 추정 · 실제와 다를 수 있음</div>`;
+    <div class="tsm" style="margin-top:6px; opacity:.8">과거 ${isChg ? '충전' : '방전'} 속도 기반 추정 · 실제와 다를 수 있음</div>`;
   tip.hidden = false;
   positionTip(x, y);
 }
@@ -1190,6 +1250,14 @@ async function load() {
 document.querySelectorAll('.seg').forEach(seg => {
   seg.addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
+    if (seg.dataset.group === 'projToggle') {   // 방전/충전 = 독립 토글(라디오 아님)
+      const on = !b.classList.contains('on'); b.classList.toggle('on', on);
+      const key = b.dataset.pt === 'dis' ? 'projDis' : 'projChg', ls = b.dataset.pt === 'dis' ? 'battProjDis' : 'battProjChg';
+      state[key] = on ? 'on' : 'off';
+      try { localStorage.setItem(ls, state[key]); } catch { /* ignore */ }
+      drawProjection3D();
+      return;
+    }
     seg.querySelectorAll('button').forEach(x => x.classList.remove('on'));
     b.classList.add('on');
     const group = seg.dataset.group, val = b.dataset.val;
@@ -1204,13 +1272,13 @@ document.querySelectorAll('.seg').forEach(seg => {
     else if (group === 'rateLevel') { state.rateLevel = val; try { localStorage.setItem('battRateLevel', val); } catch { /* ignore */ } load(); }   // 전역 정밀도: 리포트+속도패널+그래프 전부 재계산
     else if (group === 'floorGuide') { state.floorGuide = val; try { localStorage.setItem('battFloorGuide', val); } catch { /* ignore */ } if (pinned || curHover) { placeGuides((pinned || curHover).vp); overlay.visible = true; } }
     else if (group === 'valGuide') { state.valGuide = val; try { localStorage.setItem('battValGuide', val); } catch { /* ignore */ } if (pinned || curHover) { placeGuides((pinned || curHover).vp); overlay.visible = true; } }
-    else if (group === 'projLine') { state.projLine = val; try { localStorage.setItem('battProjLine', val); } catch { /* ignore */ } drawProjection3D(); }
     else { state[group] = val; rebuild(); }
   });
 });
 // reflect current state on every segmented control (defaults + deep-linked y/color/xScale)
 document.querySelectorAll('.seg').forEach(seg => {
   const g = seg.dataset.group;
+  if (g === 'projToggle') { seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', (b.dataset.pt === 'dis' ? state.projDis : state.projChg) === 'on')); return; }
   seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', g === 'xScale' ? +b.dataset.val === state.xScale : String(state[g]) === b.dataset.val));
 });
 

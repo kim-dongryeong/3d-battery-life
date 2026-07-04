@@ -113,10 +113,10 @@
         </div>
       </div>
       <div class="grp">
-        <span class="lbl">방전 예상선 (3D · 배터리 % 모드)</span>
-        <div class="seg" data-group="projLine">
-          <button data-val="on" class="on" title="현재 잔량에서 0%까지 예상 방전 곡선(청록 실선)·직선(점선)을 3D 그래프에 겹쳐 표시">켜기</button>
-          <button data-val="off">끄기</button>
+        <span class="lbl">방전·충전 예상선 (3D · 배터리 % 모드)</span>
+        <div class="seg" data-group="projToggle">
+          <button data-pt="dis" class="on" title="현재 잔량 → 0% 방전 예상선(청록 실선=구간별 곡선, 점선=등속). 충전 중이면 '지금 뽑으면' 가정.">방전</button>
+          <button data-pt="chg" class="on" title="현재 잔량 → 100% 충전 예상선(초록). 방전 중이면 최근 쓰던 충전기를 '지금 꽂으면' 가정. 완충(≈100%)이면 표시 안 함.">충전</button>
         </div>
       </div>
       <div class="grp">
