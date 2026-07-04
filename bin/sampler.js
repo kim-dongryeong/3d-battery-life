@@ -2,11 +2,12 @@
 // One-shot: take a battery snapshot and append it to the shared samples log.
 // Designed to be run repeatedly by launchd (StartInterval) — it exits
 // immediately, so there is no resident daemon and ~0% idle CPU cost.
-import { sample } from '../lib/battery.js';
+import { sample, applyLiveSMC } from '../lib/battery.js';
 import { appendSample } from '../lib/paths.js';
 
 try {
   const s = sample();
+  applyLiveSMC(s, true);   // RECORD the 1-minute AVERAGE power (∫W dt / 60s), not a single instant → energy-correct
   appendSample(s);   // recency-guarded + locked: won't double-write with the resident app / a racing writer
   if (process.stdout.isTTY) {
     console.log(

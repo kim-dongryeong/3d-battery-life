@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { sample } from '../lib/battery.js';
+import { sample, applyLiveSMC } from '../lib/battery.js';
 import { startServer, resolveRoot, DEMO_VER } from '../server.js';
 import { userDataDir, samplesFile, appendSample } from '../lib/paths.js';
 import { generateDemoLines } from '../scripts/gen-demo.js';
@@ -121,6 +121,7 @@ switch (cmd) {
     break;
   case 'sample': {
     const s = sample();
+    applyLiveSMC(s, true);   // record the 1-minute AVERAGE power (energy-correct), like the launchd sampler
     const wrote = appendSample(s);   // recency-guarded + locked (no double-write with launchd / resident app)
     console.log(`${s.iso}  ${s.pct}%  ${s.watts}W  health ${s.healthPct}%  ${s.ac ? 'AC' : 'BATT'}${wrote ? '' : '  (skipped: 최근 기록 있음)'}`);
     break;

@@ -220,6 +220,7 @@ fn main() {
                 let (mut lpm, mut tick) = (low_power_mode(), 0u32);
                 let mut rec_state = rec0;
                 let mut last_pop_h = 0.0f64;   // last height the popover reported (to size its window)
+                let mut pwin: Vec<(u64, f64, f64, f64)> = Vec::new();   // rolling 60s (t, sysW, adpW, batW) → 1-min avg for the recorder
                 loop {
                     let l = reader.read();
                     let c = live::load_cfg();   // re-read each tick so menu AND popover-settings changes apply live
@@ -255,10 +256,19 @@ fn main() {
                     let mut sys_w = None;
                     if let Some(ref s) = smc {
                         sys_w = s.system_watts();
-                        let f = |o: Option<f64>| o.map(|v| v.to_string()).unwrap_or_else(|| "null".into());
+                        let (adp_w, bat_w) = (s.adapter_watts(), s.battery_watts());
+                        let f = |o: Option<f64>| o.map(|v| format!("{:.3}", v)).unwrap_or_else(|| "null".into());
                         let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-                        let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"batteryW\":{},\"at\":{}}}",
-                            f(s.battery_temp_c()), f(sys_w), f(s.adapter_watts()), f(s.battery_watts()), now);
+                        // accumulate a rolling 60s window so the recorder can log the minute's AVERAGE power
+                        // (∫W dt / 60s) instead of a single instant — a 0.1s spike no longer skews a whole minute.
+                        if let (Some(sw), Some(aw), Some(bw)) = (sys_w, adp_w, bat_w) { pwin.push((now, sw, aw, bw)); }
+                        pwin.retain(|(t, ..)| now.saturating_sub(*t) <= 60);
+                        let (mut ss, mut sa, mut sb) = (0.0, 0.0, 0.0);
+                        for (_, sw, aw, bw) in &pwin { ss += sw; sa += aw; sb += bw; }
+                        let n = pwin.len() as f64;
+                        let av = |sum: f64| if n > 0.0 { Some(sum / n) } else { None };
+                        let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"batteryW\":{},\"systemWAvg\":{},\"adapterWAvg\":{},\"batteryWAvg\":{},\"at\":{}}}",
+                            f(s.battery_temp_c()), f(sys_w), f(adp_w), f(bat_w), f(av(ss)), f(av(sa)), f(av(sb)), now);
                         let _ = std::fs::write(data_dir().join("live-smc.json"), j);
                     }
                     if let Some(tray) = handle.tray_by_id("tray") {
