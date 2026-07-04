@@ -233,7 +233,7 @@ function buildLines(report) {
     };
     for (const p of run.points) {
       pi++;
-      const yv = state.y === 'rate' ? (rates ? rates[pi] : null) : (state.y === 'pct' ? p.pct : p.watts);
+      const yv = state.y === 'rate' ? (rates ? rates[pi] : null) : (state.y === 'pct' ? (p.cap ?? p.pct) : p.watts);   // 배터리 %도 정밀 mAh 기반(p.cap), 없으면 정수%
       if (yv == null || !Number.isFinite(yv)) continue;         // skip null/NaN -> no bad vertices
       const d = dayOfT(p.t);
       if (curDay !== null && d !== curDay) flush();             // split at midnight: no cross-day diagonal
