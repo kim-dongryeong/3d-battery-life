@@ -331,17 +331,24 @@ const fmtDur = sec => {                                     // 초 → "1일 3�
 function healthChartHTML(health) {
   const hs = (health || []).filter(h => h.healthPct != null);
   if (hs.length < 2) return '';
-  const W = 240, H = 44, pad = 4;
+  const W = 240, H = 60, pL = 26, pR = 5, pT = 5, pB = 12;
   const hp = hs.map(h => h.healthPct), lo0 = Math.min(...hp), hi0 = Math.max(...hp);
-  const m = Math.max(0.5, (hi0 - lo0) * 0.6), lo = lo0 - m, span = Math.max(0.2, (hi0 + m) - lo);
+  // 최소 스팬 8%p로 잡아 100% 부근 미세 변동이 급격해 보이지 않게 (실제 노화는 스팬을 키움)
+  const mid = (lo0 + hi0) / 2, span = Math.max(8, (hi0 - lo0) * 3), yLo = mid - span / 2, yHi = mid + span / 2;
   const d0 = hs[0].day, dr = Math.max(1, hs[hs.length - 1].day - d0);
-  const X = d => pad + (d - d0) / dr * (W - 2 * pad);
-  const Yv = v => pad + (1 - (v - lo) / span) * (H - 2 * pad);
+  const X = d => pL + (d - d0) / dr * (W - pL - pR);
+  const Yv = v => pT + (1 - (v - yLo) / span) * (H - pT - pB);
   const line = hs.map(h => `${X(h.day).toFixed(1)},${Yv(h.healthPct).toFixed(1)}`).join(' ');
-  const cur = hs[hs.length - 1];
-  return `<div class="hcHdr">건강도(최대 용량) 추세 <small>일별 · ${lo0.toFixed(1)}–${hi0.toFixed(1)}%${cur.rawMax ? ` · ${cur.rawMax}mAh` : ''}</small></div>
-    <svg class="hcSvg" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none">
+  const cur = hs[hs.length - 1], fdt = ts => { const d = new Date(ts * 1000); return `${d.getMonth() + 1}/${d.getDate()}`; };
+  const yLab = v => `<text x="${pL - 3}" y="${(Yv(v) + 2.6).toFixed(1)}" text-anchor="end" class="hcAx">${v.toFixed(0)}</text>`;
+  const ref100 = (100 >= yLo && 100 <= yHi) ? `<line x1="${pL}" y1="${Yv(100).toFixed(1)}" x2="${W - pR}" y2="${Yv(100).toFixed(1)}" class="hcRef"/>` : '';
+  return `<div class="hcHdr">건강도(최대 용량) 추세 <small>일별 · ${cur.rawMax ? `${cur.rawMax}mAh · ` : ''}${cur.healthPct}%</small></div>
+    <svg class="hcSvg" viewBox="0 0 ${W} ${H}" width="100%">
+      <line x1="${pL}" y1="${pT}" x2="${pL}" y2="${H - pB}" class="hcAx2"/>
+      ${ref100}${yLab(yHi)}${yLab(mid)}${yLab(yLo)}
       <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+      <text x="${pL}" y="${H - 2}" class="hcAx">${fdt(hs[0].t)}</text>
+      <text x="${W - pR}" y="${H - 2}" text-anchor="end" class="hcAx">${fdt(hs[hs.length - 1].t)}</text>
     </svg>`;
 }
 

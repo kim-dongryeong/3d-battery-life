@@ -43,7 +43,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #healthChart:empty { display: none; }
 .hcHdr { color: var(--dim); font-size: 10px; font-weight: 600; margin-bottom: 3px; }
 .hcHdr small { font-weight: 400; opacity: .85; }
-.hcSvg { display: block; }
+.hcSvg { display: block; width: 100%; height: auto; }
+.hcAx { fill: var(--dim); font-size: 8px; font-variant-numeric: tabular-nums; }
+.hcAx2 { stroke: var(--line); stroke-width: 1; }
+.hcRef { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 2; opacity: .7; }   /* 100% 기준선 */
 .trend { font-size: 13px; color: var(--accent); background: rgba(77,208,192,.08);
   border: 1px solid rgba(77,208,192,.25); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
 #stats { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; }
