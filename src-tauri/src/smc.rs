@@ -1,8 +1,11 @@
 // Minimal read-only AppleSMC client. Unlike the AppleSmartBattery ioreg node (which macOS refreshes
 // only ~every 60s), SMC keys update in real time — so this gives a LIVE battery temperature and
 // system power draw. Best-effort: any failure returns None and callers fall back to ioreg.
-// Verified keys on Apple Silicon: PSTR (system power W), PDTR (adapter W), PPBR (battery W),
-// TB0T/TB1T/TB2T (battery temp °C). Struct layout matches the classic smc.c protocol.
+// Verified keys on Apple Silicon: PSTR (system total W), PDTR (adapter/DC-in W),
+// TB0T/TB1T/TB2T (battery temp °C). PPBR is the battery DISCHARGE power ("PBus (BMON) Batt Dischg
+// Power", per acidanthera/VirtualSMC) — it reads the real drain on battery but collapses to ~0 while
+// charging, so it is NOT the charge power. We derive signed battery power from the energy balance
+// PDTR−PSTR (see lib/battery.js applyLiveSMC), not PPBR. Struct layout matches the classic smc.c protocol.
 #![allow(non_snake_case, non_upper_case_globals)]
 use std::ffi::c_void;
 
@@ -100,9 +103,9 @@ impl Smc {
     pub fn adapter_watts(&self) -> Option<f64> {
         self.read_f64("PDTR").filter(|v| *v >= 0.0 && *v < 500.0).map(|v| (v * 100.0).round() / 100.0)
     }
-    // Live battery power magnitude in Watts (PPBR). ioreg's Amperage/Voltage are 60s-quantized, so
-    // right after (un)plugging the battery current lags; PPBR moves in real time. Direction is
-    // decided upstream from PDTR vs PSTR (adapter surplus → charging, deficit → discharging).
+    // Battery DISCHARGE power in Watts (PPBR = "PBus (BMON) Batt Dischg Power"). Accurate on battery,
+    // but ~0 while charging (charge flows the other way), so it is NOT the charge power. Still written
+    // to the bridge for reference; the signed battery power is derived from PDTR−PSTR in battery.js.
     pub fn battery_watts(&self) -> Option<f64> {
         self.read_f64("PPBR").filter(|v| *v >= 0.0 && *v < 500.0).map(|v| (v * 100.0).round() / 100.0)
     }
