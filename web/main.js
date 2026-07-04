@@ -475,6 +475,18 @@ function drawProjection3DInner(r) {
   const dot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), new THREE.MeshBasicMaterial({ color: 0x4dd0c0 }));
   dot.position.copy(sp); projGroup.add(dot);
   const lab = makeLabel('예상', { size: 26, color: '#4dd0c0' }); lab.position.copy(sp).add(new THREE.Vector3(0, 1, 0)); projGroup.add(lab);
+  // 0% 도달 지점(곡선/직선이 바닥면과 만나는 곳)에 도착 시각을 표기 — 2D 카드의 ETA와 동일.
+  // 두 종점이 화면상 거의 겹치므로(예상선이 격자 밖 좁은 구석으로 수렴) 세로로 크게 벌려 표기.
+  const markEnd = (endMin, prefix, colHex, colStr, off) => {
+    const rt = P.baseT + endMin * 60;
+    const p = new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(0, yMax), zFromDay(dayOfT(rt), maxDay));
+    const d = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), new THREE.MeshBasicMaterial({ color: colHex }));
+    d.position.copy(p); projGroup.add(d);
+    const t = makeLabel(`${prefix} ${fmtWhen(rt * 1000)}`, { size: 21, color: colStr });
+    t.position.copy(p).add(off); projGroup.add(t);
+  };
+  markEnd(P.curveMin, '곡선', 0x4dd0c0, '#4dd0c0', new THREE.Vector3(0, 0.55, 0));   // 곡선 도착(청록) — 아래
+  markEnd(P.linMin, '직선', 0x8aa0b8, '#9fb2c6', new THREE.Vector3(0, 3.1, 0.8));    // 직선 도착(회청) — 위+뒤로 크게 벌려 겹침 방지
 }
 
 function updateHud(r) {
