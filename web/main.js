@@ -65,6 +65,7 @@ const key = new THREE.DirectionalLight(0xffffff, 0.8); key.position.set(20, 40, 
 
 const sceneRoot = new THREE.Group(); scene.add(sceneRoot);   // axes + grid (rebuilt on mode change)
 const lineRoot = new THREE.Group(); scene.add(lineRoot);     // session curves
+const overlay = new THREE.Group(); overlay.visible = false; scene.add(overlay);   // hover marker + drop line (persists across rebuilds)
 
 // ---- helpers ------------------------------------------------------------
 const todOf = t => { const d = new Date(t * 1000); return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600; };
@@ -180,6 +181,7 @@ function buildLines(report) {
   // detach the shared highlight material so disposeGroup doesn't free it
   if (hovered) { hovered.material = hovered.userData.base; hovered = null; }
   if (tip) tip.hidden = true;
+  overlay.visible = false;                                   // clear stale hover marker on rebuild
   disposeGroup(lineRoot); lines = [];
   const runs = report.runs || [];
   if (!runs.length) return { yMax: 100, maxDay: 1, cMin: null, cMax: null };
@@ -242,6 +244,7 @@ function buildLines(report) {
         : state.color === 'lowPower' ? (p.lowPower ? C_LPM : C_LPM_OFF)
           : stateColor(p);
       col.push(c.r, c.g, c.b);
+      if (state.y === 'rate') p._rate = yv;   // stash the signed rate so the hover tooltip can show it
       pts.push(p);
     }
     flush();
@@ -328,7 +331,7 @@ function updateHud(r) {
     const sc = r.sinceCharge;   // 마지막 전원분리 이후: 경과(잠자기 포함) + 그중 실사용(깨어있던)
     if (sc && !sc.onAC && sc.unplugT) {
       const pct = sc.wallSec > 0 ? Math.round(sc.awakeSec / sc.wallSec * 100) : 0;
-      rows.push(['마지막 충전 이후', `${sc.knownStart ? '' : '≥ '}${fmtDur(sc.wallSec)}`]);
+      rows.push(['마지막 충전 이후', `${sc.knownStart ? '' : '≥ '}${fmtDur(sc.wallSec)} · ${fmtWhen(sc.unplugT * 1000)} 분리`]);
       rows.push(['그중 사용(켜짐)', `${fmtDur(sc.awakeSec)} · ${pct}%`]);
     }
     rows.push(['배터리 건강도', `${L.healthPct}%`]);
@@ -757,11 +760,15 @@ const mouse = new THREE.Vector2();
 const tip = document.getElementById('tip');
 let hovered = null;
 const HI = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1 });
+// stock-chart-style hover cue: a dot on the exact point + a vertical drop line to the base plane
+const marker = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+const dropLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0x4dd0c0, transparent: true, opacity: 0.7 }));
+overlay.add(marker, dropLine);
 
 addEventListener('pointermove', e => {
   if (e.target !== renderer.domElement) {                       // pointer is over a panel — don't raycast through it
     if (hovered) { hovered.material = hovered.userData.base; hovered = null; }
-    tip.hidden = true;
+    tip.hidden = true; overlay.visible = false;
     return;
   }
   mouse.x = (e.clientX / innerWidth) * 2 - 1;
@@ -781,10 +788,16 @@ addEventListener('pointermove', e => {
     const lp = line.worldToLocal(hit.point.clone());            // compare in the line's own space
     const di = lp.distanceToSquared(new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)));
     const dj = lp.distanceToSquared(new THREE.Vector3(pos.getX(j), pos.getY(j), pos.getZ(j)));
-    showTip(line.userData.dayIndex, pts[dj < di ? j : i], e.clientX, e.clientY);
+    const idx = dj < di ? j : i;
+    const vp = new THREE.Vector3(pos.getX(idx), pos.getY(idx), pos.getZ(idx)); line.localToWorld(vp);
+    marker.position.copy(vp);
+    const baseY = state.y === 'rate' ? Y / 2 : 0;               // drop to the 0-rate plane in rate mode, else the floor
+    dropLine.geometry.setFromPoints([vp.clone(), new THREE.Vector3(vp.x, baseY, vp.z)]);
+    overlay.visible = true;
+    showTip(line.userData.dayIndex, pts[idx], e.clientX, e.clientY);
   } else {
     if (hovered) { hovered.material = hovered.userData.base; hovered = null; }
-    tip.hidden = true;
+    tip.hidden = true; overlay.visible = false;
   }
 });
 
@@ -795,6 +808,7 @@ function showTip(dayIndex, p, x, y) {
     <h3>${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${dayIndex}일차</h3>
     <div><span class="big">${p.pct}%</span> &nbsp; ${st}</div>
     <table>
+      ${state.y === 'rate' && p._rate != null ? `<tr><td class="k">변화율</td><td>${p._rate >= 0 ? '+' : ''}${p._rate.toFixed(3)} %/min</td></tr>` : ''}
       <tr><td class="k">전력</td><td>${p.watts ?? '?'} W</td></tr>
       <tr><td class="k">온도</td><td>${p.tempC ?? '?'}°C</td></tr>
       <tr><td class="k">CPU 부하</td><td>${p.loadPct ?? '?'}%</td></tr>
