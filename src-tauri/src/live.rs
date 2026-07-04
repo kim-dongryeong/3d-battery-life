@@ -165,7 +165,7 @@ pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u
     let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
-    let outline = (170u8, 176u8, 188u8, 255u8);
+    let outline = (238u8, 241u8, 247u8, 255u8);
     let ink = fill_color(l, colorize, lpm);   // number colored by level / LPM
     // thin battery outline + cap
     let (bx0, by0, bx1, by1) = (1i32, 2i32, 33i32, 18i32);
@@ -221,7 +221,7 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool) -> (Vec<u8>, 
     let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
-    let outline = (170u8, 176u8, 188u8, 255u8); // mid-gray: readable on light & dark menu bars
+    let outline = (238u8, 241u8, 247u8, 255u8); // mid-gray: readable on light & dark menu bars
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
 
@@ -267,7 +267,7 @@ pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
-    let outline = (170u8, 176u8, 188u8, 255u8);
+    let outline = (238u8, 241u8, 247u8, 255u8);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
     let (bx0, by0, bx1, by1) = (3i32, 1i32, 11i32, 19i32);   // upright cell
