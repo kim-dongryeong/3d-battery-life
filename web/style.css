@@ -32,12 +32,18 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
   position: fixed; z-index: 10; padding: 14px 16px;
   background: var(--panel); backdrop-filter: blur(14px);
   border: 1px solid var(--line); border-radius: 14px;
+  max-height: calc(100vh - 32px); overflow-y: auto; overscroll-behavior: contain;   /* 창이 작으면 패널 내부 스크롤 */
 }
 #hud { top: 16px; left: 16px; max-width: 320px; }
 #hud h1 { margin: 0 0 8px; font-size: 15px; font-weight: 600; letter-spacing: .2px; }
 #hud h1 .help-link { float: right; font-size: 11px; font-weight: 600; color: var(--accent); text-decoration: none;
   border: 1px solid rgba(77,208,192,.4); border-radius: 6px; padding: 1px 7px; }
 #hud h1 .help-link:hover { background: rgba(77,208,192,.15); }
+#healthChart { margin-top: 10px; }
+#healthChart:empty { display: none; }
+.hcHdr { color: var(--dim); font-size: 10px; font-weight: 600; margin-bottom: 3px; }
+.hcHdr small { font-weight: 400; opacity: .85; }
+.hcSvg { display: block; }
 .trend { font-size: 13px; color: var(--accent); background: rgba(77,208,192,.08);
   border: 1px solid rgba(77,208,192,.25); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
 #stats { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; }
@@ -84,6 +90,8 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #tip { position: fixed; z-index: 20; pointer-events: none; max-width: 260px;
   background: var(--tip); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px;
   box-shadow: 0 8px 30px rgba(0,0,0,.5); }
+#tip.pinned { pointer-events: auto; cursor: move; }   /* 고정 시 드래그로 이동 가능 */
+#tip.pinned h3 { cursor: move; }
 #tip h3 { margin: 0 0 6px; font-size: 13px; }
 #tip .big { font-size: 20px; color: var(--accent); font-weight: 700; }
 #tip .tsm { color: var(--dim); font-size: 11px; font-weight: 600; }
@@ -94,7 +102,8 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 
 #buckets { position: fixed; z-index: 10; left: 16px; bottom: 16px; padding: 12px 14px;
   background: var(--panel); backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: 14px;
-  width: 256px; box-sizing: border-box; }   /* fixed width → never collides with #trendchart (left:284) */
+  width: 256px; box-sizing: border-box;
+  max-height: calc(100vh - 32px); overflow-y: auto; overscroll-behavior: contain; }   /* fixed width → never collides with #trendchart (left:284); scroll if the window is short */
 #buckets h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--fg); }
 #buckets table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 #buckets th { color: var(--dim); font-weight: 500; font-size: 10px; text-transform: uppercase; text-align: right; padding: 0 0 4px; }

@@ -73,6 +73,7 @@ const sceneRoot = new THREE.Group(); scene.add(sceneRoot);   // axes + grid (reb
 const lineRoot = new THREE.Group(); scene.add(lineRoot);     // session curves
 const overlay = new THREE.Group(); overlay.visible = false; scene.add(overlay);   // hover marker + guide lines (persists across rebuilds)
 let pinned = null, curHover = null;   // 마커 고정 상태 · 현재 호버 결과 {vp,point,dayIndex,line}
+let tipManual = false;                // 고정 툴팁을 드래그해 직접 배치했는지 → 그러면 마커 추적 중단
 
 // ---- helpers ------------------------------------------------------------
 const todOf = t => { const d = new Date(t * 1000); return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600; };
@@ -191,7 +192,7 @@ function buildLines(report) {
   // detach the shared highlight material so disposeGroup doesn't free it
   if (hovered) { hovered.material = hovered.userData.base; hovered = null; }
   if (tip) tip.hidden = true;
-  overlay.visible = false; pinned = null; curHover = null;   // clear stale hover/pinned marker on rebuild
+  overlay.visible = false; pinned = null; curHover = null; tipManual = false; if (tip) tip.classList.remove('pinned');   // clear stale hover/pinned marker on rebuild
   disposeGroup(lineRoot); lines = [];
   const runs = report.runs || [];
   if (!runs.length) return { yMax: 100, maxDay: 1, cMin: null, cMax: null };
@@ -325,6 +326,25 @@ const fmtDur = sec => {                                     // 초 → "1일 3�
   return d ? `${d}일 ${h}시간` : h ? `${h}시간 ${m}분` : `${m}분`;
 };
 
+// 배터리 건강도(=최대 용량, rawMax/design)의 일별 추세 — 작은 선그래프.
+// 노화는 몇 달에 걸쳐 나타나므로 며칠짜리 기록은 거의 평평(펌웨어 재보정 노이즈 ±수 mAh).
+function healthChartHTML(health) {
+  const hs = (health || []).filter(h => h.healthPct != null);
+  if (hs.length < 2) return '';
+  const W = 240, H = 44, pad = 4;
+  const hp = hs.map(h => h.healthPct), lo0 = Math.min(...hp), hi0 = Math.max(...hp);
+  const m = Math.max(0.5, (hi0 - lo0) * 0.6), lo = lo0 - m, span = Math.max(0.2, (hi0 + m) - lo);
+  const d0 = hs[0].day, dr = Math.max(1, hs[hs.length - 1].day - d0);
+  const X = d => pad + (d - d0) / dr * (W - 2 * pad);
+  const Yv = v => pad + (1 - (v - lo) / span) * (H - 2 * pad);
+  const line = hs.map(h => `${X(h.day).toFixed(1)},${Yv(h.healthPct).toFixed(1)}`).join(' ');
+  const cur = hs[hs.length - 1];
+  return `<div class="hcHdr">건강도(최대 용량) 추세 <small>일별 · ${lo0.toFixed(1)}–${hi0.toFixed(1)}%${cur.rawMax ? ` · ${cur.rawMax}mAh` : ''}</small></div>
+    <svg class="hcSvg" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none">
+      <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>`;
+}
+
 function updateHud(r) {
   const L = r.latest, stats = document.getElementById('stats');
 
@@ -363,6 +383,7 @@ function updateHud(r) {
   rows.push(['기록 기간', `${r.spanDays}일 · ${r.sessions.length}방전세션`]);
   rows.push(['샘플 수', `${r.sampleCount.toLocaleString()}개`]);
   stats.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd${k === '기준 시각' ? ' id="asof"' : ''}>${v}</dd>`).join('');
+  document.getElementById('healthChart').innerHTML = healthChartHTML(r.health);
 
   renderRates();  // rigorous per-band discharge-rate panel (lib/bucketRates.js, /api/rates)
   if (typeof renderInsight === 'function') renderInsight();   // E 카드 레이아웃 값 갱신
@@ -854,9 +875,25 @@ renderer.domElement.addEventListener('pointerup', e => {
   if (!downXY) return;
   const moved = Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]); downXY = null;
   if (moved > 5) return;                                       // 드래그(회전) → 클릭 아님
-  if (pinned) { pinned = null; setHovered(null); tip.hidden = true; overlay.visible = false; return; }   // 고정 해제
-  if (curHover) { pinned = curHover; placeGuides(curHover.vp); overlay.visible = true; showTip(curHover.dayIndex, curHover.point, e.clientX, e.clientY, true); }
+  if (pinned) { pinned = null; tipManual = false; tip.classList.remove('pinned'); setHovered(null); tip.hidden = true; overlay.visible = false; return; }   // 고정 해제
+  if (curHover) { pinned = curHover; tipManual = false; tip.classList.add('pinned'); placeGuides(curHover.vp); overlay.visible = true; showTip(curHover.dayIndex, curHover.point, e.clientX, e.clientY, true); }
 });
+// 고정된 툴팁은 드래그로 옮길 수 있음 (그래프 관찰 시 걸리적거리지 않게)
+let tipDrag = null;
+tip.addEventListener('pointerdown', e => {
+  if (!pinned) return;
+  const r = tip.getBoundingClientRect();
+  tipDrag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+  try { tip.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  e.stopPropagation(); e.preventDefault();
+});
+tip.addEventListener('pointermove', e => {
+  if (!tipDrag) return;
+  tipManual = true;                                          // 이후 회전해도 이 자리에 고정
+  tip.style.left = Math.max(4, Math.min(innerWidth - 40, e.clientX - tipDrag.dx)) + 'px';
+  tip.style.top = Math.max(4, Math.min(innerHeight - 24, e.clientY - tipDrag.dy)) + 'px';
+});
+tip.addEventListener('pointerup', () => { tipDrag = null; });
 
 function showTip(dayIndex, p, x, y, isPinned) {
   const d = new Date(p.t * 1000);
@@ -1100,7 +1137,7 @@ addEventListener('resize', () => {
 (function animate() {
   requestAnimationFrame(animate);
   controls.update();
-  if (pinned) {   // 고정된 마커를 화면좌표로 투영해 툴팁을 따라붙임 (회전해도 붙어있게)
+  if (pinned && !tipManual) {   // 고정 마커를 화면좌표로 투영해 툴팁이 따라붙게 (단, 직접 드래그로 옮겼으면 그 자리 유지)
     const s = pinned.vp.clone().project(camera);
     positionTip((s.x * 0.5 + 0.5) * innerWidth, (-s.y * 0.5 + 0.5) * innerHeight - 16);
   }
