@@ -109,6 +109,10 @@ impl Smc {
     pub fn battery_watts(&self) -> Option<f64> {
         self.read_f64("PPBR").filter(|v| *v >= 0.0 && *v < 500.0).map(|v| (v * 100.0).round() / 100.0)
     }
+    // Measured DC-In (adapter) voltage (VD0R) and current (ID0R) — the REAL delivered V/A, unlike
+    // ioreg's nominal AdapterVoltage/rated-Watts. (What Stats shows as "DC In" 19.699V / 1.42A.)
+    pub fn dc_in_volts(&self) -> Option<f64> { self.read_f64("VD0R").filter(|v| *v > 0.0 && *v < 60.0).map(|v| (v * 1000.0).round() / 1000.0) }
+    pub fn dc_in_amps(&self) -> Option<f64> { self.read_f64("ID0R").filter(|v| *v >= 0.0 && *v < 20.0).map(|v| (v * 1000.0).round() / 1000.0) }
 }
 
 impl Drop for Smc { fn drop(&mut self) { unsafe { IOServiceClose(self.conn); } } }

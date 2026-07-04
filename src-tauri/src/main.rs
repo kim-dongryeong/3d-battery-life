@@ -267,8 +267,8 @@ fn main() {
                         for (_, sw, aw, bw) in &pwin { ss += sw; sa += aw; sb += bw; }
                         let n = pwin.len() as f64;
                         let av = |sum: f64| if n > 0.0 { Some(sum / n) } else { None };
-                        let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"batteryW\":{},\"systemWAvg\":{},\"adapterWAvg\":{},\"batteryWAvg\":{},\"at\":{}}}",
-                            f(s.battery_temp_c()), f(sys_w), f(adp_w), f(bat_w), f(av(ss)), f(av(sa)), f(av(sb)), now);
+                        let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"batteryW\":{},\"systemWAvg\":{},\"adapterWAvg\":{},\"batteryWAvg\":{},\"dcInV\":{},\"dcInA\":{},\"at\":{}}}",
+                            f(s.battery_temp_c()), f(sys_w), f(adp_w), f(bat_w), f(av(ss)), f(av(sa)), f(av(sb)), f(s.dc_in_volts()), f(s.dc_in_amps()), now);
                         let _ = std::fs::write(data_dir().join("live-smc.json"), j);
                     }
                     if let Some(tray) = handle.tray_by_id("tray") {

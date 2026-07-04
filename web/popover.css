@@ -73,6 +73,9 @@ html { scrollbar-width: none; }
   padding: 3px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
 }
 .kv:last-child { border-bottom: none; }
+.cmp { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 1.5px 0; }
+.cmp > span { color: var(--dim); font-size: 11px; white-space: nowrap; }
+.cmp > b { font-weight: 600; font-size: 11.5px; font-variant-numeric: tabular-nums; text-align: right; }
 .kv > span { color: var(--dim); font-size: 12px; }
 .kv > b { font-variant-numeric: tabular-nums; font-weight: 650; font-size: 12.5px; letter-spacing: -.1px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }

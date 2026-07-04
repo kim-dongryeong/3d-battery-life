@@ -87,8 +87,13 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .info .ftip { position: absolute; bottom: 135%; left: -2px; width: 244px; background: var(--tip); border: 1px solid var(--accent);
   border-radius: 8px; padding: 8px 10px; font-size: 11px; line-height: 1.55; color: var(--fg); font-weight: 400; letter-spacing: 0;
   box-shadow: 0 8px 30px rgba(0,0,0,.5); opacity: 0; visibility: hidden; transform: translateY(4px); transition: .12s; z-index: 40; pointer-events: none; }
-.info:hover .ftip { opacity: 1; visibility: visible; transform: translateY(0); }
 .info .ftip b { color: var(--accent); }
+/* portaled copy (rendered on <body>) so the panel's overflow:auto can't clip it */
+.ftip-portal { position: fixed; z-index: 100; width: 244px; background: var(--tip); border: 1px solid var(--accent);
+  border-radius: 8px; padding: 8px 10px; font-size: 11px; line-height: 1.55; color: var(--fg);
+  box-shadow: 0 8px 30px rgba(0,0,0,.5); pointer-events: none; }
+.ftip-portal[hidden] { display: none; }
+.ftip-portal b { color: var(--accent); }
 
 #tip { position: fixed; z-index: 20; pointer-events: none; max-width: 260px;
   background: var(--tip); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px;

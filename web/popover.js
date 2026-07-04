@@ -131,6 +131,29 @@ function rowsPower(s) {
   r.push(['배터리', (b.length ? b.join(' · ') : '–') + (s.batLive ? ' <i class="ld"></i>' : '')]);
   return r;
 }
+// 전력 비교 — 모든 측정 방식을 각각 표기해 눈으로 비교 (배터리 3방식 · 어댑터 2방식). 부호: +충전 −방전.
+function powerCompareHTML(s) {
+  const V = s.voltage;
+  const wva = (w, v, a, signed) => w == null ? '–' :
+    [(signed ? `${w >= 0 ? '+' : '−'}${Math.abs(w).toFixed(2)}` : w.toFixed(2)) + ' W',
+     v != null ? `${v.toFixed(2)} V` : null, a != null ? `${Math.round(a)} mA` : null].filter(Boolean).join(' · ');
+  const charging = s.powerW != null ? s.powerW > 0.05 : !!s.charging;
+  const bat = [
+    ['어댑터−시스템 (수지)', wva(s.powerW, V, s.amperage, true)],
+    ['ioreg V×I (셀 실측)', wva(s.ioregW, V, s.ioregA, true)],
+    ['PPBR (방전 전용)', s.ppbrW == null ? '–' : charging ? '충전 중 ~0 (방전 시만)' : wva(-s.ppbrW, V, V ? -s.ppbrW / V * 1000 : null, true)],
+  ];
+  let html = `<div class="sec">배터리 전력 (방식별)</div>` + bat.map(([k, v]) => `<div class="cmp"><span>${k}</span><b>${v}</b></div>`).join('');
+  if (s.ac) {
+    const nw = detail.adapterWatts, nv = detail.adapterVoltage;
+    const adp = [
+      ['ioreg 공칭/정격', wva(nw, nv, (nw && nv) ? nw / nv * 1000 : null, false)],
+      ['SMC 실측 (PDTR·VD0R·ID0R)', wva(s.adapterW, s.dcInV, s.dcInA != null ? s.dcInA * 1000 : null, false)],
+    ];
+    html += `<div class="sec">어댑터 전력 (방식별)</div>` + adp.map(([k, v]) => `<div class="cmp"><span>${k}</span><b>${v}</b></div>`).join('');
+  }
+  return html;
+}
 // 상태 rows shared by list/gauge: remaining time + live temperature.
 function statusRows(s) {
   return [
@@ -259,7 +282,7 @@ function loop3D() {
   t3d.renderer.render(t3d.scene, t3d.camera);
   t3d.raf = requestAnimationFrame(loop3D);
 }
-function tailHTML(s) { return detailHTML(s) + procsHTML(); }
+function tailHTML(s) { return powerCompareHTML(s) + detailHTML(s) + procsHTML(); }
 
 // ── settings panel (gear) ──────────────────────────────────────────────
 // data-k = a localStorage display pref (popover-only) · data-c = a server cfg key (menu-bar/alerts)

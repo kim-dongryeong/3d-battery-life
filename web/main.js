@@ -1008,6 +1008,21 @@ document.querySelectorAll('.seg').forEach(seg => {
 
 document.getElementById('spin').addEventListener('change', e => { controls.autoRotate = e.target.checked; controls.autoRotateSpeed = 0.6; });
 document.getElementById('reset').addEventListener('click', () => { camera.position.copy(HOME).multiplyScalar(0.6 + 0.4 * state.xScale); controls.target.copy(LOOK); });
+// info (i) tooltips: portal a copy to <body> on hover so a panel's overflow:auto can't clip them
+{
+  const portal = document.createElement('div');
+  portal.className = 'ftip-portal'; portal.hidden = true; document.body.appendChild(portal);
+  document.addEventListener('mouseover', e => {
+    const info = e.target.closest && e.target.closest('.info'); if (!info) return;
+    const ft = info.querySelector('.ftip'); if (!ft) return;
+    portal.innerHTML = ft.innerHTML;
+    const r = info.getBoundingClientRect();
+    portal.style.left = Math.max(8, Math.min(innerWidth - 252, r.left - 110)) + 'px';
+    portal.style.top = 'auto'; portal.style.bottom = (innerHeight - r.top + 6) + 'px';   // above the icon
+    portal.hidden = false;
+  });
+  document.addEventListener('mouseout', e => { if (e.target.closest && e.target.closest('.info')) portal.hidden = true; });
+}
 document.getElementById('gear').addEventListener('click', () => {   // ⚙ 뷰어 설정 (마커 크기 · 정밀도)
   const s = document.getElementById('viewerSettings');
   s.hidden = !s.hidden;
