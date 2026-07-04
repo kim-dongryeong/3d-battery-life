@@ -372,9 +372,8 @@ function updateHud(r) {
     if (L.lowPower != null) rows.push(['저전력 모드', L.lowPower ? '🟡 켜짐' : '꺼짐']);   // pmset lowpowermode
     const sc = r.sinceCharge;   // 마지막 전원분리 이후: 경과(잠자기 포함) + 그중 실사용(깨어있던)
     if (sc && !sc.onAC && sc.unplugT) {
-      const pct = sc.wallSec > 0 ? Math.round(sc.awakeSec / sc.wallSec * 100) : 0;
       rows.push(['마지막 충전 이후', `${sc.knownStart ? '' : '≥ '}${fmtDur(sc.wallSec)} · ${fmtWhen(sc.unplugT * 1000)} 분리`]);
-      rows.push(['그중 사용(켜짐)', `${fmtDur(sc.awakeSec)} · ${pct}%`]);
+      rows.push(['그중 사용(켜짐)', fmtDur(sc.awakeSec)]);
     }
     rows.push(['배터리 건강도', `${L.healthPct}%`]);
     rows.push(['사이클', `${L.cycles}회`]);
