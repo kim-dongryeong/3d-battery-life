@@ -108,7 +108,7 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .ftip-portal b { color: var(--accent); }
 
 /* 방전 예상선의 0% 도달 시각 태그 — 3D 크로싱 지점을 화면좌표로 추적, 패널 위에 항상 표시 */
-.projTag { position: fixed; z-index: 46; pointer-events: none; white-space: nowrap;
+.projTag { position: fixed; z-index: 6; pointer-events: none; white-space: nowrap;   /* 3D 주석 → 캔버스 위, 단 좌우 UI 패널(z10)보다는 아래로 */
   padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .2px;
   background: rgba(9,13,20,.82); border: 1px solid currentColor;
   box-shadow: 0 2px 12px rgba(0,0,0,.45); backdrop-filter: blur(4px); }

@@ -19,6 +19,32 @@ let three = null, t3d = null, t3dLoading = false;     // lazy Three.js + persist
 let cfg = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true };
 let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
 
+// ── i18n (popover) — shares localStorage 'battLang' + /locales/<lang>.json with the viewer ──
+// (popover.js is a classic script, so this is a small self-contained copy of web/i18n.js's logic.)
+let I18N = {}, i18nApplying = false;
+const battLang = () => ls('battLang', 'ko');
+function applyI18nPop(root) {
+  if (battLang() === 'ko' || !root || i18nApplying) return;
+  const scopes = root.matches && root.matches('[data-i18n]') ? [root] : (root.querySelectorAll ? [...root.querySelectorAll('[data-i18n]')] : []);
+  if (!scopes.length) return;
+  i18nApplying = true;
+  try {
+    for (const s of scopes) {
+      for (const el of [s, ...s.querySelectorAll('[title]')]) { const o = el.getAttribute && el.getAttribute('title'); if (o && I18N[o.trim()]) el.setAttribute('title', I18N[o.trim()]); }
+      const w = document.createTreeWalker(s, NodeFilter.SHOW_TEXT); const ns = []; let n; while ((n = w.nextNode())) ns.push(n);
+      for (const tn of ns) { const k = tn.nodeValue.trim(); if (k && I18N[k]) tn.nodeValue = tn.nodeValue.replace(k, I18N[k]); }
+    }
+  } finally { i18nApplying = false; }
+}
+async function initI18nPop() {
+  const l = battLang(); if (!l || l === 'ko') return;
+  try { I18N = await (await fetch(`/locales/${l}.json`)).json(); } catch { I18N = {}; }
+  const obs = new MutationObserver(muts => { if (i18nApplying) return; const seen = new Set(); for (const m of muts) { const el = m.target.nodeType === 1 ? m.target : m.target.parentElement; const sc = el && el.closest && el.closest('[data-i18n]'); if (sc && !seen.has(sc)) { seen.add(sc); applyI18nPop(sc); } } });
+  document.querySelectorAll('[data-i18n]').forEach(s => obs.observe(s, { childList: true, subtree: true, characterData: true }));
+  applyI18nPop(document);
+}
+const setLangPop = l => { save('battLang', l); location.reload(); };
+
 const resolveTheme = () => theme === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme;
 // "system" temperature unit → °F only in the handful of Fahrenheit locales, else °C
 const resolveUnit = () => unit === 'system' ? (/^en-(US|LR|MM|BS|BZ|KY|PW|FM|MH)\b/i.test(navigator.language || '') ? 'f' : 'c') : unit;
@@ -297,6 +323,7 @@ const pctOpts = steps => steps.map(v => [String(v), v === 0 ? '끄기' : `${v}%`
 function settingsHTML() {
   return `<div class="settings">
     <div class="sec">표시</div>
+    <div class="srow"><span>언어 / Language</span>${selEl('data-lang', 'lang', battLang(), [['ko', '한국어'], ['en', 'English']])}</div>
     <div class="srow"><span>레이아웃</span>${selEl('data-k', 'pv', pv, [['list', '목록'], ['cards', '카드'], ['gauge', '게이지']])}</div>
     <div class="srow"><span>테마</span>${selEl('data-k', 'theme', theme, [['dark', '다크'], ['light', '라이트'], ['system', '시스템']])}</div>
     <div class="srow"><span>온도 단위</span>${selEl('data-k', 'unit', unit, [['system', '시스템'], ['c', '°C'], ['f', '°F']])}</div>
@@ -433,7 +460,8 @@ async function applyCfg(k, v) {
 }
 $('pop').addEventListener('change', e => {
   const t = e.target;
-  if (t.matches('select[data-k]')) applyDisplay(t.dataset.k, t.value);
+  if (t.matches('select[data-lang]')) setLangPop(t.value);   // 언어: 앱 전체 공용(localStorage) → 새로고침
+  else if (t.matches('select[data-k]')) applyDisplay(t.dataset.k, t.value);
   else if (t.matches('select[data-c]')) applyCfg(t.dataset.c, coerce(t.dataset.c, t.value));
 });
 $('pop').addEventListener('click', e => {
@@ -493,6 +521,7 @@ document.addEventListener('keydown', e => {
   }
 });
 
+initI18nPop();   // 언어(팝오버 설정에서 선택, localStorage 공용) 적용 + 이후 렌더 자동 번역
 render();
 pull(); pullProcs(); pullDetail(); pullConfig(); pullSpark();
 setInterval(() => { if (!document.hidden) pull(); }, 2000);

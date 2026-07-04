@@ -35,23 +35,41 @@ export async function initI18n() {
 }
 
 // Translate all text nodes + title attributes inside every [data-i18n] scope under `root`.
+let applying = false;
 export function applyI18n(root) {
-  if (LANG === 'ko' || !root || !root.querySelectorAll) return;
+  if (LANG === 'ko' || !root || applying) return;
   const scopes = root.matches && root.matches('[data-i18n]') ? [root] : [];
-  root.querySelectorAll('[data-i18n]').forEach(s => scopes.push(s));
-  for (const scope of scopes) {
-    // titles (tooltips) on the scope and any descendant
-    for (const el of [scope, ...scope.querySelectorAll('[title]')]) {
-      const o = el.getAttribute && el.getAttribute('title');
-      if (o && dict[o.trim()]) el.setAttribute('title', dict[o.trim()]);
+  if (root.querySelectorAll) root.querySelectorAll('[data-i18n]').forEach(s => scopes.push(s));
+  if (!scopes.length) return;
+  applying = true;   // guard so our own DOM writes don't re-trigger the observer into extra work
+  try {
+    for (const scope of scopes) {
+      for (const el of [scope, ...scope.querySelectorAll('[title]')]) {
+        const o = el.getAttribute && el.getAttribute('title');
+        if (o && dict[o.trim()]) el.setAttribute('title', dict[o.trim()]);
+      }
+      const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+      const nodes = []; let n;
+      while ((n = walker.nextNode())) nodes.push(n);
+      for (const tn of nodes) {
+        const k = tn.nodeValue.trim();
+        if (k && dict[k]) tn.nodeValue = tn.nodeValue.replace(k, dict[k]);
+      }
     }
-    // leaf text nodes
-    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
-    const nodes = []; let n;
-    while ((n = walker.nextNode())) nodes.push(n);
-    for (const tn of nodes) {
-      const k = tn.nodeValue.trim();
-      if (k && dict[k]) tn.nodeValue = tn.nodeValue.replace(k, dict[k]);
+  } finally { applying = false; }
+}
+
+// Keep dynamic (JS-rendered) content translated: re-apply on any DOM change inside the marked scopes.
+export function observeI18n() {
+  if (LANG === 'ko' || typeof MutationObserver === 'undefined') return;
+  const obs = new MutationObserver(muts => {
+    if (applying) return;
+    const seen = new Set();
+    for (const m of muts) {
+      const el = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      const scope = el && el.closest && el.closest('[data-i18n]');
+      if (scope && !seen.has(scope)) { seen.add(scope); applyI18n(scope); }
     }
-  }
+  });
+  document.querySelectorAll('[data-i18n]').forEach(s => obs.observe(s, { childList: true, subtree: true, characterData: true }));
 }

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { initI18n, listLangs, setLang, curLang } from './i18n.js';
+import { initI18n, observeI18n } from './i18n.js';
 
 // ---- world dimensions ---------------------------------------------------
 // X = 하루 중 시각 (0..24h)  ·  Y = 배터리 %/W (높이)  ·  Z = 경과 일수 (깊이)
@@ -1271,14 +1271,9 @@ document.querySelectorAll('.seg').forEach(seg => {
     else { state[group] = val; rebuild(); }
   });
 });
-// i18n: translate static viewer labels/tooltips (data-i18n scopes) + wire the language picker.
-initI18n();
-(async () => {
-  const sel = document.getElementById('langSel'); if (!sel) return;
-  const langs = await listLangs();
-  sel.innerHTML = langs.map(([c, n]) => `<option value="${c}"${c === curLang() ? ' selected' : ''}>${n}</option>`).join('');
-  sel.addEventListener('change', () => setLang(sel.value));   // persist + reload → applies on next load
-})();
+// i18n: translate static + dynamic viewer content. Language is chosen in the POPOVER settings
+// (shared via localStorage 'battLang' — same origin), so the viewer just reads and applies it.
+initI18n().then(observeI18n);
 
 // reflect current state on every segmented control (defaults + deep-linked y/color/xScale)
 document.querySelectorAll('.seg').forEach(seg => {

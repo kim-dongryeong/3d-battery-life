@@ -54,11 +54,11 @@ function readTray() {
 // so a wrong type would break the menu-bar reader.
 function sanitizeCfg(p) {
   const o = {};
-  if (Number.isInteger(p.info) && p.info >= 0 && p.info <= 5) o.info = p.info;
+  if (Number.isInteger(p.info) && p.info >= 0 && p.info <= 7) o.info = p.info;
   if (typeof p.colorize === 'boolean') o.colorize = p.colorize;
   if (Number.isInteger(p.low_pct) && p.low_pct >= 0 && p.low_pct <= 100) o.low_pct = p.low_pct;
   if (Number.isInteger(p.high_pct) && p.high_pct >= 0 && p.high_pct <= 100) o.high_pct = p.high_pct;
-  if (['icon', 'iconpct', 'bar', 'text'].includes(p.widget)) o.widget = p.widget;
+  if (['icon', 'iconpct', 'combo', 'stack', 'bar', 'text'].includes(p.widget)) o.widget = p.widget;
   if (typeof p.glyph_xl === 'boolean') o.glyph_xl = p.glyph_xl;
   if (typeof p.shortcut === 'boolean') o.shortcut = p.shortcut;
   return o;

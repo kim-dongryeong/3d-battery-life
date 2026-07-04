@@ -128,6 +128,10 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
+            // menu-bar app: no Dock icon / no ⌘Tab entry while only the tray is up. We flip to Regular
+            // while the viewer window is open (so it's ⌘Tab-able) and back to Accessory when it closes.
+            #[cfg(target_os = "macos")]
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             // 1) start the local server (bundled single binary) as a sidecar
             let cmd = app.shell().sidecar("battery-life").expect("sidecar 'battery-life' missing").args(["serve"]);
             let (mut rx, child) = cmd.spawn().expect("failed to spawn battery-life serve");
@@ -345,6 +349,9 @@ fn main() {
                 WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     let _ = window.hide();
+                    // viewer closed → drop the Dock/⌘Tab presence back to menu-bar-only
+                    #[cfg(target_os = "macos")]
+                    if window.label() == "main" { let _ = window.app_handle().set_activation_policy(tauri::ActivationPolicy::Accessory); }
                 }
                 // popover auto-hides when it loses focus (menu-bar popover convention)
                 WindowEvent::Focused(false) if window.label() == "popover" => {
@@ -369,6 +376,9 @@ fn main() {
 
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        // viewer visible → become a Regular app so it shows in ⌘Tab / can be focused normally
+        #[cfg(target_os = "macos")]
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
         let _ = w.show();
         let _ = w.set_focus();
     }
