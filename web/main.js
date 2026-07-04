@@ -9,7 +9,7 @@ let X = X_BASE;                                          // effective time-axis 
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', crosshair: '3d', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', floorGuide: 'on', valGuide: 'step', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
@@ -34,7 +34,8 @@ try {
 try { const w = +localStorage.getItem('battRateWin'); if ([120, 300, 600, 1200].includes(w)) state.rateWin = w; } catch { /* ignore */ }
 try { const m = +localStorage.getItem('battMarkerSize'); if ([0.12, 0.2, 0.32].includes(m)) state.markerSize = m; } catch { /* ignore */ }
 try { const r = localStorage.getItem('battWattsRail'); if (['battery', 'system', 'adapter'].includes(r)) state.wattsRail = r; } catch { /* ignore */ }
-try { const c = localStorage.getItem('battCrosshair'); if (['3d', 'vert', 'off'].includes(c)) state.crosshair = c; } catch { /* ignore */ }
+try { const c = localStorage.getItem('battFloorGuide'); if (['on', 'off'].includes(c)) state.floorGuide = c; } catch { /* ignore */ }
+try { const c = localStorage.getItem('battValGuide'); if (['diag', 'step', 'dot', 'plane', 'off'].includes(c)) state.valGuide = c; } catch { /* ignore */ }
 try { const l = localStorage.getItem('battRateLevel'); if (l === 'pct' || l === 'rawcap') state.rateLevel = l; } catch { /* ignore */ }   // '정수% 사용' 전역 설정
 try { const q = new URLSearchParams(location.search).get('level'); if (q === 'pct' || q === 'rawcap') state.rateLevel = q; } catch { /* ignore */ }   // ?level= deep-link (overrides)
 
@@ -70,7 +71,8 @@ const key = new THREE.DirectionalLight(0xffffff, 0.8); key.position.set(20, 40, 
 
 const sceneRoot = new THREE.Group(); scene.add(sceneRoot);   // axes + grid (rebuilt on mode change)
 const lineRoot = new THREE.Group(); scene.add(lineRoot);     // session curves
-const overlay = new THREE.Group(); overlay.visible = false; scene.add(overlay);   // hover marker + drop line (persists across rebuilds)
+const overlay = new THREE.Group(); overlay.visible = false; scene.add(overlay);   // hover marker + guide lines (persists across rebuilds)
+let pinned = null, curHover = null;   // 마커 고정 상태 · 현재 호버 결과 {vp,point,dayIndex,line}
 
 // ---- helpers ------------------------------------------------------------
 const todOf = t => { const d = new Date(t * 1000); return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600; };
@@ -189,7 +191,7 @@ function buildLines(report) {
   // detach the shared highlight material so disposeGroup doesn't free it
   if (hovered) { hovered.material = hovered.userData.base; hovered = null; }
   if (tip) tip.hidden = true;
-  overlay.visible = false;                                   // clear stale hover marker on rebuild
+  overlay.visible = false; pinned = null; curHover = null;   // clear stale hover/pinned marker on rebuild
   disposeGroup(lineRoot); lines = [];
   const runs = report.runs || [];
   if (!runs.length) return { yMax: 100, maxDay: 1, cMin: null, cMax: null };
@@ -782,61 +784,86 @@ const HI = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opa
 const marker = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
 marker.scale.setScalar(state.markerSize);   // adjustable in the gear settings (default smaller than before)
 const mkGuide = op => new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0x4dd0c0, transparent: true, opacity: op }));
-const dropLine = mkGuide(0.7);   // vertical: value
-const xLine = mkGuide(0.5);      // floor → 하루 중 시각(X) 축
-const zLine = mkGuide(0.5);      // floor → 날짜(Z) 축
-overlay.add(marker, dropLine, xLine, zLine);
+const xLine = mkGuide(0.5), zLine = mkGuide(0.5);   // 바닥 안내선 → 하루 중 시각(X) · 날짜(Z) 축
+const valLine = mkGuide(0.65);                      // 값(z축=세로) 안내선: 대각선/직각
+const valDot = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshBasicMaterial({ color: 0x4dd0c0 }));
+const valPlane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: 0x4dd0c0, transparent: true, opacity: 0.11, side: THREE.DoubleSide, depthWrite: false }));
+valPlane.rotation.x = -Math.PI / 2;                 // 바닥(x-z)과 평행한 수평면
+overlay.add(marker, xLine, zLine, valLine, valDot, valPlane);
 
-addEventListener('pointermove', e => {
-  if (e.target !== renderer.domElement) {                       // pointer is over a panel — don't raycast through it
-    if (hovered) { hovered.material = hovered.userData.base; hovered = null; }
-    tip.hidden = true; overlay.visible = false;
-    return;
+// 마커에서 시각(X)·날짜(Z) 축(바닥) + 값(z축=세로) 축으로 안내선/점/면 배치
+function placeGuides(vp) {
+  const baseY = isSignedY() ? Y / 2 : 0, x0 = -X / 2, z0 = -Z / 2;
+  const fp = new THREE.Vector3(vp.x, baseY, vp.z);            // 바닥 투영점
+  marker.position.copy(vp);
+  const fg = state.floorGuide === 'on';
+  xLine.visible = zLine.visible = fg;
+  if (fg) {
+    xLine.geometry.setFromPoints([fp.clone(), new THREE.Vector3(vp.x, baseY, z0)]);   // → 시각(X)축
+    zLine.geometry.setFromPoints([fp.clone(), new THREE.Vector3(x0, baseY, vp.z)]);    // → 날짜(Z)축
   }
-  mouse.x = (e.clientX / innerWidth) * 2 - 1;
-  mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+  const vg = state.valGuide;                                  // diag | step | dot | plane | off
+  const VA = new THREE.Vector3(x0, vp.y, z0);                 // 값축(세로 x0,z0) 위, 같은 높이
+  valLine.visible = vg === 'diag' || vg === 'step';
+  valDot.visible = vg === 'dot';
+  valPlane.visible = vg === 'plane';
+  if (vg === 'diag') valLine.geometry.setFromPoints([vp.clone(), VA.clone()]);                                   // 대각선 바로 축으로
+  else if (vg === 'step') valLine.geometry.setFromPoints([fp.clone(), vp.clone(), new THREE.Vector3(x0, vp.y, vp.z), VA.clone()]);   // 바닥→수직↑→축과평행→값축
+  else if (vg === 'dot') { valDot.position.copy(VA); valDot.scale.setScalar(Math.max(0.12, state.markerSize * 0.9)); }              // 값축에 점만
+  else if (vg === 'plane') { valPlane.position.set(0, vp.y, 0); valPlane.scale.set(X + 0.5, Z + 0.5, 1); }                          // 그 높이의 수평면
+}
+
+function pickAt(cx, cy) {   // raycast the curves → nearest vertex, or null
+  mouse.x = (cx / innerWidth) * 2 - 1;
+  mouse.y = -(cy / innerHeight) * 2 + 1;
   ray.setFromCamera(mouse, camera);
   const hit = ray.intersectObjects(lines, false)[0];
-  if (hit) {
-    const line = hit.object;
-    if (hovered !== line) {
-      if (hovered) hovered.material = hovered.userData.base;
-      hovered = line; line.userData.base = line.material; line.material = HI;
-    }
-    const pts = line.userData.pts;
-    // hit.index is the segment START vertex; pick whichever endpoint is nearer the hit point
-    const i = clamp(hit.index ?? 0, 0, pts.length - 1), j = Math.min(i + 1, pts.length - 1);
-    const pos = line.geometry.attributes.position;
-    const lp = line.worldToLocal(hit.point.clone());            // compare in the line's own space
-    const di = lp.distanceToSquared(new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)));
-    const dj = lp.distanceToSquared(new THREE.Vector3(pos.getX(j), pos.getY(j), pos.getZ(j)));
-    const idx = dj < di ? j : i;
-    const vp = new THREE.Vector3(pos.getX(idx), pos.getY(idx), pos.getZ(idx)); line.localToWorld(vp);
-    marker.position.copy(vp);
-    const baseY = isSignedY() ? Y / 2 : 0;                      // floor plane: 0-rate/0-power plane in signed modes, else the floor
-    const fp = new THREE.Vector3(vp.x, baseY, vp.z);            // point projected onto the floor
-    const ch = state.crosshair;                                // '3d' | 'vert' | 'off'
-    dropLine.visible = ch !== 'off';
-    if (ch !== 'off') dropLine.geometry.setFromPoints([vp.clone(), fp.clone()]);   // vertical → value
-    xLine.visible = zLine.visible = ch === '3d';
-    if (ch === '3d') {
-      xLine.geometry.setFromPoints([fp.clone(), new THREE.Vector3(vp.x, baseY, -Z / 2)]);   // 바닥선 → 하루 중 시각(X) 축
-      zLine.geometry.setFromPoints([fp.clone(), new THREE.Vector3(-X / 2, baseY, vp.z)]);    // 바닥선 → 날짜(Z) 축
-    }
-    overlay.visible = true;
-    showTip(line.userData.dayIndex, pts[idx], e.clientX, e.clientY);
-  } else {
-    if (hovered) { hovered.material = hovered.userData.base; hovered = null; }
-    tip.hidden = true; overlay.visible = false;
-  }
+  if (!hit) return null;
+  const line = hit.object, pts = line.userData.pts;
+  const i = clamp(hit.index ?? 0, 0, pts.length - 1), j = Math.min(i + 1, pts.length - 1);
+  const pos = line.geometry.attributes.position;
+  const lp = line.worldToLocal(hit.point.clone());
+  const di = lp.distanceToSquared(new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)));
+  const dj = lp.distanceToSquared(new THREE.Vector3(pos.getX(j), pos.getY(j), pos.getZ(j)));
+  const idx = dj < di ? j : i;
+  const vp = new THREE.Vector3(pos.getX(idx), pos.getY(idx), pos.getZ(idx)); line.localToWorld(vp);
+  return { line, vp, point: pts[idx], dayIndex: line.userData.dayIndex };
+}
+function setHovered(line) {
+  if (hovered === line) return;
+  if (hovered) hovered.material = hovered.userData.base;
+  hovered = line || null;
+  if (hovered) { hovered.userData.base = hovered.material; hovered.material = HI; }
+}
+function clearHover() {
+  if (pinned) return;                                          // 고정 상태는 유지
+  setHovered(null); curHover = null; tip.hidden = true; overlay.visible = false;
+}
+addEventListener('pointermove', e => {
+  if (pinned) return;                                          // 고정 중엔 드래그로 회전만 (호버 변경 X)
+  if (e.target !== renderer.domElement) { clearHover(); return; }
+  const h = pickAt(e.clientX, e.clientY);
+  if (!h) { clearHover(); return; }
+  setHovered(h.line); curHover = h; placeGuides(h.vp); overlay.visible = true;
+  showTip(h.dayIndex, h.point, e.clientX, e.clientY, false);
+});
+// 클릭 = 마커 고정 토글 (그다음 드래그로 각도 바꿔가며 관찰) — 드래그(회전)와는 이동량으로 구분
+let downXY = null;
+renderer.domElement.addEventListener('pointerdown', e => { downXY = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!downXY) return;
+  const moved = Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]); downXY = null;
+  if (moved > 5) return;                                       // 드래그(회전) → 클릭 아님
+  if (pinned) { pinned = null; setHovered(null); tip.hidden = true; overlay.visible = false; return; }   // 고정 해제
+  if (curHover) { pinned = curHover; placeGuides(curHover.vp); overlay.visible = true; showTip(curHover.dayIndex, curHover.point, e.clientX, e.clientY, true); }
 });
 
-function showTip(dayIndex, p, x, y) {
+function showTip(dayIndex, p, x, y, isPinned) {
   const d = new Date(p.t * 1000);
   const st = p.charging ? '⚡ 충전 중' : p.ac ? '🔌 만충/유휴' : '🔋 방전 중';
   tip.innerHTML = `
-    <h3>${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${dayIndex}일차</h3>
-    <div><span class="big">${state.rateLevel === 'pct' ? (p.pct ?? '?') : (p.cap != null ? p.cap.toFixed(1) : (p.pct ?? '?'))}%</span>${state.rateLevel === 'pct' ? '' : ` <span class="tsm">정수 ${p.pct ?? '?'}%</span>`} &nbsp; ${st}</div>
+    <h3>${isPinned ? '📌 ' : ''}${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${dayIndex}일차</h3>
+    <div><span class="big">${state.rateLevel === 'pct' ? (p.pct ?? '?') : (p.cap != null ? p.cap.toFixed(1) : (p.pct ?? '?'))}%</span> <span class="tsm">${state.rateLevel === 'pct' ? (p.cap != null ? `정밀 ${p.cap.toFixed(1)}%` : '') : `정수 ${p.pct ?? '?'}%`}</span> &nbsp; ${st}</div>
     <table>
       ${state.y === 'rate' && p._rate != null ? `<tr><td class="k">변화율</td><td>${p._rate >= 0 ? '+' : ''}${p._rate.toFixed(3)} %/min</td></tr>` : ''}
       ${p.systemW != null ? `<tr><td class="k">시스템</td><td>${p.systemW.toFixed(1)} W</td></tr>` : ''}
@@ -847,9 +874,12 @@ function showTip(dayIndex, p, x, y) {
       ${p.lowPower != null ? `<tr><td class="k">저전력</td><td>${p.lowPower ? '🟡 켜짐' : '꺼짐'}</td></tr>` : ''}
     </table>`;
   tip.hidden = false;
+  positionTip(x, y);
+}
+function positionTip(x, y) {
   const r = tip.getBoundingClientRect();
-  tip.style.left = Math.min(x + 16, innerWidth - r.width - 8) + 'px';
-  tip.style.top = Math.min(y + 16, innerHeight - r.height - 8) + 'px';
+  tip.style.left = Math.min(Math.max(8, x + 16), innerWidth - r.width - 8) + 'px';
+  tip.style.top = Math.min(Math.max(8, y + 16), innerHeight - r.height - 8) + 'px';
 }
 
 // ---- data ---------------------------------------------------------------
@@ -904,7 +934,8 @@ document.querySelectorAll('.seg').forEach(seg => {
     else if (group === 'wattsRail') { state.wattsRail = val; try { localStorage.setItem('battWattsRail', val); } catch { /* ignore */ } rebuild(); }
     else if (group === 'markerSize') { state.markerSize = +val; marker.scale.setScalar(+val); try { localStorage.setItem('battMarkerSize', val); } catch { /* ignore */ } }
     else if (group === 'rateLevel') { state.rateLevel = val; try { localStorage.setItem('battRateLevel', val); } catch { /* ignore */ } load(); }   // 전역 정밀도: 리포트+속도패널+그래프 전부 재계산
-    else if (group === 'crosshair') { state.crosshair = val; try { localStorage.setItem('battCrosshair', val); } catch { /* ignore */ } }   // 다음 호버부터 적용
+    else if (group === 'floorGuide') { state.floorGuide = val; try { localStorage.setItem('battFloorGuide', val); } catch { /* ignore */ } if (pinned || curHover) { placeGuides((pinned || curHover).vp); overlay.visible = true; } }
+    else if (group === 'valGuide') { state.valGuide = val; try { localStorage.setItem('battValGuide', val); } catch { /* ignore */ } if (pinned || curHover) { placeGuides((pinned || curHover).vp); overlay.visible = true; } }
     else { state[group] = val; rebuild(); }
   });
 });
@@ -1069,6 +1100,10 @@ addEventListener('resize', () => {
 (function animate() {
   requestAnimationFrame(animate);
   controls.update();
+  if (pinned) {   // 고정된 마커를 화면좌표로 투영해 툴팁을 따라붙임 (회전해도 붙어있게)
+    const s = pinned.vp.clone().project(camera);
+    positionTip((s.x * 0.5 + 0.5) * innerWidth, (-s.y * 0.5 + 0.5) * innerHeight - 16);
+  }
   renderer.render(scene, camera);
 })();
 
