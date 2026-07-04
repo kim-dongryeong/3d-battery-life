@@ -439,6 +439,7 @@ function renderProjection() {
 // 라벨로는 화면 각도에 따라 안 보인다. 대신 그 월드좌표를 매 프레임 화면좌표로 투영해, 패널 위에
 // 항상 뜨는 HTML 태그(#projTags)로 도착 시각을 표기한다 → 카메라·패널과 무관하게 "확실히 인지".
 let proj3DTags = [];   // [{vp: THREE.Vector3, el, yBias}]
+let projLines = [];    // 예상 곡선/직선 THREE.Line — 데이터 곡선처럼 마우스 호버(레이캐스트) 대상
 function clearProjTags() { for (const t of proj3DTags) t.el.remove(); proj3DTags = []; }
 function addProjTag(vp, text, color, yBias = 0) {
   const el = document.createElement('div');
@@ -448,8 +449,15 @@ function addProjTag(vp, text, color, yBias = 0) {
   proj3DTags.push({ vp, el, yBias });
 }
 function drawProjection3D() {
+  // 예상선을 dispose 하기 전에, 그 위의 호버 하이라이트(공유 HI 재질)를 원복해 dispose 대상에서 뺀다
+  // (안 그러면 disposeGroup이 공유 HI를 dispose → 이후 모든 호버 하이라이트가 깨짐)
+  if (hovered && hovered.userData && hovered.userData.proj) { hovered.material = hovered.userData.base; hovered = null; }
   disposeGroup(projGroup);
   clearProjTags();
+  // 예상선을 지우면 그 위에 걸려 있던 호버/고정 마커도 함께 정리 (dangling 참조 방지)
+  if (curHover && curHover.proj) { curHover = null; if (!pinned) { tip.hidden = true; overlay.visible = false; } }
+  if (pinned && pinned.proj) { pinned = null; tipManual = false; tip.classList.remove('pinned'); tip.hidden = true; overlay.visible = false; }
+  projLines = [];
   const r = state.report;
   if (state.projLine !== 'on' || state.y !== 'pct' || !r) return;
   try { drawProjection3DInner(r); } catch (e) { /* projection is non-essential — never let it break the 3D graph */ }
@@ -464,26 +472,29 @@ function drawProjection3DInner(r) {
     for (let i = 1; i < ps.length; i++) if (tm <= ps[i].t) { const a = ps[i - 1], b = ps[i]; return a.lvl + (b.lvl - a.lvl) * (b.t === a.t ? 0 : (tm - a.t) / (b.t - a.t)); }
     return 0;
   };
-  const build = (endMin, isLinear, color, dashed, opacity) => {
-    const segs = [[]]; let prevDay = null;
+  const build = (endMin, isLinear, color, dashed, opacity, kind) => {
+    const segs = [[]], metas = [[]]; let prevDay = null;     // metas: 정점별 {t, lvl, mm} — 호버 툴팁용
     for (let tm = 0; tm <= endMin + 1e-6; tm += Math.max(2, endMin / 90)) {
       const mm = Math.min(tm, endMin);
       const lvl = isLinear ? P.L0 * (1 - mm / endMin) : lvlAtMin(mm);
       const rt = P.baseT + mm * 60, day = dayOfT(rt);
-      if (prevDay !== null && day !== prevDay) segs.push([]);   // 자정에서 분리 → 가로 점프선 방지
+      if (prevDay !== null && day !== prevDay) { segs.push([]); metas.push([]); }   // 자정에서 분리 → 가로 점프선 방지
       prevDay = day;
       segs[segs.length - 1].push(new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(lvl, yMax), zFromDay(day, maxDay)));
+      metas[metas.length - 1].push({ t: rt, lvl, mm });
     }
-    for (const seg of segs) {
-      if (seg.length < 2) continue;
+    for (let si = 0; si < segs.length; si++) {
+      const seg = segs[si]; if (seg.length < 2) continue;
       const g = new THREE.BufferGeometry().setFromPoints(seg);
       const m = dashed ? new THREE.LineDashedMaterial({ color, dashSize: 0.7, gapSize: 0.5, transparent: true, opacity })
         : new THREE.LineBasicMaterial({ color, transparent: true, opacity });
-      const line = new THREE.Line(g, m); if (dashed) line.computeLineDistances(); projGroup.add(line);
+      const line = new THREE.Line(g, m); if (dashed) line.computeLineDistances();
+      line.userData = { proj: true, kind, meta: metas[si] };
+      projGroup.add(line); projLines.push(line);            // 레이캐스트 대상에 추가
     }
   };
-  build(P.curveMin, false, 0x4dd0c0, false, 0.9);          // 구간별 곡선 (청록 실선)
-  build(P.linMin, true, 0x8aa0b8, true, 0.6);              // 직선 등속 (회청 점선)
+  build(P.curveMin, false, 0x4dd0c0, false, 0.9, 'curve');  // 구간별 곡선 (청록 실선)
+  build(P.linMin, true, 0x8aa0b8, true, 0.6, 'line');       // 직선 등속 (회청 점선)
   const sp = new THREE.Vector3(xFromTod(todOf(P.baseT)), yFromVal(P.L0, yMax), zFromDay(dayOfT(P.baseT), maxDay));
   const dot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), new THREE.MeshBasicMaterial({ color: 0x4dd0c0 }));
   dot.position.copy(sp); projGroup.add(dot);
@@ -1000,17 +1011,25 @@ function pickAt(cx, cy) {   // raycast the curves → nearest vertex, or null
   mouse.x = (cx / innerWidth) * 2 - 1;
   mouse.y = -(cy / innerHeight) * 2 + 1;
   ray.setFromCamera(mouse, camera);
-  const hit = ray.intersectObjects(lines, false)[0];
+  // vendored three의 Line.raycast는 distanceToRay를 안 채우므로, 교점(point)의 시선(ray) 수직거리를 직접 계산.
+  const rd2 = h => ray.ray.distanceSqToPoint(h.point);            // 커서 시선과의 수직거리² (작을수록 커서 바로 아래)
+  const dataHit = ray.intersectObjects(lines, false)[0] || null;   // 데이터 곡선: 종전대로 카메라 최근접
+  let projHit = null;                                              // 예상선(곡선·직선): 커서에 시각적으로 가장 가까운 쪽
+  if (projLines.length) for (const h of ray.intersectObjects(projLines, false)) if (!projHit || rd2(h) < rd2(projHit)) projHit = h;
+  // 예상선이 커서 시선에 더 가까우면 예상선을, 아니면 데이터 곡선을 집는다 (두 예상선이 겹쳐도 각각 선택 가능)
+  let hit = dataHit;
+  if (projHit && (!dataHit || rd2(projHit) < rd2(dataHit))) hit = projHit;
   if (!hit) return null;
-  const line = hit.object, pts = line.userData.pts;
-  const i = clamp(hit.index ?? 0, 0, pts.length - 1), j = Math.min(i + 1, pts.length - 1);
+  const line = hit.object, arr = line.userData.proj ? line.userData.meta : line.userData.pts;
+  const i = clamp(hit.index ?? 0, 0, arr.length - 1), j = Math.min(i + 1, arr.length - 1);
   const pos = line.geometry.attributes.position;
   const lp = line.worldToLocal(hit.point.clone());
   const di = lp.distanceToSquared(new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)));
   const dj = lp.distanceToSquared(new THREE.Vector3(pos.getX(j), pos.getY(j), pos.getZ(j)));
   const idx = dj < di ? j : i;
   const vp = new THREE.Vector3(pos.getX(idx), pos.getY(idx), pos.getZ(idx)); line.localToWorld(vp);
-  return { line, vp, point: pts[idx], dayIndex: line.userData.dayIndex };
+  if (line.userData.proj) return { line, vp, proj: { ...line.userData.meta[idx], kind: line.userData.kind } };
+  return { line, vp, point: arr[idx], dayIndex: line.userData.dayIndex };
 }
 function setHovered(line) {
   if (hovered === line) return;
@@ -1028,7 +1047,8 @@ addEventListener('pointermove', e => {
   const h = pickAt(e.clientX, e.clientY);
   if (!h) { clearHover(); return; }
   setHovered(h.line); curHover = h; placeGuides(h.vp); overlay.visible = true;
-  showTip(h.dayIndex, h.point, e.clientX, e.clientY, false);
+  if (h.proj) showProjTip(h.proj, e.clientX, e.clientY, false);
+  else showTip(h.dayIndex, h.point, e.clientX, e.clientY, false);
 });
 // 클릭 = 마커 고정 토글 (그다음 드래그로 각도 바꿔가며 관찰) — 드래그(회전)와는 이동량으로 구분
 let downXY = null;
@@ -1038,7 +1058,9 @@ renderer.domElement.addEventListener('pointerup', e => {
   const moved = Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]); downXY = null;
   if (moved > 5) return;                                       // 드래그(회전) → 클릭 아님
   if (pinned) { pinned = null; tipManual = false; tip.classList.remove('pinned'); setHovered(null); tip.hidden = true; overlay.visible = false; return; }   // 고정 해제
-  if (curHover) { pinned = curHover; tipManual = false; tip.classList.add('pinned'); placeGuides(curHover.vp); overlay.visible = true; showTip(curHover.dayIndex, curHover.point, e.clientX, e.clientY, true); }
+  if (curHover) { pinned = curHover; tipManual = false; tip.classList.add('pinned'); placeGuides(curHover.vp); overlay.visible = true;
+    if (curHover.proj) showProjTip(curHover.proj, e.clientX, e.clientY, true);
+    else showTip(curHover.dayIndex, curHover.point, e.clientX, e.clientY, true); }
 });
 // 고정된 툴팁은 드래그로 옮길 수 있음 (그래프 관찰 시 걸리적거리지 않게)
 let tipDrag = null;
@@ -1100,6 +1122,25 @@ function positionTip(x, y) {
   const r = tip.getBoundingClientRect();
   tip.style.left = Math.min(Math.max(8, x + 16), innerWidth - r.width - 8) + 'px';
   tip.style.top = Math.min(Math.max(8, y + 16), innerHeight - r.height - 8) + 'px';
+}
+// 예상선(곡선/직선) 위 호버 툴팁 — 실측 데이터가 아니라 미래 추정이므로 별도 서식(시각·%·경과).
+function showProjTip(pj, x, y, isPinned) {
+  const d = new Date(pj.t * 1000);
+  const clock = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const isCurve = pj.kind === 'curve';
+  const col = isCurve ? '#4dd0c0' : '#9fb2c6';
+  const way = isCurve ? '구간별 곡선 <small class="tsm">(각 구간 과거 속도)</small>' : '직선 등속 <small class="tsm">(현재 구간 속도로 외삽)</small>';
+  tip.innerHTML = `
+    <h3>${isPinned ? '📌 ' : ''}<span style="color:${col}">📈 방전 예상 · ${isCurve ? '곡선' : '직선'}</span></h3>
+    <div><span class="big" style="color:${col}">${pj.lvl.toFixed(1)}%</span> <span class="tsm">${d.getMonth() + 1}/${d.getDate()} ${clock} 예상</span></div>
+    <table>
+      <tr><td class="k">예상 시각</td><td>${d.getMonth() + 1}/${d.getDate()} ${clock}</td></tr>
+      <tr><td class="k">지금부터</td><td>${fmtDur(pj.mm * 60)} 뒤</td></tr>
+      <tr><td class="k">방식</td><td>${way}</td></tr>
+    </table>
+    <div class="tsm" style="margin-top:6px; opacity:.8">과거 방전 속도 기반 추정 · 실제와 다를 수 있음</div>`;
+  tip.hidden = false;
+  positionTip(x, y);
 }
 
 // ---- data ---------------------------------------------------------------
