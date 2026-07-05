@@ -379,8 +379,19 @@ fn show_main(app: &AppHandle) {
         // viewer visible → become a Regular app so it shows in ⌘Tab / can be focused normally
         #[cfg(target_os = "macos")]
         let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+        let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
+        // Promoting Accessory→Regular does NOT make the app frontmost by itself — the window would open
+        // BEHIND the current app and land last in ⌘Tab. Explicitly activate so it behaves like a normal
+        // app (comes to front, normal ⌘Tab order). Must run after the policy switch.
+        #[cfg(target_os = "macos")]
+        unsafe {
+            use objc::runtime::{Object, YES};
+            use objc::{class, msg_send, sel, sel_impl};
+            let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+            let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
+        }
     }
 }
 

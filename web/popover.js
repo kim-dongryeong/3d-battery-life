@@ -41,8 +41,9 @@ function applyI18nPop(root) {
     }
   } finally { i18nApplying = false; }
   // translated text can change the content height (English often wraps differently) → re-measure so the
-  // Rust side resizes the window to fit. Without this the window keeps the pre-translation height → scroll.
-  if (typeof fitWindow === 'function') requestAnimationFrame(fitWindow);
+  // Rust side resizes the window to fit. fitWindow self-defers to the next frame and coalesces, so calling
+  // it here (in addition to render's call) collapses to a single post-translation measurement — no flicker.
+  if (typeof fitWindow === 'function') fitWindow();
 }
 async function initI18nPop() {
   try {
@@ -87,13 +88,24 @@ const timeVal = s => s.timeRemain == null ? '–' : `${fmtTime(s.timeRemain)} ·
 // The Tauri webview IPC isn't reliable for this external-localhost window, so report the content
 // height (and hide requests) to the tray app through the node bridge, which resizes/hides the
 // window from Rust. This makes the window fit the content exactly → no scrollbar, no square margin.
-let lastWinH = 0;
+let lastWinH = 0, fitPending = false;
+// Coalesce all fitWindow() calls in a frame into ONE measurement on the next animation frame. This
+// matters because i18n translates text asynchronously (MutationObserver microtask) AFTER a synchronous
+// render() — so a synchronous measure would read the pre-translation (Korean) height, and a second
+// post-translation measure would read a different (English) height → the window would flip-flop between
+// the two every render (visible flicker) and flood /api/height. rAF runs after microtasks, so the single
+// deferred measure always reads the final, translated layout. Height-change guard avoids redundant posts.
 function fitWindow() {
-  if (document.hidden) return;   // a hidden webview doesn't lay out reliably → measure only when shown
-  const h = Math.min(Math.ceil(document.body.getBoundingClientRect().height), Math.round((screen.availHeight || 900) * 0.95));
-  if (Math.abs(h - lastWinH) < 2) return;   // only post when the content height actually changes
-  lastWinH = h;
-  fetch('/api/height', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ h }) }).catch(() => {});
+  if (fitPending) return;
+  fitPending = true;
+  requestAnimationFrame(() => {
+    fitPending = false;
+    if (document.hidden) return;   // a hidden webview doesn't lay out reliably → measure only when shown
+    const h = Math.min(Math.ceil(document.body.getBoundingClientRect().height), Math.round((screen.availHeight || 900) * 0.95));
+    if (Math.abs(h - lastWinH) < 2) return;   // only post when the content height actually changes
+    lastWinH = h;
+    fetch('/api/height', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ h }) }).catch(() => {});
+  });
 }
 // when the popover is shown, re-pull fresh data and re-measure at the true (visible) layout height
 document.addEventListener('visibilitychange', () => {
