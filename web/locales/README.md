@@ -21,6 +21,21 @@ The viewer speaks **Korean** by default and can be switched to any language a lo
    ```
 4. Reload, pick your language in the gear menu, and check it. Open a PR — that's it. 🎉
 
+### Optional: translate the help page (?Guide)
+
+The **?Guide** article (metrics & methods) is a standalone document, not covered by the JSON dict.
+To translate it, **copy** [`../help.html`](../help.html) to `web/help.<code>.html` and translate the prose
+(keep the HTML structure, code, and formulas). The viewer loads `help.<code>.html` when your language
+is active and **falls back to the Korean `help.html`** if it's missing — so this step is optional.
+See [`../help.en.html`](../help.en.html) for a worked example.
+
+### `_patterns` (interpolated strings)
+
+`en.json` has a `_patterns` list of `[regex, replacement]` pairs applied to strings that can't be
+exact-keyed because they contain numbers (e.g. `"3h 21m later"`, `"day 5"`). If your language needs
+different word order or units, translate these too. Order matters — longer/more-specific patterns must
+come **before** shorter ones. If unsure, leave `_patterns` as-is; only whole-string keys will translate.
+
 ## How it works (for maintainers)
 
 - `web/i18n.js` loads `/locales/<code>.json` (a flat `{ "한국어": "translation" }` dict) and, at page

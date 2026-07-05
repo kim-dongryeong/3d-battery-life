@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3D Analysis Report — Metrics & Methods Guide</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script>try { if (localStorage.getItem('battTheme') === 'light') document.documentElement.classList.add('light'); } catch (e) {}</script>
+  <style>
+    body { overflow: auto; }
+    .help { max-width: 860px; margin: 0 auto; padding: 32px 22px 80px; }
+    .help h1 { font-size: 22px; margin: 0 0 4px; }
+    .help .sub { color: var(--dim); margin: 0 0 26px; }
+    .help h2 { font-size: 17px; margin: 30px 0 8px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--accent); }
+    .help h3 { font-size: 14px; margin: 16px 0 4px; }
+    .help p, .help li { color: var(--fg); line-height: 1.65; }
+    .help code, .help .f { background: var(--btn); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: var(--fg); }
+    .help .f { display: inline-block; margin: 4px 0; padding: 4px 9px; }
+    .help table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13px; }
+    .help th, .help td { border: 1px solid var(--line); padding: 7px 9px; text-align: left; vertical-align: top; }
+    .help th { background: var(--th); color: var(--fg); }
+    .help .k { color: var(--accent); font-weight: 600; }
+    .help .warn { color: #ffa94d; }
+    .help .tag { display: inline-block; background: var(--accent); color: #06201d; border-radius: 5px; padding: 1px 7px; font-weight: 700; font-size: 12px; }
+    .help a.back { color: var(--accent); text-decoration: none; }
+    .help ul { margin: 6px 0; padding-left: 20px; }
+    .help .note { color: var(--dim); font-size: 12.5px; }
+  </style>
+</head>
+<body>
+  <div class="help">
+    <a class="back" href="/">← Back to viewer</a>
+    <h1>🔋 Metrics & Methods — the science</h1>
+    <p class="sub">How discharge speed / aging are computed, and what the versions, metrics and deltas actually differ in.</p>
+
+    <h2>0. How the data is produced</h2>
+    <p>Every minute the battery is recorded with <code>ioreg</code>. Analysis uses only <b>discharge spans</b> (charger unplugged <code>ac=false</code>, level monotonically decreasing, adjacent-sample gap ≤ 2 min). Between two adjacent samples we assume a <b>straight line</b> (your proposed assumption), and slice finely at <b>1% and date boundaries</b>, accumulating <b>drop (Δ%) · time · energy (W·s)</b> into each <code>(date, 10% band)</code> cell. This "clipped interval accumulation" is the foundation of every calculation.</p>
+    <p class="note">Reporting gate: to show a cell it needs <b>observed ≥ 10 min &amp; total drop ≥ 2%p &amp; ≥ 3 bands</b>. Below that it's emptied as "insufficient data" (so little data can't fabricate a fake trend).</p>
+
+    <h2>1. Metrics: speed (%/min) vs aging (Wh/%)</h2>
+    <p>They answer <b>different questions</b>.</p>
+    <h3>Speed — <code>%/min</code> (negative = discharge)</h3>
+    <p class="f">speed = −60 × Σ(drop %) ÷ Σ(time sec)</p>
+    <p>How fast battery % falls per minute. It's a <b>"felt speed" that mixes load (how much you use) + aging</b>. Even the same new battery gets faster under heavy CPU use. → Answers "why is it draining fast right now?".</p>
+    <h3>Aging — <code>Wh/%</code> (lower = more aging)</h3>
+    <p class="k" style="font-size:15px">In one line — <b>Wh/% = "how much real energy 1% holds"</b> (≈ full capacity ÷ 100)</p>
+    <p class="f">Wh/% = Σ(energy Wh) ÷ Σ(drop %)</p>
+    <p>The <b>energy</b> it actually took to drain 1%. Physically <code>1% ≈ (full energy)/100</code>, and as a battery ages its full capacity (mAh) shrinks, so <b>the energy in 1% shrinks too</b>. So Wh/% is <span class="k">nearly independent of load</span> (using a lot and draining fast doesn't change the "energy per 1%") → <b>a pure aging metric with load removed</b>.</p>
+    <table>
+      <tr><th>Observation</th><th>Interpretation</th></tr>
+      <tr><td>Speed ↑ but Wh/% unchanged</td><td>Battery is fine; it got faster because <b>load (usage) rose</b></td></tr>
+      <tr><td>Speed ↑ and Wh/% ↓</td><td><b>Real battery aging</b> is underway</td></tr>
+    </table>
+    <p class="note">Level toggle <b>integer % ↔ mAh precise</b>: <code>pct</code> is 1% steps (coarse), <code>rawCap/rawMax</code> is ~0.02% resolution (precise). Precise mode reduces quantization noise, so V4c·V5 stabilize.</p>
+
+    <h2>2. Speed methods (versions): V4a · V0 · V1 · V4c · V5</h2>
+    <p>Data crossing one band (e.g. <code>90–100%</code>) is clipped at the ends (starts at 93%, stops at 78%) and samples are uneven. "The average speed of that band" depends on <b>how you estimate it</b> — that's the difference between versions. The same data is computed several ways to compare <b>how much the estimation method changes the result</b>.</p>
+    <table>
+      <tr><th>Version</th><th>Method</th><th>Character / when</th></tr>
+      <tr><td><span class="tag">V4a</span> Pooled <span class="k">(default)</span></td><td><span class="f">−Σ(drop) ÷ Σ(time)</span> "total drop over total time spent in the band"</td><td>A <b>sum</b> of ratios, so it's <b>invariant</b> to how you segment; short noisy stretches don't spike. Statistically most robust → the default.</td></tr>
+      <tr><td><span class="tag">V0</span> Raw mean</td><td>Compute each discharge episode's speed separately and take a <b>simple average</b></td><td><span class="warn">The ratio-average trap</span>: a short, noisy episode carries the same weight as a long one → biased. For contrast/reference.</td></tr>
+      <tr><td><span class="tag">V1</span> Full-band only</td><td>Average only episodes that crossed exactly 10%↔10% fully</td><td>Clean but <span class="warn">selection bias</span>: only long single-sitting sessions survive; short ones are thrown out.</td></tr>
+      <tr><td><span class="tag">V4c</span> 1% sub-bins</td><td>Split the band into 1% pieces, get each 1%'s speed, and <b>average the 1%s equally</b></td><td>"Level-based standardization". Diagnoses partial-coverage (e.g. only starts at 93%) and data-skew bias. Noise-sensitive at integer %.</td></tr>
+      <tr><td><span class="tag">V5</span> Regression</td><td><b>Regress</b> (least-squares) a line through every raw point in the band, take the slope</td><td>Unsuited to integer %, autocorrelation and step shapes (expert consensus) → diagnostic. More meaningful at mAh precise.</td></tr>
+    </table>
+    <p><b>How to read it:</b> normally use <span class="k">V4a</span>. If V0/V1 diverge a lot from V4a, that signals "estimation is unstable" (many short sessions). If V4c differs a lot from V4a, "data is skewed to one side within the band". (That's why the main table shows only V4a; the rest are for diagnosis.)</p>
+
+    <h2>3. What is the delta (Δ) relative to</h2>
+    <p>The delta re-expresses <b>each band as its difference from "that band's own initial baseline"</b>.</p>
+    <ul>
+      <li>baseline = the <b>median of the earliest 20% of the periods</b> of that band's data, sorted by time.</li>
+      <li>displayed value = <span class="f">(current value) − (that band's baseline)</span></li>
+    </ul>
+    <p><b>Why:</b> absolute speed differs per band (per-band offset), making trend comparison hard. The delta subtracts that offset and keeps only <span class="k">"how much it changed vs. the start"</span>. Below 0 means — in the speed metric, <b>faster than the start</b>; in the Wh/% metric, <b>more aged than the start</b>. (Delta color is a diverging scale around 0: red = worse, blue = better.)</p>
+
+    <h2>4. Period: day / week / month</h2>
+    <p>The same V4a pooling is <b>re-accumulated from the raw data</b> over a wider period (not by averaging daily values — that would bias it). Toward week/month, noise falls and the long-term aging trend sharpens. (The gate amount is the same, so wider periods pass more easily.)</p>
+
+    <h2>5. How to read the screens</h2>
+    <ul>
+      <li><b>Heatmap</b>: x = date, y = band, color = value, <b>opacity = observed amount</b> (fainter = less data), teal line = health. Green on the left → red on the right means getting faster / aging. Click a cell = that date's cross-section.</li>
+      <li><b>3D</b>: x = date, height = value, depth = band (level). Shapes: <b>Lines</b> (per-band time trend) · <b>Ridges</b> (per-date profile) · <b>Lines+Ridges</b> (grid) · <b>Surface</b> (terrain). The <b>0 line</b> = where speed is 0 (no discharge); <b>Delta</b> · <b>Expand</b> toggles.</li>
+      <li>Bottom-left table: click a row (band) → that band's trend. Empty dates are <b>not filled in</b> (no interpolation — we don't invent missing data).</li>
+    </ul>
+
+    <h2>6. The main 3D graph's vertical axis · markers</h2>
+    <p>The main 3D graph (x = time of day, depth = date) lets you switch the <b>vertical axis</b> three ways.</p>
+    <ul>
+      <li><b>Battery %</b> — level at that moment. Follows the global precision setting (precise mAh / integer %).</li>
+      <li><b>Power W</b> — pick <b>battery / system / adapter</b> via "Power rail" below. The battery rail is a signed axis (charge +, discharge −).</li>
+      <li><b>Δ charge %/min</b> — explained below.</li>
+    </ul>
+    <h3>Δ charge %/min = d(level)/dt · <b>trailing moving average</b></h3>
+    <p>Each point's value is <b>the average rate over the smoothing window (e.g. 20 min) just BEFORE that point</b> — <span class="k">a trailing moving average that looks only at the past, so it never uses future values.</span> So picking 20 min means "the average speed over the past 20 min", <b>not</b> a centered average of "past 10 min + future 10 min".</p>
+    <p class="f">rate(t) = ( level(t) − level(t − window) ) ÷ window(min)</p>
+    <p>Sign: <b>+ charge, − discharge</b> (above/below the 0 line). A <b>narrower</b> window is <b>twitchier</b> (variation shows), a <b>wider</b> one is <b>smoother</b>. Raw level (integer %) is 1% steps, so differentiating it directly makes a sawtooth; the window smooths it, and the default is precise-mAh based so it's smooth. <span class="note">(The tooltip's "rate · past N-min average" indicates this window.)</span></p>
+    <h3>Markers · guides · pinning</h3>
+    <p>Hovering a curve pops a <b>marker</b> and value at that point. In ⚙ Settings, choose <b>floor guides</b> (time · date axes) and the <b>value guide</b> (to the vertical axis: diagonal / right-angle / dot / plane), and change the <b>marker size</b>. <b>Click a point to pin it (📌)</b> so you can rotate the angle by dragging while keeping it, and a pinned <b>tooltip can be dragged</b> to move it.</p>
+
+    <p class="note" style="margin-top:24px">Design &amp; validation: cross-review by Codex × Claude × agy. Calculation code is <code>lib/bucketRates.js</code>; CLI comparison is <code>node scripts/compare-rates.js [demo|real] [pct|rawcap] [day|week|month]</code>.</p>
+    <a class="back" href="/">← Back to viewer</a>
+  </div>
+</body>
+</html>

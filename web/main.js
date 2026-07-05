@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { initI18n, observeI18n, tr } from './i18n.js';
+import { initI18n, observeI18n, tr, curLang } from './i18n.js';
 
 // ---- world dimensions ---------------------------------------------------
 // X = 하루 중 시각 (0..24h)  ·  Y = 배터리 %/W (높이)  ·  Z = 경과 일수 (깊이)
@@ -1291,7 +1291,14 @@ document.querySelectorAll('.seg').forEach(seg => {
     const close = () => { helpModal.hidden = true; };
     helpBtn.addEventListener('click', e => {
       e.preventDefault();
-      if (!helpFrame.dataset.loaded) { helpFrame.src = '/help.html'; helpFrame.dataset.loaded = '1'; }   // lazy-load once
+      if (!helpFrame.dataset.loaded) {   // lazy-load once — prefer the translated help.<lang>.html, fall back to Korean
+        helpFrame.dataset.loaded = '1';
+        const lang = curLang();
+        if (lang && lang !== 'ko') {
+          const cand = `/help.${lang}.html`;
+          fetch(cand, { method: 'HEAD' }).then(r => { helpFrame.src = r.ok ? cand : '/help.html'; }).catch(() => { helpFrame.src = '/help.html'; });
+        } else helpFrame.src = '/help.html';
+      }
       helpModal.hidden = false;
     });
     document.getElementById('helpClose').addEventListener('click', close);
