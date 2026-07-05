@@ -1282,6 +1282,13 @@ initI18n().then(() => {
   fetch('/api/main-title', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title }) }).catch(() => {});
 });
 
+// The language is chosen in the POPOVER (writes localStorage 'battLang', same origin). An already-open
+// viewer must pick that up too — the popover reloads itself, but this window won't unless we react.
+// Reload when battLang changes: via the standard cross-document 'storage' event, plus a light poll
+// fallback because Tauri's separate webviews don't reliably deliver 'storage' across windows.
+window.addEventListener('storage', e => { if (e.key === 'battLang' && (e.newValue || 'ko') !== curLang()) location.reload(); });
+setInterval(() => { try { if ((localStorage.getItem('battLang') || 'ko') !== curLang()) location.reload(); } catch { /* ignore */ } }, 1500);
+
 // reflect current state on every segmented control (defaults + deep-linked y/color/xScale)
 document.querySelectorAll('.seg').forEach(seg => {
   const g = seg.dataset.group;
