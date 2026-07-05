@@ -21,7 +21,7 @@ let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOp
 
 // ── i18n (popover) — shares localStorage 'battLang' + /locales/<lang>.json with the viewer ──
 // (popover.js is a classic script, so this is a small self-contained copy of web/i18n.js's logic.)
-let I18N = {}, i18nApplying = false;
+let I18N = {}, I18N_PAT = [], i18nApplying = false;
 const battLang = () => ls('battLang', 'ko');
 function applyI18nPop(root) {
   if (battLang() === 'ko' || !root || i18nApplying) return;
@@ -32,13 +32,18 @@ function applyI18nPop(root) {
     for (const s of scopes) {
       for (const el of [s, ...s.querySelectorAll('[title]')]) { const o = el.getAttribute && el.getAttribute('title'); if (o && I18N[o.trim()]) el.setAttribute('title', I18N[o.trim()]); }
       const w = document.createTreeWalker(s, NodeFilter.SHOW_TEXT); const ns = []; let n; while ((n = w.nextNode())) ns.push(n);
-      for (const tn of ns) { const k = tn.nodeValue.trim(); if (k && I18N[k]) tn.nodeValue = tn.nodeValue.replace(k, I18N[k]); }
+      for (const tn of ns) {
+        const raw = tn.nodeValue, k = raw.trim(); if (!k) continue;
+        if (I18N[k]) { tn.nodeValue = raw.replace(k, I18N[k]); continue; }
+        if (I18N_PAT.length && /[가-힣]/.test(raw)) { let v = raw; for (const [re, rep] of I18N_PAT) v = v.replace(re, rep); if (v !== raw) tn.nodeValue = v; }
+      }
     }
   } finally { i18nApplying = false; }
 }
 async function initI18nPop() {
   const l = battLang(); if (!l || l === 'ko') return;
   try { I18N = await (await fetch(`/locales/${l}.json`)).json(); } catch { I18N = {}; }
+  try { I18N_PAT = (I18N._patterns || []).map(([re, rep]) => [new RegExp(re, 'gu'), rep]); } catch { I18N_PAT = []; }
   const obs = new MutationObserver(muts => { if (i18nApplying) return; const seen = new Set(); for (const m of muts) { const el = m.target.nodeType === 1 ? m.target : m.target.parentElement; const sc = el && el.closest && el.closest('[data-i18n]'); if (sc && !seen.has(sc)) { seen.add(sc); applyI18nPop(sc); } } });
   document.querySelectorAll('[data-i18n]').forEach(s => obs.observe(s, { childList: true, subtree: true, characterData: true }));
   applyI18nPop(document);

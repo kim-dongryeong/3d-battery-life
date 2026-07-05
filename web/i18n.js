@@ -10,7 +10,7 @@
 // run once at load (the marked scopes are static HTML), and changing language just reloads the page.
 // Dynamic JS strings can opt in via the exported `t('한국어')` (returns the translation or the Korean).
 
-let dict = {};
+let dict = {}, patterns = [];   // patterns: regex fallbacks for interpolated strings (units/dates numbers can't be exact-keyed)
 const LANG = (() => { try { return localStorage.getItem('battLang') || 'ko'; } catch { return 'ko'; } })();
 
 export function curLang() { return LANG; }
@@ -30,6 +30,7 @@ export async function listLangs() {
 export async function initI18n() {
   if (LANG && LANG !== 'ko') {
     try { dict = await (await fetch(`/locales/${LANG}.json`)).json(); } catch { dict = {}; }
+    try { patterns = (dict._patterns || []).map(([re, rep]) => [new RegExp(re, 'gu'), rep]); } catch { patterns = []; }
   }
   applyI18n(document);
 }
@@ -52,8 +53,13 @@ export function applyI18n(root) {
       const nodes = []; let n;
       while ((n = walker.nextNode())) nodes.push(n);
       for (const tn of nodes) {
-        const k = tn.nodeValue.trim();
-        if (k && dict[k]) tn.nodeValue = tn.nodeValue.replace(k, dict[k]);
+        const raw = tn.nodeValue, k = raw.trim();
+        if (!k) continue;
+        if (dict[k]) { tn.nodeValue = raw.replace(k, dict[k]); continue; }   // whole-node exact match (pure labels)
+        if (patterns.length && /[가-힣]/.test(raw)) {                        // fallback: regex patterns (interpolated units/dates)
+          let v = raw; for (const [re, rep] of patterns) v = v.replace(re, rep);
+          if (v !== raw) tn.nodeValue = v;
+        }
       }
     }
   } finally { applying = false; }
