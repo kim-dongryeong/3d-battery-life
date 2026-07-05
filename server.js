@@ -48,7 +48,19 @@ let sparkCache = { at: 0, data: [] };    // /api/spark cache (recent %, for the 
 const TRAY_DEFAULTS = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true };
 const trayPath = () => path.join(userDataDir(), 'tray.json');
 function readTray() {
-  try { return { ...TRAY_DEFAULTS, ...JSON.parse(fs.readFileSync(trayPath(), 'utf8')) }; } catch { return { ...TRAY_DEFAULTS }; }
+  let t;
+  try { t = { ...TRAY_DEFAULTS, ...JSON.parse(fs.readFileSync(trayPath(), 'utf8')) }; } catch { t = { ...TRAY_DEFAULTS }; }
+  // read-side migration: files predating the 텍스트 chips carry the legacy `info` enum (0–7).
+  // Same mapping as Rust's Cfg::title_items — GET always returns the chip keys so the popover
+  // never needs to know about `info`. First chip save persists them (sanitizeCfg below).
+  if (t.text_pct == null) {
+    const i = Number.isInteger(t.info) && t.info >= 0 && t.info <= 7 ? t.info : 4;
+    t.text_pct = [1, 4, 5, 7].includes(i);
+    t.text_time = [2, 5].includes(i);
+    t.text_w = [3, 4, 6, 7].includes(i);
+    t.w_src = [6, 7].includes(i) ? 'bat' : 'sys';
+  }
+  return t;
 }
 // only accept known keys with valid types/ranges — tray.json is deserialized by Rust (serde),
 // so a wrong type would break the menu-bar reader.
@@ -61,6 +73,10 @@ function sanitizeCfg(p) {
   if (['icon', 'iconpct', 'combo', 'stack', 'bar', 'text'].includes(p.widget)) o.widget = p.widget;
   if (typeof p.glyph_xl === 'boolean') o.glyph_xl = p.glyph_xl;
   if (typeof p.shortcut === 'boolean') o.shortcut = p.shortcut;
+  if (typeof p.text_pct === 'boolean') o.text_pct = p.text_pct;
+  if (typeof p.text_time === 'boolean') o.text_time = p.text_time;
+  if (typeof p.text_w === 'boolean') o.text_w = p.text_w;
+  if (['sys', 'bat'].includes(p.w_src)) o.w_src = p.w_src;
   return o;
 }
 
@@ -225,6 +241,17 @@ export function startServer({ root, port } = {}) {
       }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(readTray()));
+      return;
+    }
+
+    // menu-bar glyph previews (written by the Rust ticker as raw-RGBA-base64) — the settings
+    // panel renders these directly, so its preview is the tray renderer's actual output.
+    if (url.pathname === '/api/tray-preview') {
+      try {
+        const j = fs.readFileSync(path.join(userDataDir(), 'tray-preview.json'));
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(j);
+      } catch { res.writeHead(404, { 'content-type': 'application/json' }); res.end('{"error":"no preview yet"}'); }
       return;
     }
 

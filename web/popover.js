@@ -16,8 +16,10 @@ let procN = +ls('battProcN', '6');                    // top-processes count · 
 let sparkMode = qs('sm') || ls('battSparkMode', 'pct');   // mini-chart metric: pct | w | 3d
 let sparkH = +(qs('sh') ?? ls('battSparkH', '6'));        // mini-chart window hours: 6 | 24 | 0(all)
 let three = null, t3d = null, t3dLoading = false;     // lazy Three.js + persistent live-3D scene (survives DOM rebuilds)
-let cfg = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true };
+let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w: true, w_src: 'sys' };
 let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
+// menu-bar preview (settings panel): glyph dumps from the Rust tray renderer via /api/tray-preview
+let pvSim = 'cur', pvData = null, pvTimer = 0, pvMeasure = null;
 
 // ── i18n (popover) — shares localStorage 'battLang' + /locales/<lang>.json with the viewer ──
 // (popover.js is a classic script, so this is a small self-contained copy of web/i18n.js's logic.)
@@ -343,11 +345,49 @@ function tailHTML(s) { return powerCompareHTML(s) + detailHTML(s) + procsHTML();
 
 // ── settings panel (gear) ──────────────────────────────────────────────
 // data-k = a localStorage display pref (popover-only) · data-c = a server cfg key (menu-bar/alerts)
-const INFO_OPTS = [['0', '아이콘만'], ['1', '퍼센트(잔량)'], ['2', '남은/완충 시간'], ['3', '시스템 전력'], ['4', '퍼센트+시스템전력'], ['5', '퍼센트+시간'], ['6', '배터리 전력'], ['7', '퍼센트+배터리전력']];
 const selEl = (attr, key, cur, opts) => `<select ${attr}="${key}">` +
   opts.map(([v, l]) => `<option value="${v}"${String(v) === String(cur) ? ' selected' : ''}>${l}</option>`).join('') + `</select>`;
 const tglEl = (key, on) => `<button class="tgl${on ? ' on' : ''}" data-c="${key}" role="switch" aria-checked="${on}"><i></i></button>`;
 const pctOpts = steps => steps.map(v => [String(v), v === 0 ? '끄기' : `${v}%`]);
+
+// 메뉴바 위젯: 모양은 실물 썸네일 갤러리, 텍스트는 독립 칩 — 조합을 글로 상상하는 대신 위의
+// 미리보기(트레이 렌더러가 덤프한 진짜 픽셀)로 결과를 확인하고 고른다.
+const WIDGETS = [
+  ['icon', '채움', '넓음'], ['combo', '채움+숫자', '최다 정보'], ['iconpct', '테두리+숫자', 'macOS풍'],
+  ['stack', '숫자↑아이콘', '좁음'], ['bar', '세로 막대', '가장 좁음'], ['text', '텍스트만', '아이콘 없음'],
+];
+const PV_SIMS = [['cur', '현재'], ['chg', '충전'], ['low', '부족'], ['lpm', '저전력']];
+const widgetHasDigits = w => w === 'combo' || w === 'iconpct' || w === 'stack';
+
+function menubarHTML() {
+  const digitsIn = widgetHasDigits(cfg.widget);
+  const pctForced = cfg.widget === 'text' && !cfg.text_time && !cfg.text_w;   // text-only never goes blank
+  const chip = (key, label, on, locked, badge) =>
+    `<button class="chip${on ? ' on' : ''}${locked ? ' locked' : ''}"${locked ? '' : ` data-t="${key}"`} aria-pressed="${on}"><i class="cdot"></i>${label}${badge ? `<em>${badge}</em>` : ''}</button>`;
+  return `
+    <div class="sec">메뉴바</div>
+    <div class="pvstrip" id="pvstrip"></div>
+    <div class="pvmeta"><span class="pvwidth" id="pvwidth"></span><span class="simseg">${
+      PV_SIMS.map(([k, l]) => `<button data-sim="${k}" class="${pvSim === k ? 'on' : ''}">${l}</button>`).join('')}</span></div>
+    <div class="ssub">모양</div>
+    <div class="gal">${WIDGETS.map(([k, l, sub]) =>
+      `<button data-w="${k}" class="${cfg.widget === k ? 'on' : ''}" aria-pressed="${cfg.widget === k}"><span class="gth" data-gth="${k}"></span><span class="glb">${l}<small>${sub}</small></span></button>`).join('')}</div>
+    <div class="ssub">옆에 붙는 텍스트</div>
+    <div class="chips">
+      ${digitsIn ? chip('pct', '잔량 %', true, true, '아이콘에 포함')
+        : pctForced ? chip('pct', '잔량 %', true, true, '기본 표시')
+        : chip('pct', '잔량 %', !!cfg.text_pct, false)}
+      ${chip('time', '남은/완충 시간', !!cfg.text_time, false)}
+      ${chip('w', '전력 W', !!cfg.text_w, false)}
+      ${cfg.text_w ? `<span class="subseg"><button data-ws="sys" class="${cfg.w_src !== 'bat' ? 'on' : ''}">시스템</button><button data-ws="bat" class="${cfg.w_src === 'bat' ? 'on' : ''}">배터리</button></span>` : ''}
+    </div>
+    <div class="chiphint">${digitsIn ? '이 모양은 잔량 숫자를 아이콘 안에 그려요 — 옆 텍스트와 중복되지 않아요.'
+      : pctForced ? '텍스트만 모양은 비워둘 수 없어 잔량을 기본 표시해요.'
+      : '켠 항목이 · 로 이어져 아이콘 옆에 붙어요. 시간은 계산될 때만 보여요.'}</div>
+    <div class="srow"><span>상태별 색상</span>${tglEl('colorize', cfg.colorize)}</div>
+    ${cfg.widget === 'icon' ? `<div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>` : ''}
+    <div class="srow"><span>열기 단축키 <kbd>⌥⌃B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>`;
+}
 
 function settingsHTML() {
   return `<div class="settings">
@@ -358,20 +398,85 @@ function settingsHTML() {
     <div class="srow"><span>온도 단위</span>${selEl('data-k', 'unit', unit, [['system', '시스템'], ['c', '°C'], ['f', '°F']])}</div>
     <div class="srow"><span>시간 형식</span>${selEl('data-k', 'timeFmt', timeFmt, [['short', '1:20'], ['long', '1시간 20분']])}</div>
     <div class="srow"><span>상위 프로세스 수</span>${selEl('data-k', 'procN', procN, [['0', '끄기'], ['3', '3'], ['5', '5'], ['6', '6'], ['8', '8'], ['10', '10'], ['15', '15']])}</div>
-
-    <div class="sec">메뉴바</div>
-    <div class="srow"><span>표시 텍스트</span>${selEl('data-c', 'info', cfg.info, INFO_OPTS)}</div>
-    <div class="srow"><span>위젯 모양</span>${selEl('data-c', 'widget', cfg.widget, [['icon', '아이콘(채움)'], ['combo', '채움+숫자+상태'], ['iconpct', '아이콘+숫자'], ['stack', '숫자↑아이콘'], ['bar', '막대'], ['text', '텍스트']])}</div>
-    <div class="srow"><span>아이콘 색상</span>${tglEl('colorize', cfg.colorize)}</div>
-    <div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>
-    <div class="srow"><span>열기 단축키 <kbd>⌥⌃B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>
-
+    ${menubarHTML()}
     <div class="sec">알림</div>
     <div class="srow"><span>배터리 부족</span>${selEl('data-c', 'low_pct', cfg.low_pct, pctOpts([0, 10, 15, 20, 25, 30]))}</div>
     <div class="srow"><span>충전 완료</span>${selEl('data-c', 'high_pct', cfg.high_pct, pctOpts([0, 70, 75, 80, 85, 90, 100]))}</div>
 
     <div class="shint">메뉴바·알림 설정은 즉시 저장되어 메뉴바에 반영됩니다.</div>
   </div>`;
+}
+
+// ── menu-bar preview (settings) ────────────────────────────────────────
+// The glyphs are the Rust tray renderer's own pixels (dumped per state as base64 RGBA), so the
+// preview cannot drift from the real menu bar. The title text is composed here with the exact
+// rules tray_title() uses — % skipped when drawn in the glyph, time only when known, text-only
+// never blank — which is what the locked chips above visualize.
+function pvState() {
+  if (pvSim !== 'cur' && pvData && pvData.states && pvData.states[pvSim]) return pvData.states[pvSim];
+  const s = live || {};
+  return { pct: s.pct ?? 0, min: s.timeRemain ?? null, sysW: s.systemW ?? s.watts ?? 0, batW: Math.abs(s.powerW ?? 0) };
+}
+function composeTrayTitle(st) {
+  const parts = [];
+  if (cfg.text_pct && !widgetHasDigits(cfg.widget)) parts.push(`${Math.round(st.pct)}%`);
+  if (cfg.text_time && st.min != null) parts.push(`${Math.floor(st.min / 60)}:${String(st.min % 60).padStart(2, '0')}`);
+  if (cfg.text_w) parts.push(`${(+(cfg.w_src === 'bat' ? st.batW : st.sysW) || 0).toFixed(1)}W`);
+  if (cfg.widget === 'text' && !parts.length) parts.push(`${Math.round(st.pct)}%`);
+  return parts.join(' · ');
+}
+function glyphCanvas(styleKey, dispH, pixelated) {
+  const set = pvData && pvData.glyphs && pvData.glyphs[pvSim];
+  const g = set && set[styleKey === 'icon' && cfg.glyph_xl ? 'icon_xl' : styleKey];
+  if (!g) return null;
+  try {
+    const raw = atob(cfg.colorize ? g.c : g.m);
+    const arr = new Uint8ClampedArray(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    const c = document.createElement('canvas');
+    c.width = g.w; c.height = g.h;
+    c.getContext('2d').putImageData(new ImageData(arr, g.w, g.h), 0, 0);
+    c.style.height = dispH + 'px'; c.style.width = Math.round(g.w * dispH / g.h) + 'px';
+    if (pixelated) c.style.imageRendering = 'pixelated';
+    return c;
+  } catch { return null; }
+}
+function renderPreviewZone() {
+  const strip = $('pvstrip'); if (!strip) return;
+  const st = pvState(), title = composeTrayTitle(st);
+  strip.textContent = '';
+  const g = cfg.widget === 'text' ? null : glyphCanvas(cfg.widget, 17, false);
+  if (g) strip.appendChild(g);
+  else if (cfg.widget !== 'text' && !pvData) { const ph = document.createElement('span'); ph.className = 'pvph'; ph.textContent = '미리보기 준비 중…'; strip.appendChild(ph); }
+  if (title) { const t = document.createElement('span'); t.className = 'pvtxt'; t.textContent = title; strip.appendChild(t); }
+  // 점유 폭 추정: 글리프(메뉴바 높이 스케일) + 텍스트(시스템 13px) + 트레이 항목 좌우 패딩
+  if (!pvMeasure) pvMeasure = document.createElement('canvas').getContext('2d');
+  pvMeasure.font = '500 13px -apple-system, system-ui, sans-serif';
+  const gw = g ? parseFloat(g.style.width) : 0;
+  const tw = title ? pvMeasure.measureText(title).width + (g ? 5 : 0) : 0;
+  const wEl = $('pvwidth'); if (wEl) wEl.innerHTML = `점유 폭 <b>≈${Math.round(gw + tw + 14)}pt</b>`;
+  document.querySelectorAll('.gal [data-gth]').forEach(th => {
+    th.textContent = '';
+    const k = th.dataset.gth;
+    if (k === 'text') { const t = document.createElement('b'); t.textContent = `${Math.round(st.pct)}%`; th.appendChild(t); return; }
+    const c = glyphCanvas(k, k === 'stack' ? 22 : 20, true);
+    if (c) th.appendChild(c);
+  });
+}
+async function pullPreview() {
+  try { const r = await fetch('/api/tray-preview', { cache: 'no-store' }); if (r.ok) pvData = await r.json(); } catch { /* keep last */ }
+  if (settingsOpen) renderPreviewZone();   // refresh strip/thumbs in place — no full re-render (would reset open selects)
+}
+// chips save as ONE patch (all 4 keys) so tray.json gains the full set at once — after the first
+// save neither side needs the legacy `info` fallback again.
+function applyTextChip(k) {
+  const patch = { text_pct: !!cfg.text_pct, text_time: !!cfg.text_time, text_w: !!cfg.text_w, w_src: cfg.w_src === 'bat' ? 'bat' : 'sys' };
+  if (k === 'pct') patch.text_pct = !patch.text_pct;
+  else if (k === 'time') patch.text_time = !patch.text_time;
+  else if (k === 'w') patch.text_w = !patch.text_w;
+  cfg = { ...cfg, ...patch };
+  render();
+  fetch('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) }).catch(() => {});
 }
 
 function procsHTML() {
@@ -395,7 +500,15 @@ function paint() {
   document.body.dataset.pv = pv;
   document.body.classList.toggle('settings-open', settingsOpen);
   document.querySelectorAll('.vsel button').forEach(b => b.classList.toggle('on', b.dataset.pv === pv));
-  if (settingsOpen) { el.innerHTML = settingsHTML(); $('poptail').innerHTML = ''; $('live').textContent = ''; return; }
+  if (settingsOpen) {
+    el.innerHTML = settingsHTML(); $('poptail').innerHTML = ''; $('live').textContent = '';
+    renderPreviewZone();
+    if (!pvData) pullPreview();
+    // poll while open: keeps the "현재" preview live and picks up fresh dumps as % changes
+    if (!pvTimer) pvTimer = setInterval(() => { if (!document.hidden && settingsOpen) pullPreview(); }, 2000);
+    return;
+  }
+  if (pvTimer) { clearInterval(pvTimer); pvTimer = 0; }
   if (!live || live.error) { el.innerHTML = `<div class="err">배터리 정보를 읽을 수 없습니다${live && live.error ? ` (${esc(live.error)})` : ''}.</div>`; $('poptail').innerHTML = ''; $('live').textContent = ''; return; }
   const s = live;
   const known = s.pct != null;
@@ -473,7 +586,7 @@ $('foot').addEventListener('click', e => {
 });
 
 // settings controls (delegated — #pop is rebuilt on every render)
-const coerce = (k, v) => (k === 'info' || k === 'low_pct' || k === 'high_pct') ? +v : v;
+const coerce = (k, v) => (k === 'low_pct' || k === 'high_pct') ? +v : v;
 function applyDisplay(k, v) {
   if (k === 'pv') { pv = v; save('battPV', v); }
   else if (k === 'theme') { theme = v; save('battTheme', v); }
@@ -494,7 +607,15 @@ $('pop').addEventListener('change', e => {
   else if (t.matches('select[data-c]')) applyCfg(t.dataset.c, coerce(t.dataset.c, t.value));
 });
 $('pop').addEventListener('click', e => {
-  const b = e.target.closest('.tgl'); if (!b) return;   // boolean toggle (settings)
+  const sim = e.target.closest('[data-sim]');          // preview state simulator (현재/충전/부족/저전력)
+  if (sim) { pvSim = sim.dataset.sim; render(); return; }
+  const w = e.target.closest('[data-w]');              // widget shape gallery
+  if (w) { applyCfg('widget', w.dataset.w); return; }
+  const ws = e.target.closest('[data-ws]');            // W source sub-segment — save via the full chip
+  if (ws) { cfg.w_src = ws.dataset.ws; applyTextChip(null); return; }   // patch so legacy files gain all 4 keys
+  const t = e.target.closest('[data-t]');              // text item chips
+  if (t) { applyTextChip(t.dataset.t); return; }
+  const b = e.target.closest('.tgl'); if (!b) return;  // boolean toggle (settings)
   applyCfg(b.dataset.c, !cfg[b.dataset.c]);
 });
 // trend preview lives in its own persistent container (#sparkbox) so the live 3D canvas survives

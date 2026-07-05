@@ -88,13 +88,35 @@ impl Reader {
 // Every field has a #[serde(default)] so a partial or older JSON still deserializes.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Cfg {
-    #[serde(default = "d_info")] pub info: u8,      // title next to icon: 0 icon-only · 1 % · 2 time · 3 W · 4 %+W · 5 %+time
+    #[serde(default = "d_info")] pub info: u8,      // LEGACY title enum (0–7) — superseded by text_*; kept so old tray.json still works
     #[serde(default = "d_true")] pub colorize: bool,// color the glyph fill by level (else monochrome except red <20%)
     #[serde(default = "d_low")] pub low_pct: u8,    // discharge warning at ≤ this % (0 = off)
     #[serde(default = "d_high")] pub high_pct: u8,  // charge-complete alert at ≥ this % (0 = off)
-    #[serde(default = "d_widget")] pub widget: String, // menu-bar widget: "icon" | "bar" | "text"
-    #[serde(default)] pub glyph_xl: bool,           // draw the glyph at a larger body size
+    #[serde(default = "d_widget")] pub widget: String, // menu-bar widget: "icon" | "iconpct" | "combo" | "stack" | "bar" | "text"
+    #[serde(default)] pub glyph_xl: bool,           // draw the glyph at a larger body size ("icon" style only)
     #[serde(default = "d_true")] pub shortcut: bool, // register a global ⌥⌃B to open the popover (default on)
+    // independent title items (the popover's 텍스트 chips). None = file predates the chips UI →
+    // fall back to the legacy `info` enum (see title_items) so old configs keep their meaning.
+    #[serde(default)] pub text_pct: Option<bool>,   // append "67%"
+    #[serde(default)] pub text_time: Option<bool>,  // append "5:12" (time to empty/full, when known)
+    #[serde(default)] pub text_w: Option<bool>,     // append "7.4W"
+    #[serde(default)] pub w_src: Option<String>,    // which W: "sys" (SMC system draw) | "bat" (battery rail)
+}
+
+impl Cfg {
+    // Effective title items as (pct, time, w, w_is_battery). New keys win; old files map the
+    // legacy 표시 텍스트 enum: 0 none · 1 % · 2 time · 3 sysW · 4 %+sysW · 5 %+time · 6 batW · 7 %+batW.
+    pub fn title_items(&self) -> (bool, bool, bool, bool) {
+        if self.text_pct.is_none() && self.text_time.is_none() && self.text_w.is_none() {
+            let i = if self.info > 7 { 4 } else { self.info };
+            return (matches!(i, 1 | 4 | 5 | 7), matches!(i, 2 | 5), matches!(i, 3 | 4 | 6 | 7), matches!(i, 6 | 7));
+        }
+        (self.text_pct.unwrap_or(false), self.text_time.unwrap_or(false),
+         self.text_w.unwrap_or(false), self.w_src.as_deref() == Some("bat"))
+    }
+    // styles that draw the % digits inside the glyph — the % title item is redundant there
+    // (the settings UI shows this as a locked "아이콘에 포함" chip, so the rule is visible)
+    pub fn digits_in_icon(&self) -> bool { matches!(self.widget.as_str(), "combo" | "iconpct" | "stack") }
 }
 fn d_info() -> u8 { 4 }
 fn d_true() -> bool { true }
@@ -102,7 +124,10 @@ fn d_low() -> u8 { 20 }
 fn d_high() -> u8 { 80 }
 fn d_widget() -> String { "icon".into() }
 impl Default for Cfg {
-    fn default() -> Self { Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: "icon".into(), glyph_xl: false, shortcut: true } }
+    fn default() -> Self {
+        Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: "icon".into(), glyph_xl: false, shortcut: true,
+              text_pct: None, text_time: None, text_w: None, w_src: None }   // None → title_items falls back to `info`
+    }
 }
 pub fn cfg_path() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
@@ -373,6 +398,67 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool) -> (Vec<u8>, 
     (buf, w, h)
 }
 
+// ---- settings-panel preview bridge ----------------------------------------------------------
+// Dumps every widget style (× colorized/mono × normal/XL) for the current battery state plus
+// three fixed demo states (충전/부족/저전력) as raw-RGBA-base64 JSON. The popover's settings panel
+// renders these directly, so the preview IS the tray renderer's output — zero drift by
+// construction. Written only when the visible inputs change (~every 1% of battery), read via
+// the node server's /api/tray-preview.
+fn b64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let n = ((c[0] as u32) << 16) | ((*c.get(1).unwrap_or(&0) as u32) << 8) | *c.get(2).unwrap_or(&0) as u32;
+        s.push(T[(n >> 18) as usize & 63] as char);
+        s.push(T[(n >> 12) as usize & 63] as char);
+        s.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        s.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    s
+}
+fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
+    match style {
+        "icon_xl" => battery_icon(l, colorize, true, lpm),
+        "combo" => combo_icon(l, colorize, lpm),
+        "iconpct" => battery_pct_icon(l, colorize, lpm),
+        "stack" => stack_icon(l, colorize, lpm),
+        "bar" => bar_glyph(l, colorize, lpm),
+        _ => battery_icon(l, colorize, false, lpm),
+    }
+}
+pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
+    let mk = |pct: f64, charging: bool, min: i64, w: f64| Live {
+        ok: true, pct, charging, time_min: Some(min), watts: w, ..Default::default()
+    };
+    // fixed demo states so the panel can preview 충전/부족/저전력 without waiting for them; the
+    // popover composes the "cur" state's text from /api/live, so no live numbers are needed here
+    let states = [
+        ("cur", cur.clone(), lpm, 0.0),
+        ("chg", mk(45.0, true, 78, 28.5), false, 31.2),
+        ("low", mk(12.0, false, 54, 5.8), false, 6.1),
+        ("lpm", mk(33.0, false, 190, 4.6), true, 4.8),
+    ];
+    let mut glyphs = serde_json::Map::new();
+    let mut meta = serde_json::Map::new();
+    for (name, l, is_lpm, sys_w) in &states {
+        let mut styles = serde_json::Map::new();
+        for style in ["icon", "icon_xl", "combo", "iconpct", "stack", "bar"] {
+            let (col, w, h) = render_style(style, l, true, *is_lpm);
+            let (mono, ..) = render_style(style, l, false, *is_lpm);
+            styles.insert(style.into(), serde_json::json!({ "w": w, "h": h, "c": b64(&col), "m": b64(&mono) }));
+        }
+        glyphs.insert((*name).into(), styles.into());
+        meta.insert((*name).into(), serde_json::json!({
+            "pct": l.pct.round(), "charging": l.charging, "full": l.full, "lpm": is_lpm,
+            "min": l.time_min, "sysW": sys_w, "batW": l.watts,
+        }));
+    }
+    let out = serde_json::json!({ "states": meta, "glyphs": glyphs }).to_string();
+    // tmp + rename so a concurrent /api/tray-preview read never sees a half-written file
+    let tmp = dir.join("tray-preview.json.tmp");
+    if std::fs::write(&tmp, out).is_ok() { let _ = std::fs::rename(&tmp, dir.join("tray-preview.json")); }
+}
+
 // ---- vertical bar glyph (Stats' "bar_chart"): a thin upright cell filling from the bottom.
 pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (14u32, 20u32);
@@ -403,22 +489,91 @@ pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     (buf, w, h)
 }
 
-// The compact tray-title text macOS shows next to the icon (per the chosen info mode).
-// `watts` is the figure to show in the W modes — the ticker passes live SMC system power
-// (the real draw) when available, falling back to the battery-rail watts (0 while plugged/holding).
-pub fn tray_title(l: &Live, info: u8, watts: f64) -> String {
+// The compact tray-title text macOS shows next to the icon, composed from the independent
+// title items (잔량/시간/전력 chips) joined with " · ". `sys_w` is the live SMC system draw when
+// available, falling back to the battery-rail watts (0 while plugged/holding).
+// Rules the settings UI mirrors 1:1 (nothing hidden): % is skipped when the glyph already draws
+// it; time is skipped while unknown (no countdown); a text-only widget never goes blank.
+pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64) -> String {
     if !l.ok {
         return String::new();
     }
+    let (pct_on, time_on, w_on, w_bat) = c.title_items();
     let pct = l.pct.round() as i64;
-    match info {
-        0 => String::new(),                                   // 아이콘만
-        1 => format!("{pct}%"),                               // 잔량
-        2 => time_str(l),                                     // 남은/완충 예상시간
-        3 => format!("{watts:.1}W"),                          // 시스템 전력 (watts = 시스템 우선)
-        5 => format!("{pct}% · {}", time_str(l)),             // 잔량 + 예상시간
-        6 => format!("{:.1}W", l.watts.abs()),                // 배터리 전력 (배터리 레일 W)
-        7 => format!("{pct}% · {:.1}W", l.watts.abs()),       // 잔량 + 배터리 전력
-        _ => format!("{pct}% · {watts:.1}W"),                 // 4 = 잔량 + 시스템 전력 (기본)
+    let mut parts: Vec<String> = Vec::new();
+    if pct_on && !c.digits_in_icon() { parts.push(format!("{pct}%")); }
+    if time_on && matches!(l.time_min, Some(m) if m > 0) { parts.push(time_str(l)); }
+    if w_on { parts.push(format!("{:.1}W", if w_bat { l.watts.abs() } else { sys_w })); }
+    if c.widget == "text" && parts.is_empty() { parts.push(format!("{pct}%")); }   // no glyph to fall back on
+    parts.join(" · ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn live(pct: f64, min: Option<i64>, watts: f64) -> Live {
+        Live { ok: true, pct, watts, time_min: min, ..Default::default() }
+    }
+
+    // old tray.json (no text_* keys) must keep its legacy `info` meaning through title_items
+    #[test]
+    fn legacy_info_maps_to_chips() {
+        let mut c = Cfg::default();
+        for (info, want) in [
+            (0u8, (false, false, false, false)),
+            (1, (true, false, false, false)),
+            (2, (false, true, false, false)),
+            (3, (false, false, true, false)),
+            (4, (true, false, true, false)),
+            (5, (true, true, false, false)),
+            (6, (false, false, true, true)),
+            (7, (true, false, true, true)),
+            (99, (true, false, true, false)),   // out of range → default (4)
+        ] {
+            c.info = info;
+            assert_eq!(c.title_items(), want, "info={info}");
+        }
+        // explicit chips win over the legacy enum
+        c.info = 0;
+        c.text_time = Some(true);
+        assert_eq!(c.title_items(), (false, true, false, false));
+    }
+
+    #[test]
+    fn title_composition_rules() {
+        let l = live(67.4, Some(312), 7.44);
+        let mut c = Cfg { text_pct: Some(true), text_time: Some(true), text_w: Some(true), ..Cfg::default() };
+        assert_eq!(tray_title(&l, &c, 9.96), "67% · 5:12 · 10.0W");
+        c.w_src = Some("bat".into());
+        assert_eq!(tray_title(&l, &c, 9.96), "67% · 5:12 · 7.4W");
+        c.widget = "combo".into();                                   // % drawn in the glyph → skipped in text
+        assert_eq!(tray_title(&l, &c, 9.96), "5:12 · 7.4W");
+        let idle = live(67.4, None, 0.0);                            // unknown countdown → time part skipped
+        assert_eq!(tray_title(&idle, &c, 9.96), "0.0W");
+        let mut t = Cfg { text_pct: Some(false), text_time: Some(false), text_w: Some(false), ..Cfg::default() };
+        t.widget = "text".into();                                    // text-only never goes blank
+        assert_eq!(tray_title(&l, &t, 9.96), "67%");
+        t.widget = "icon".into();
+        assert_eq!(tray_title(&l, &t, 9.96), "");                    // icon-only: no title at all
+    }
+
+    // the preview dump must contain every state × style with RGBA buffers of the declared size
+    #[test]
+    fn preview_dump_shape() {
+        let dir = std::env::temp_dir().join("bl-preview-test");
+        let _ = std::fs::create_dir_all(&dir);
+        write_preview(&dir, &live(67.0, Some(312), 7.4), false);
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("tray-preview.json")).unwrap()).unwrap();
+        for s in ["cur", "chg", "low", "lpm"] {
+            assert!(v["states"][s]["pct"].is_number(), "state {s}");
+            for g in ["icon", "icon_xl", "combo", "iconpct", "stack", "bar"] {
+                let e = &v["glyphs"][s][g];
+                let n = (e["w"].as_u64().unwrap() * e["h"].as_u64().unwrap() * 4) as usize;
+                for k in ["c", "m"] {
+                    assert_eq!(e[k].as_str().unwrap().len(), n.div_ceil(3) * 4, "{s}/{g}/{k}");
+                }
+            }
+        }
     }
 }

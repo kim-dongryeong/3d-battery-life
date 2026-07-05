@@ -239,6 +239,7 @@ fn main() {
                 if smc.is_some() { let _ = std::fs::create_dir_all(data_dir()); }   // so the bridge write can't silently fail
                 power::start_notifier();      // wake instantly on AC plug/unplug (else just the 2s poll)
                 let mut last_key = String::new();
+                let mut last_pv_key = String::new();   // settings-panel preview dump key
                 let (mut low, mut crit, mut high) = (false, false, false);
                 let mut sc_on = false;   // whether the global ⌥⌃B is currently registered
                 let (mut lpm, mut tick) = (low_power_mode(), 0u32);
@@ -297,18 +298,10 @@ fn main() {
                         let _ = std::fs::write(data_dir().join("live-smc.json"), j);
                     }
                     if let Some(tray) = handle.tray_by_id("tray") {
-                        // menu-bar "W" = live system draw (SMC) when we have it, else battery-rail watts
-                        let mut title = live::tray_title(&l, c.info, sys_w.unwrap_or(l.watts));
-                        if c.widget == "iconpct" || c.widget == "combo" || c.widget == "stack" {
-                            // the % is drawn INSIDE the icon → strip only the %-part of the title, but KEEP
-                            // the time/W so 표시 텍스트(info) still applies and the live W keeps updating.
-                            // (was: force-blank the whole title → info was a no-op and W never showed.)
-                            let pctp = format!("{}%", l.pct.round() as i64);
-                            if let Some(rest) = title.strip_prefix(&format!("{pctp} · ")) { title = rest.to_string(); }
-                            else if title == pctp { title = String::new(); }
-                        }
-                        // text-only widget must never be blank (no glyph to fall back on)
-                        else if c.widget == "text" && title.is_empty() { title = format!("{}%", l.pct.round() as i64); }
+                        // menu-bar "W" = live system draw (SMC) when we have it, else battery-rail watts.
+                        // tray_title composes the enabled 텍스트 chips itself (incl. skipping % when the
+                        // glyph draws it) — the rules live in ONE place and the settings UI mirrors them.
+                        let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts));
                         let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
                         // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm)
                         let key = format!("{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm);
@@ -319,6 +312,14 @@ fn main() {
                                 None => { let _ = tray.set_icon(None); }   // text-only widget
                             }
                         }
+                    }
+                    // settings-panel preview bridge: dump the real glyph renders (all styles ×
+                    // color/mono × normal/XL) when their inputs change (~every 1% of battery).
+                    // cfg toggles need no re-dump — the popover picks the matching variant itself.
+                    let pv_key = format!("{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, lpm);
+                    if l.ok && pv_key != last_pv_key {
+                        last_pv_key = pv_key;
+                        live::write_preview(&data_dir(), &l, lpm);
                     }
                     // ~2s cadence for the continuously-changing values (W/temp), but break early
                     // when IOKit signals a power-source change so plug/unplug reflects near-instantly.

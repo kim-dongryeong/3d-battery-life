@@ -230,3 +230,53 @@ body.settings-open #foot .vsel { opacity: .4; }
 .tgl.on { background: var(--accent); }
 .tgl.on > i { transform: translateX(17px); }
 .shint { color: var(--faint); font-size: 10.5px; margin-top: 13px; line-height: 1.5; }
+
+/* ── menu-bar widget picker (settings): preview strip + shape gallery + text chips ──
+   The strip and thumbnails stay DARK in both themes — the glyphs are the tray renderer's real
+   pixels (white outlines for a dark menu bar), so a dark swatch is what they actually look like. */
+.pvstrip {
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  min-height: 40px; padding: 8px 12px; margin-top: 2px;
+  background: #10131a; border: 1px solid var(--line); border-radius: 10px;
+  font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, .93); white-space: nowrap;
+}
+.pvstrip canvas, .gal canvas { display: block; }
+.pvph { color: var(--faint); font-size: 11px; font-weight: 500; }
+.pvmeta { display: flex; justify-content: space-between; align-items: center; margin-top: 7px; }
+.pvwidth { color: var(--dim); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.pvwidth b { color: var(--fg); font-weight: 650; }
+.simseg { display: inline-flex; gap: 3px; }
+.simseg button {
+  font: inherit; font-size: 10.5px; font-weight: 650; padding: 3px 8px; cursor: pointer;
+  background: var(--card); color: var(--dim); border: 1px solid var(--line); border-radius: 7px;
+}
+.simseg button.on { color: var(--onfg); background: var(--accent); border-color: var(--accent); }
+.ssub { color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .4px; margin: 12px 0 6px; }
+.gal { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.gal button {
+  font: inherit; cursor: pointer; padding: 6px 4px 6px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; color: var(--dim);
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+}
+.gal button.on { border-color: var(--accent); color: var(--fg); background: color-mix(in srgb, var(--accent) 9%, var(--card)); }
+.gal .gth { width: 100%; height: 28px; display: flex; align-items: center; justify-content: center; background: #10131a; border-radius: 6px; }
+.gal .gth b { font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, .93); }
+.gal .glb { font-size: 10px; font-weight: 650; text-align: center; line-height: 1.25; }
+.gal .glb small { display: block; font-weight: 500; color: var(--faint); font-size: 9px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.chip {
+  font: inherit; font-size: 11.5px; font-weight: 650; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px;
+  background: var(--card); color: var(--dim); border: 1px solid var(--line); border-radius: 20px;
+}
+.chip .cdot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); flex: none; }
+.chip.on { color: var(--fg); border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.chip.on .cdot { background: var(--accent); }
+.chip.locked { cursor: default; border-style: dashed; }
+.chip.locked.on { color: var(--dim); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.chip em { font-style: normal; font-size: 9px; font-weight: 700; color: var(--accent); letter-spacing: .2px; }
+.subseg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.subseg button { font: inherit; font-size: 10.5px; font-weight: 650; padding: 4px 9px; background: var(--card); color: var(--dim); border: 0; cursor: pointer; }
+.subseg button.on { background: color-mix(in srgb, var(--accent) 18%, var(--card)); color: var(--fg); }
+.chiphint { color: var(--faint); font-size: 10.5px; line-height: 1.5; margin: 7px 0 4px; }
