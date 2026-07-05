@@ -40,6 +40,9 @@ function applyI18nPop(root) {
       }
     }
   } finally { i18nApplying = false; }
+  // translated text can change the content height (English often wraps differently) → re-measure so the
+  // Rust side resizes the window to fit. Without this the window keeps the pre-translation height → scroll.
+  if (typeof fitWindow === 'function') requestAnimationFrame(fitWindow);
 }
 async function initI18nPop() {
   try {

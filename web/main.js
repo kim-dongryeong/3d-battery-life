@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { initI18n, observeI18n, tr, curLang } from './i18n.js';
+import { initI18n, observeI18n, tr, curLang, t } from './i18n.js';
 
 // ---- world dimensions ---------------------------------------------------
 // X = 하루 중 시각 (0..24h)  ·  Y = 배터리 %/W (높이)  ·  Z = 경과 일수 (깊이)
@@ -147,9 +147,9 @@ function buildAxes(valMax, valLabel, maxDay, firstT) {
 
   // X ticks: hours
   for (const h of [0, 6, 12, 18, 24]) {
-    const s = makeLabel(`${h}시`, { size: 30, color: TH().tickC }); s.position.set(xFromTod(h), baseY - 1, z0 - 1.2); sceneRoot.add(s);
+    const s = makeLabel(tr(`${h}시`), { size: 30, color: TH().tickC }); s.position.set(xFromTod(h), baseY - 1, z0 - 1.2); sceneRoot.add(s);
   }
-  const xt = makeLabel('하루 중 시각 →', { color: TH().titleC }); xt.position.set(0, baseY - 2.6, z0 - 2); sceneRoot.add(xt);
+  const xt = makeLabel(tr('하루 중 시각 →'), { color: TH().titleC }); xt.position.set(0, baseY - 2.6, z0 - 2); sceneRoot.add(xt);
 
   // Y ticks: battery %/watts run 0..max · 잔량 변화율은 부호축(−max..0..+max, 0=바닥격자 평면)
   for (let i = 0; i <= 4; i++) {
@@ -158,7 +158,7 @@ function buildAxes(valMax, valLabel, maxDay, firstT) {
     const s = makeLabel(state.y === 'pct' ? `${Math.round(v)}%` : state.y === 'rate' ? v.toFixed(2) : `${v.toFixed(0)}W`, { size: 28, color: TH().tickC });
     s.position.set(x0 - 2.2, y, z0); sceneRoot.add(s);
   }
-  const yt = makeLabel(valLabel, { color: TH().titleC }); yt.position.set(x0 - 4.5, Y + 1, z0); sceneRoot.add(yt);
+  const yt = makeLabel(tr(valLabel), { color: TH().titleC }); yt.position.set(x0 - 4.5, Y + 1, z0); sceneRoot.add(yt);
 
   // Z ticks: dates (older -> recent)
   const days = maxDay <= 1 ? [0] : [0, Math.round(maxDay / 2), maxDay];
@@ -166,7 +166,7 @@ function buildAxes(valMax, valLabel, maxDay, firstT) {
     const date = new Date(((firstT || 0) + d * 86400) * 1000);
     const s = makeLabel(`${date.getMonth() + 1}/${date.getDate()}`, { size: 26, color: TH().tickC }); s.position.set(x0 - 1.5, baseY - 0.4, zFromDay(d, maxDay)); sceneRoot.add(s);
   }
-  const zt = makeLabel('경과 일수 (오래됨 → 최근)', { color: TH().titleC }); zt.position.set(x0 - 2, baseY - 2.6, z1 - 6); sceneRoot.add(zt);
+  const zt = makeLabel(tr('경과 일수 (오래됨 → 최근)'), { color: TH().titleC }); zt.position.set(x0 - 2, baseY - 2.6, z1 - 6); sceneRoot.add(zt);
 }
 
 // ---- battery curves (continuous runs: charge + discharge, gap-split) ----
@@ -547,7 +547,7 @@ function drawProjection3DInner(r) {
       const sp = new THREE.Vector3(xFromTod(todOf(P.baseT)), yFromVal(P.L0, yMax), zFromDay(dayOfT(P.baseT), maxDay));
       const dot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
       dot.position.copy(sp); projGroup.add(dot);
-      const lab = makeLabel('예상', { size: 26, color: '#dfeeea' }); lab.position.copy(sp).add(new THREE.Vector3(0, 1, 0)); projGroup.add(lab);
+      const lab = makeLabel(t('예상'), { size: 26, color: '#dfeeea' }); lab.position.copy(sp).add(new THREE.Vector3(0, 1, 0)); projGroup.add(lab);
     }
     // 목표면(0% 또는 100%) 도달 지점: 작은 종점 점 + 화면좌표로 항상 뜨는 시각 태그
     const markEnd = (endMin, colHex, colStr, prefix, yBias) => {
@@ -939,9 +939,9 @@ function buildTrend3D(series) {
   const decR = (rmax - rmin) >= 20 ? 0 : (rmax - rmin) >= 2 ? 1 : 2;
   const nv = nVal(); for (let i = 0; i <= nv; i++) { const rr = rmin + (rmax - rmin) * i / nv, l = makeLabel(rr.toFixed(decR), { size: 22, color: TH().tickC }); l.position.set(x0 - 3.2, Y(rr), zf); g.add(l); }
   const L = (t, o, x, y, z) => { const l = makeLabel(t, o); l.position.set(x, y, z); return l; };  // (Sprite.position is read-only — must .set, not reassign)
-  g.add(L('날짜 →', { color: TH().titleC }, 0, -3.4, zf));
+  g.add(L(tr('날짜 →'), { color: TH().titleC }, 0, -3.4, zf));
   g.add(L((state.delta ? 'Δ ' : '') + metricUnit(), { color: TH().titleC }, x0 - 5.5, Yh + 1.5, zf));
-  g.add(L('구간(잔량) →', { color: TH().titleC }, x0 - 2, -1.6, zb - 5));
+  g.add(L(tr('구간(잔량) →'), { color: TH().titleC }, x0 - 2, -1.6, zb - 5));
   if (0 > rmin && 0 < rmax) {                               // 0 (= no discharge) position on the value/speed axis
     g.add(L('0', { size: 22, color: '#4dd0c0' }, x0 - 3.2, Y(0), zf));
     if (zLineOn()) g.add(axisLine([x0, Y(0), zf], [Xs / 2, Y(0), zf], 0x4dd0c0));
@@ -1273,7 +1273,7 @@ document.querySelectorAll('.seg').forEach(seg => {
 });
 // i18n: translate static + dynamic viewer content. Language is chosen in the POPOVER settings
 // (shared via localStorage 'battLang' — same origin), so the viewer just reads and applies it.
-initI18n().then(observeI18n);
+initI18n().then(() => { observeI18n(); document.title = t('3D 분석 리포트'); });   // Tauri v2 mirrors document.title → native window title
 
 // reflect current state on every segmented control (defaults + deep-linked y/color/xScale)
 document.querySelectorAll('.seg').forEach(seg => {
