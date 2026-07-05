@@ -162,7 +162,7 @@
   "낮을수록 노화": "lower = more aging", "순수 부하": "pure load", "발열": "heat",
   "안정": "steady", "점점 빨라짐": "speeding up",
 
-  "전체구간": "All bands", "2D선": "2D line", "히트맵": "Heatmap", "3D": "3D",
+  "전체구간": "All bands", "2D선": "2D line", "히트맵": "Heatmap",
   "확대": "Expand", "축소": "Collapse", "델타": "Delta", "눈금": "Ticks",
   "더 보기": "More", "간단히": "Less",
   "선": "Lines", "능선": "Ridges", "선+능선": "Lines+Ridges", "선+면": "Lines+Surface",
@@ -250,7 +250,6 @@
   "⚡ 충전 중": "⚡ Charging",
   "🔌 만충/유휴": "🔌 Full/idle",
   "🔋 건강": "🔋 Health",
-  "🧊 3D": "🧊 3D",
   "📊 속도": "📊 Speed",
   "📈 추세": "📈 Trend",
   "⚙ 설정": "⚙ Settings",

@@ -65,7 +65,11 @@ export function applyI18n(root) {
       for (const tn of nodes) {
         const raw = tn.nodeValue, k = raw.trim();
         if (!k) continue;
-        if (dict[k]) { tn.nodeValue = raw.replace(k, dict[k]); continue; }   // whole-node exact match (pure labels)
+        // IMPORTANT: only WRITE nodeValue when the value actually changes. Setting nodeValue to an
+        // identical string still fires a characterData MutationObserver record, which re-invokes
+        // applyI18n → sets it again → infinite loop. This bites whenever a translation equals its key
+        // (e.g. "3D" → "3D"), so the change-guard here is load-bearing, not just an optimization.
+        if (dict[k]) { const nv = raw.replace(k, dict[k]); if (nv !== raw) tn.nodeValue = nv; continue; }   // whole-node exact match (pure labels)
         if (patterns.length && /[가-힣]/.test(raw)) {                        // fallback: regex patterns (interpolated units/dates)
           let v = raw; for (const [re, rep] of patterns) v = v.replace(re, rep);
           if (v !== raw) tn.nodeValue = v;

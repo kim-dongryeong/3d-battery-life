@@ -35,7 +35,7 @@ function applyI18nPop(root) {
       const w = document.createTreeWalker(s, NodeFilter.SHOW_TEXT); const ns = []; let n; while ((n = w.nextNode())) ns.push(n);
       for (const tn of ns) {
         const raw = tn.nodeValue, k = raw.trim(); if (!k) continue;
-        if (I18N[k]) { tn.nodeValue = raw.replace(k, I18N[k]); continue; }
+        if (I18N[k]) { const nv = raw.replace(k, I18N[k]); if (nv !== raw) tn.nodeValue = nv; continue; }   // change-guard: an identical write still fires the observer → infinite loop (e.g. "3D"→"3D")
         if (I18N_PAT.length && /[가-힣]/.test(raw)) { let v = raw; for (const [re, rep] of I18N_PAT) v = v.replace(re, rep); if (v !== raw) tn.nodeValue = v; }
       }
     }
