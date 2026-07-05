@@ -22,6 +22,7 @@ let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOp
 // ── i18n (popover) — shares localStorage 'battLang' + /locales/<lang>.json with the viewer ──
 // (popover.js is a classic script, so this is a small self-contained copy of web/i18n.js's logic.)
 let I18N = {}, I18N_PAT = [], i18nApplying = false;
+let langList = [['ko', '한국어'], ['en', 'English']];
 const battLang = () => ls('battLang', 'ko');
 function applyI18nPop(root) {
   if (battLang() === 'ko' || !root || i18nApplying) return;
@@ -41,6 +42,14 @@ function applyI18nPop(root) {
   } finally { i18nApplying = false; }
 }
 async function initI18nPop() {
+  try {
+    const arr = await (await fetch('/locales/index.json')).json();
+    if (Array.isArray(arr) && arr.length) {
+      langList = arr.map(x => [x.code, x.name]);
+      if (settingsOpen) render();
+    }
+  } catch (e) { /* ignore */ }
+
   const l = battLang(); if (!l || l === 'ko') return;
   try { I18N = await (await fetch(`/locales/${l}.json`)).json(); } catch { I18N = {}; }
   try { I18N_PAT = (I18N._patterns || []).map(([re, rep]) => [new RegExp(re, 'gu'), rep]); } catch { I18N_PAT = []; }
@@ -328,7 +337,7 @@ const pctOpts = steps => steps.map(v => [String(v), v === 0 ? '끄기' : `${v}%`
 function settingsHTML() {
   return `<div class="settings">
     <div class="sec">표시</div>
-    <div class="srow"><span>언어 / Language</span>${selEl('data-lang', 'lang', battLang(), [['ko', '한국어'], ['en', 'English']])}</div>
+    <div class="srow"><span>언어 / Language</span>${selEl('data-lang', 'lang', battLang(), langList)}</div>
     <div class="srow"><span>레이아웃</span>${selEl('data-k', 'pv', pv, [['list', '목록'], ['cards', '카드'], ['gauge', '게이지']])}</div>
     <div class="srow"><span>테마</span>${selEl('data-k', 'theme', theme, [['dark', '다크'], ['light', '라이트'], ['system', '시스템']])}</div>
     <div class="srow"><span>온도 단위</span>${selEl('data-k', 'unit', unit, [['system', '시스템'], ['c', '°C'], ['f', '°F']])}</div>
