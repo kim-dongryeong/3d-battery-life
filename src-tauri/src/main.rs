@@ -244,6 +244,7 @@ fn main() {
                 let (mut lpm, mut tick) = (low_power_mode(), 0u32);
                 let mut rec_state = rec0;
                 let mut last_pop_h = 0.0f64;   // last height the popover reported (to size its window)
+                let mut last_title = String::new();   // last native window title the viewer requested (i18n)
                 let mut pwin: Vec<(u64, f64, f64, f64)> = Vec::new();   // rolling 60s (t, sysW, adpW, batW) → 1-min avg for the recorder
                 loop {
                     let l = reader.read();
@@ -335,6 +336,19 @@ fn main() {
                                 _ => {}
                             }
                             break;   // re-read state promptly after acting
+                        }
+                        // viewer reported its native window title (localized) → set it. Tauri doesn't
+                        // mirror document.title, and Tauri IPC is unreliable for this external-URL window,
+                        // so it comes through the same file bridge as the height/actions.
+                        if let Ok(tt) = std::fs::read_to_string(data_dir().join("main-title")) {
+                            let tt = tt.trim().to_string();
+                            if !tt.is_empty() && tt != last_title {
+                                last_title = tt.clone();
+                                let ht = handle.clone();
+                                let _ = handle.run_on_main_thread(move || {
+                                    if let Some(w) = ht.get_webview_window("main") { let _ = w.set_title(&tt); }
+                                });
+                            }
                         }
                         // popover reported its content height → size its window to fit exactly (no scrollbar)
                         if let Ok(h) = std::fs::read_to_string(data_dir().join("popover-h")).map(|s| s.trim().parse::<f64>()) {

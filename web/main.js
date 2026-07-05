@@ -1273,7 +1273,14 @@ document.querySelectorAll('.seg').forEach(seg => {
 });
 // i18n: translate static + dynamic viewer content. Language is chosen in the POPOVER settings
 // (shared via localStorage 'battLang' — same origin), so the viewer just reads and applies it.
-initI18n().then(() => { observeI18n(); document.title = t('3D 분석 리포트'); });   // Tauri v2 mirrors document.title → native window title
+initI18n().then(() => {
+  observeI18n();
+  const title = t('3D 분석 리포트');
+  document.title = title;   // browser tab
+  // Native window title bar: Tauri doesn't mirror document.title, and Tauri IPC is unreliable for this
+  // external-URL window, so send it through the same file bridge as height/actions → Rust set_title.
+  fetch('/api/main-title', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title }) }).catch(() => {});
+});
 
 // reflect current state on every segmented control (defaults + deep-linked y/color/xScale)
 document.querySelectorAll('.seg').forEach(seg => {

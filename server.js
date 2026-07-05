@@ -161,6 +161,21 @@ export function startServer({ root, port } = {}) {
 
     // the popover reports its content height → a file the tray app reads to size the window
     // exactly (no scrollbar, no square margin around the rounded body).
+    // viewer's localized native window title → a file the tray app's ticker reads and applies via
+    // set_title (Tauri doesn't mirror document.title; IPC is unreliable for this external-URL window).
+    if (url.pathname === '/api/main-title' && req.method === 'POST') {
+      let body = '';
+      req.on('data', c => { body += c; if (body.length > 1e3) req.destroy(); });
+      req.on('end', () => {
+        try {
+          const tt = String(JSON.parse(body || '{}').title || '').replace(/[\r\n]/g, ' ').trim().slice(0, 200);
+          if (tt) { fs.mkdirSync(userDataDir(), { recursive: true }); fs.writeFileSync(path.join(userDataDir(), 'main-title'), tt); }
+          res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');
+        } catch { res.writeHead(400); res.end('bad'); }
+      });
+      return;
+    }
+
     if (url.pathname === '/api/height' && req.method === 'POST') {
       let body = '';
       req.on('data', c => { body += c; if (body.length > 1e3) req.destroy(); });
