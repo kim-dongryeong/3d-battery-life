@@ -144,6 +144,26 @@ fn main() {
                 }
             });
 
+            // 1b) The "main" window is created from config and loads http://localhost:4317 immediately —
+            // which RACES the sidecar above. If the web server hasn't bound the port yet, WKWebView gets
+            // connection-refused and shows a blank white page that never retries (unlike Chrome's error
+            // page + reload). So: wait until the server accepts a TCP connection, then (re)navigate the
+            // main window to a guaranteed-live server. The window is hidden at this point, so the reload
+            // is invisible; it just ensures content is there when the user first opens the viewer.
+            let ready = app.handle().clone();
+            std::thread::spawn(move || {
+                for _ in 0..150 {
+                    if std::net::TcpStream::connect("127.0.0.1:4317").is_ok() { break; }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                let h = ready.clone();
+                let _ = ready.run_on_main_thread(move || {
+                    if let Some(w) = h.get_webview_window("main") {
+                        if let Ok(url) = "http://localhost:4317/".parse() { let _ = w.navigate(url); }
+                    }
+                });
+            });
+
             // 2) tray menu (menu-bar item).
             // Recording (launchd) is INDEPENDENT of the app — quitting the app never stops it.
             let recording = plist_path().exists();
