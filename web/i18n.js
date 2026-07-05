@@ -15,6 +15,16 @@ const LANG = (() => { try { return localStorage.getItem('battLang') || 'ko'; } c
 
 export function curLang() { return LANG; }
 export function t(ko) { return dict[ko] || ko; }
+// Translate a raw string (not a DOM node) — same exact-then-pattern logic as applyI18n's per-node
+// path. For dynamically built strings that live OUTSIDE a [data-i18n] scope (e.g. the #projTags
+// overlay appended to <body>), so the MutationObserver never sees them.
+export function tr(s) {
+  if (LANG === 'ko' || !s) return s;
+  const k = s.trim();
+  if (dict[k]) return s.replace(k, dict[k]);
+  if (patterns.length && /[가-힣]/.test(s)) { let v = s; for (const [re, rep] of patterns) v = v.replace(re, rep); return v; }
+  return s;
+}
 export function setLang(l) { try { localStorage.setItem('battLang', l); } catch { /* ignore */ } location.reload(); }
 
 // available languages: served list, falling back to the two we ship

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { initI18n, observeI18n } from './i18n.js';
+import { initI18n, observeI18n, tr } from './i18n.js';
 
 // ---- world dimensions ---------------------------------------------------
 // X = 하루 중 시각 (0..24h)  ·  Y = 배터리 %/W (높이)  ·  Z = 경과 일수 (깊이)
@@ -483,7 +483,7 @@ let projLines = [];    // 예상 곡선/직선 THREE.Line — 데이터 곡선�
 function clearProjTags() { for (const t of proj3DTags) t.el.remove(); proj3DTags = []; }
 function addProjTag(vp, text, color, yBias = 0) {
   const el = document.createElement('div');
-  el.className = 'projTag'; el.textContent = text;
+  el.className = 'projTag'; el.textContent = tr(text);   // #projTags live on <body>, outside any [data-i18n] scope → translate here
   el.style.color = color; el.style.borderColor = color;
   document.body.appendChild(el);
   proj3DTags.push({ vp, el, yBias });
