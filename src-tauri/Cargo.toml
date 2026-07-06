@@ -13,6 +13,7 @@ tauri-plugin-global-shortcut = "2" # optional global hotkey (⌥⌘B) to open th
 starship-battery = "0.11"          # native IOKit battery read (~0.4ms, no subprocess) for the live tray
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+fontdue = "0.9"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"                        # round the popover's native NSWindow (transparent + clipped corners)

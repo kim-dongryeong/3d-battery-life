@@ -167,9 +167,193 @@ fn parse_pmset_pct(s: &str) -> Option<f64> {
 // is what keeps white legible on light backdrops, so no appearance detection is needed (an
 // AppleInterfaceStyle-based dark-ink variant looked alien next to the neighboring icons).
 const INK: (u8, u8, u8, u8) = (255, 255, 255, 255);
-const SHADOW: (u8, u8, u8, u8) = (0, 0, 0, 70);         // faint +1,+1 drop under body outlines
+const SHADOW: (u8, u8, u8, u8) = (0, 0, 0, 70);         // faint drop under body outlines
 const DIGIT_SHADOW: (u8, u8, u8, u8) = (0, 0, 0, 140);  // soft backing for digits/bolt/plug
-const OUT4: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];   // 4-side outline offsets
+
+// ---- anti-aliased rendering core -----------------------------------------------------------
+// The old pixel-art path (opaque rects on a tiny buffer) could never match the system icons —
+// they're vector shapes + real type. Here every glyph is rasterized at SS× the output buffer
+// with analytic rounded-rect/polygon inside-tests, digits are stamped from the SYSTEM FONT
+// (San Francisco via fontdue), and a box-downsample produces the anti-aliased result.
+const SS: i32 = 3;   // supersample factor (output buffers are already 2× logical)
+
+struct Hi { w: i32, h: i32, buf: Vec<u8> }   // straight-alpha RGBA at output×SS
+impl Hi {
+    fn new(w: u32, h: u32) -> Hi {
+        Hi { w: w as i32 * SS, h: h as i32 * SS, buf: vec![0; (w as usize * h as usize * (SS * SS) as usize) * 4] }
+    }
+    fn blend(&mut self, x: i32, y: i32, c: (u8, u8, u8, u8), cov: f32) {
+        if x < 0 || y < 0 || x >= self.w || y >= self.h || cov <= 0.0 { return; }
+        let i = ((y * self.w + x) * 4) as usize;
+        let sa = cov.min(1.0) * c.3 as f32 / 255.0;
+        if sa <= 0.0 { return; }
+        let da = self.buf[i + 3] as f32 / 255.0;
+        let oa = sa + da * (1.0 - sa);
+        let src = [c.0, c.1, c.2];
+        for k in 0..3 {
+            let v = (src[k] as f32 * sa + self.buf[i + k] as f32 * da * (1.0 - sa)) / oa;
+            self.buf[i + k] = v.round() as u8;
+        }
+        self.buf[i + 3] = (oa * 255.0).round() as u8;
+    }
+    // coords below are in OUTPUT units (f32) — scaled to the supersample grid internally
+    fn fill_rrect(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r: f32, c: (u8, u8, u8, u8)) {
+        let s = SS as f32;
+        let (hx0, hy0, hx1, hy1) = (x0 * s, y0 * s, x1 * s, y1 * s);
+        let r = (r * s).min((hx1 - hx0) / 2.0).min((hy1 - hy0) / 2.0).max(0.0);
+        for y in (hy0.floor() as i32).max(0)..(hy1.ceil() as i32).min(self.h) {
+            for x in (hx0.floor() as i32).max(0)..(hx1.ceil() as i32).min(self.w) {
+                if in_rr(x as f32 + 0.5, y as f32 + 0.5, hx0, hy0, hx1, hy1, r) { self.blend(x, y, c, 1.0); }
+            }
+        }
+    }
+    fn stroke_rrect(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r: f32, sw: f32, c: (u8, u8, u8, u8)) {
+        let s = SS as f32;
+        let (hx0, hy0, hx1, hy1) = (x0 * s, y0 * s, x1 * s, y1 * s);
+        let r = (r * s).min((hx1 - hx0) / 2.0).min((hy1 - hy0) / 2.0).max(0.0);
+        let sw = sw * s;
+        for y in (hy0.floor() as i32).max(0)..(hy1.ceil() as i32).min(self.h) {
+            for x in (hx0.floor() as i32).max(0)..(hx1.ceil() as i32).min(self.w) {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                if in_rr(px, py, hx0, hy0, hx1, hy1, r)
+                    && !in_rr(px, py, hx0 + sw, hy0 + sw, hx1 - sw, hy1 - sw, (r - sw).max(0.0)) {
+                    self.blend(x, y, c, 1.0);
+                }
+            }
+        }
+    }
+    fn fill_poly(&mut self, pts: &[(f32, f32)], c: (u8, u8, u8, u8)) {
+        let s = SS as f32;
+        let p: Vec<(f32, f32)> = pts.iter().map(|&(x, y)| (x * s, y * s)).collect();
+        let (x0, x1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.0), a.1.max(q.0)));
+        let (y0, y1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.1), a.1.max(q.1)));
+        for y in (y0.floor() as i32).max(0)..(y1.ceil() as i32).min(self.h) {
+            for x in (x0.floor() as i32).max(0)..(x1.ceil() as i32).min(self.w) {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                let mut inside = false;
+                let mut j = p.len() - 1;
+                for i in 0..p.len() {
+                    let (xi, yi) = p[i];
+                    let (xj, yj) = p[j];
+                    if (yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi { inside = !inside; }
+                    j = i;
+                }
+                if inside { self.blend(x, y, c, 1.0); }
+            }
+        }
+    }
+    fn down(self) -> (Vec<u8>, u32, u32) {   // alpha-weighted box average (no dark fringes)
+        let (ow, oh) = ((self.w / SS) as u32, (self.h / SS) as u32);
+        let mut out = vec![0u8; (ow * oh * 4) as usize];
+        for oy in 0..oh as i32 {
+            for ox in 0..ow as i32 {
+                let (mut r, mut g, mut b, mut a) = (0f32, 0f32, 0f32, 0f32);
+                for sy in 0..SS {
+                    for sx in 0..SS {
+                        let i = (((oy * SS + sy) * self.w + ox * SS + sx) * 4) as usize;
+                        let al = self.buf[i + 3] as f32 / 255.0;
+                        r += self.buf[i] as f32 * al; g += self.buf[i + 1] as f32 * al; b += self.buf[i + 2] as f32 * al; a += al;
+                    }
+                }
+                let o = ((oy as u32 * ow + ox as u32) * 4) as usize;
+                if a > 0.0 {
+                    out[o] = (r / a).round() as u8;
+                    out[o + 1] = (g / a).round() as u8;
+                    out[o + 2] = (b / a).round() as u8;
+                    out[o + 3] = (a / (SS * SS) as f32 * 255.0).round() as u8;
+                }
+            }
+        }
+        (out, ow, oh)
+    }
+}
+fn in_rr(px: f32, py: f32, x0: f32, y0: f32, x1: f32, y1: f32, r: f32) -> bool {
+    if px < x0 || px > x1 || py < y0 || py > y1 { return false; }
+    let dx = px - px.clamp(x0 + r, x1 - r);
+    let dy = py - py.clamp(y0 + r, y1 - r);
+    dx * dx + dy * dy <= r * r
+}
+
+// System font for the glyph digits (REAL type, like the menu bar itself). Loaded once; falls
+// back through Helvetica and finally to the 5×7 pixel font if nothing parses.
+static SYS_FONT: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
+fn sys_font() -> Option<&'static fontdue::Font> {
+    SYS_FONT.get_or_init(|| {
+        for p in ["/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/SFNSRounded.ttf",
+                  "/System/Library/Fonts/Helvetica.ttc", "/System/Library/Fonts/HelveticaNeue.ttc"] {
+            if let Ok(b) = std::fs::read(p) {
+                if let Ok(f) = fontdue::Font::from_bytes(b, fontdue::FontSettings::default()) { return Some(f); }
+            }
+        }
+        None
+    }).as_ref()
+}
+fn stamp_text(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8)) -> bool {
+    let Some(f) = sys_font() else { return false };
+    let px = size * SS as f32;
+    let gs: Vec<(fontdue::Metrics, Vec<u8>)> = text.chars().map(|ch| f.rasterize(ch, px)).collect();
+    let total: f32 = gs.iter().map(|(m, _)| m.advance_width).sum();
+    let cap = gs.iter().map(|(m, _)| m.height).max().unwrap_or(0) as f32;
+    let left = cx * SS as f32 - total / 2.0;
+    let top = cy * SS as f32 - cap / 2.0;
+    let mut pen = left;
+    for (m, bm) in &gs {
+        let gx = (pen + m.xmin as f32).round() as i32;
+        let gy = (top + cap - m.height as f32 - m.ymin as f32).round() as i32;
+        for row in 0..m.height {
+            for col in 0..m.width {
+                hi.blend(gx + col as i32, gy + row as i32, c, bm[row * m.width + col] as f32 / 255.0);
+            }
+        }
+        pen += m.advance_width;
+    }
+    true
+}
+// digits with the tray's soft shadow; pixel-font fallback keeps the tray alive without a font
+fn stamp_digits(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8), shadow: bool) {
+    if sys_font().is_some() {
+        if shadow { let _ = stamp_text(hi, text, size, cx, cy + 0.7, DIGIT_SHADOW); }
+        let _ = stamp_text(hi, text, size, cx, cy, c);
+        return;
+    }
+    let b = size / 7.0;
+    let dw = 6.0 * b;
+    let total = text.len() as f32 * dw - b;
+    let mut x = cx - total / 2.0;
+    let y0 = cy - 3.5 * b;
+    for ch in text.chars() {
+        let g = DIGITS57[(ch as u8).wrapping_sub(b'0') as usize % 10];
+        for (row, bits) in g.iter().enumerate() {
+            for col in 0..5 {
+                if bits & (1 << (4 - col)) != 0 {
+                    hi.fill_rrect(x + col as f32 * b, y0 + row as f32 * b, x + (col + 1) as f32 * b, y0 + (row + 1) as f32 * b, 0.0, c);
+                }
+            }
+        }
+        x += dw;
+    }
+}
+// charge-state overlays: the SF-style bolt + plug, white over a soft dark backing
+fn bolt(hi: &mut Hi, cx: f32, cy: f32, w: f32, h: f32, c: (u8, u8, u8, u8)) {
+    const P: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.60), (0.45, 0.60), (0.36, 1.0), (0.92, 0.38), (0.50, 0.38)];
+    let pts: Vec<(f32, f32)> = P.iter().map(|&(u, v)| (cx - w / 2.0 + u * w, cy - h / 2.0 + v * h)).collect();
+    hi.fill_poly(&pts, c);
+}
+fn plug(hi: &mut Hi, cx: f32, top: f32, s: f32, c: (u8, u8, u8, u8)) {
+    let pw = s * 0.09;
+    for dx in [-s * 0.17, s * 0.17] { hi.fill_rrect(cx + dx - pw, top, cx + dx + pw, top + s * 0.30, pw, c); }
+    hi.fill_rrect(cx - s * 0.32, top + s * 0.22, cx + s * 0.32, top + s * 0.62, s * 0.10, c);
+    hi.fill_rrect(cx - s * 0.05, top + s * 0.60, cx + s * 0.05, top + s, s * 0.05, c);
+}
+fn charge_overlay(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32) {
+    if l.charging {
+        bolt(hi, cx + 0.4, cy + 0.7, w, h, DIGIT_SHADOW);
+        bolt(hi, cx, cy, w, h, INK);
+    } else if l.full {
+        plug(hi, cx + 0.4, cy - h / 2.0 + 0.7, h, DIGIT_SHADOW);
+        plug(hi, cx, cy - h / 2.0, h, INK);
+    }
+}
 
 // Level → fill color (shared by the icon + bar glyphs). Low Power Mode → yellow, like macOS' own
 // battery icon (overrides level). Else: red <20% always, orange <40% / green, the app's bright
@@ -195,40 +379,15 @@ fn fill_color(l: &Live, colorize: bool, lpm: bool) -> (u8, u8, u8, u8) {
 pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool, deco: bool) -> Option<(Vec<u8>, u32, u32)> {
     match widget {
         "text" => None,
-        "bar" => Some(up2(bar_glyph(l, colorize, lpm))),
-        "iconpct" => Some(up2(battery_pct_icon(l, colorize, lpm))),
-        "combo" => Some(up2(combo_icon(l, colorize, lpm))),
-        "stack" => Some(stack_icon(l, colorize, lpm, deco)),   // drawn at native 2× already
-        _ => Some(up2(battery_icon(l, colorize, xl, lpm))),
+        "bar" => Some(bar_glyph(l, colorize, lpm)),
+        "iconpct" => Some(battery_pct_icon(l, colorize, lpm)),
+        "combo" => Some(combo_icon(l, colorize, lpm)),
+        "stack" => Some(stack_icon(l, colorize, lpm, deco)),
+        _ => Some(battery_icon(l, colorize, xl, lpm)),
     }
 }
 
-// Nearest-neighbor 2×. macOS scales the tray image to the menu-bar height, and a ~20px-tall
-// source UPSCALES on a Retina bar (≈44 physical px) → visibly soft/low-res. Feeding 2× flips
-// that to a slight downscale, keeping the pixel art crisp.
-fn up2(src: (Vec<u8>, u32, u32)) -> (Vec<u8>, u32, u32) {
-    let (b, w, h) = src;
-    let (nw, nh) = (w * 2, h * 2);
-    let mut out = vec![0u8; (nw * nh * 4) as usize];
-    for y in 0..h as usize {
-        for x in 0..w as usize {
-            let i = (y * w as usize + x) * 4;
-            for (dy, dx) in [(0usize, 0usize), (0, 1), (1, 0), (1, 1)] {
-                let o = ((y * 2 + dy) * nw as usize + (x * 2 + dx)) * 4;
-                out[o..o + 4].copy_from_slice(&b[i..i + 4]);
-            }
-        }
-    }
-    (out, nw, nh)
-}
-
-// 3×5 pixel font for 0-9 (each row's low 3 bits, MSB = leftmost pixel).
-const DIGITS: [[u8; 5]; 10] = [
-    [7, 5, 5, 5, 7], [2, 6, 2, 2, 7], [7, 1, 7, 4, 7], [7, 1, 7, 1, 7], [5, 5, 7, 1, 1],
-    [7, 4, 7, 1, 7], [7, 4, 7, 5, 7], [7, 1, 2, 2, 2], [7, 5, 7, 5, 7], [7, 5, 7, 1, 7],
-];
-// finer 5×7 font (low 5 bits per row) — used by the native-2× stack glyph, where the number is
-// the hero and the chunky 3×5 blocks read as "low res"
+// 5×7 pixel font (low 5 bits per row) — LAST-RESORT digit fallback when no system font parses
 const DIGITS57: [[u8; 7]; 10] = [
     [0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],   // 0
     [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],   // 1
@@ -245,203 +404,67 @@ const DIGITS57: [[u8; 7]; 10] = [
 // Battery outline with the % number inside, digits colored by state (macOS "show percentage in
 // icon" style). Compact: the number lives in the icon, so no separate title text is needed.
 pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
-    let (w, h) = (40u32, 20u32);
-    let mut buf = vec![0u8; (w * h * 4) as usize];
-    let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
-        if x < 0 || y < 0 || x as u32 >= w || y as u32 >= h { return; }
-        let i = ((y as u32 * w + x as u32) * 4) as usize;
-        buf[i] = c.0; buf[i + 1] = c.1; buf[i + 2] = c.2; buf[i + 3] = c.3;
-    };
-    let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
-        for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
-    };
+    let (w, h) = (80u32, 40u32);
+    let mut hi = Hi::new(w, h);
     let ink = fill_color(l, colorize, lpm);   // number colored by level / LPM
-    // thin battery outline (rounded corners) + cap — soft drop shadow first, white on top
-    let (bx0, by0, bx1, by1) = (1i32, 2i32, 33i32, 18i32);
-    for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
-        rect(&mut buf, bx0 + 2 + o, by0 + o, bx1 - 2 + o, by0 + 1 + o, c);
-        rect(&mut buf, bx0 + 2 + o, by1 - 1 + o, bx1 - 2 + o, by1 + o, c);
-        rect(&mut buf, bx0 + o, by0 + 2 + o, bx0 + 1 + o, by1 - 2 + o, c);
-        rect(&mut buf, bx1 - 1 + o, by0 + 2 + o, bx1 + o, by1 - 2 + o, c);
-        for &(cx, cy) in &[(bx0 + 1, by0 + 1), (bx1 - 2, by0 + 1), (bx0 + 1, by1 - 2), (bx1 - 2, by1 - 2)] { px(&mut buf, cx + o, cy + o, c); }
-        rect(&mut buf, bx1 + o, 8 + o, bx1 + 2 + o, 12 + o, c);
-    }
-    // left indicator (bolt/plug) + % digits — 4-side dark outline under the level-colored ink so
-    // they stay crisp on any backdrop (a diagonal shadow would fill '4's open top → reads as 9)
-    let ind_w = if l.charging || l.full { 8i32 } else { 0 };
-    let draw_ind = |buf: &mut Vec<u8>, ox: i32, oy: i32, c: (u8, u8, u8, u8)| {
-        if l.charging {
-            for &(x, y) in &[(6, 4), (5, 5), (5, 6), (4, 7), (7, 8), (6, 9), (6, 10), (5, 11)] { px(buf, x + ox, y + oy, c); }
-            rect(buf, 4 + ox, 7 + oy, 8 + ox, 8 + oy, c);      // crossbar → lightning
-        } else if l.full {
-            for &(x, y) in &[(4, 4), (4, 5), (6, 4), (6, 5)] { px(buf, x + ox, y + oy, c); }   // prongs
-            rect(buf, 3 + ox, 6 + oy, 8 + ox, 10 + oy, c);                                     // plug body
-            for y in 10..13 { px(buf, 5 + ox, y + oy, c); }                                    // cord
-        }
-    };
-    let digits: Vec<u8> = (l.pct.clamp(0.0, 100.0).round() as u32).to_string().bytes().map(|b| b - b'0').collect();
-    let (scale, gap) = (2i32, 1i32);
-    let dw = 3 * scale + gap;
-    let total = digits.len() as i32 * dw - gap;
-    let (dl, dr) = (bx0 + 1 + ind_w, bx1 - 1);
-    let x0 = (dl + dr) / 2 - total / 2;
-    let y0 = (h as i32 - 5 * scale) / 2;
-    let draw_digits = |buf: &mut Vec<u8>, ox: i32, oy: i32, c: (u8, u8, u8, u8)| {
-        let mut x = x0;
-        for &d in &digits {
-            let g = DIGITS[d as usize % 10];
-            for (row, bits) in g.iter().enumerate() {
-                for col in 0..3i32 {
-                    if bits & (1 << (2 - col)) != 0 {
-                        rect(buf, x + col * scale + ox, y0 + row as i32 * scale + oy, x + col * scale + scale + ox, y0 + row as i32 * scale + scale + oy, c);
-                    }
-                }
-            }
-            x += dw;
-        }
-    };
-    for &(ox, oy) in &OUT4 { draw_ind(&mut buf, ox, oy, DIGIT_SHADOW); draw_digits(&mut buf, ox, oy, DIGIT_SHADOW); }
-    draw_ind(&mut buf, 0, 0, ink);
-    draw_digits(&mut buf, 0, 0, ink);
-    (buf, w, h)
+    // thin rounded outline + nub, soft drop shadow under the white
+    hi.stroke_rrect(2.0, 4.8, 66.0, 36.8, 6.0, 2.0, SHADOW);
+    hi.fill_rrect(66.5, 16.8, 70.5, 24.8, 2.0, SHADOW);
+    hi.stroke_rrect(2.0, 4.0, 66.0, 36.0, 6.0, 2.0, INK);
+    hi.fill_rrect(66.5, 16.0, 70.5, 24.0, 2.0, INK);
+    // left indicator so iconpct still shows charge state: bolt (charging) / plug (full), in ink
+    let ind = if l.charging || l.full { 12.0f32 } else { 0.0 };
+    if l.charging { bolt(&mut hi, 13.0, 20.0, 10.0, 17.0, ink); }
+    else if l.full { plug(&mut hi, 13.0, 12.0, 16.0, ink); }
+    let digits = format!("{}", l.pct.clamp(0.0, 100.0).round() as u32);
+    stamp_digits(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, ink, true);
+    hi.down()
 }
 
 // Compact single cell: battery FILLED proportional to % (color by level) + % number overlaid
 // (white with a dark shadow so it reads over both the fill and the empty part) + charge status
 // bolt/plug. Max info in one battery-width slot — no separate title text needed.
 pub fn combo_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
-    let (w, h) = (40u32, 20u32);
-    let mut buf = vec![0u8; (w * h * 4) as usize];
-    let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
-        if x < 0 || y < 0 || x as u32 >= w || y as u32 >= h { return; }
-        let i = ((y as u32 * w + x as u32) * 4) as usize;
-        buf[i] = c.0; buf[i + 1] = c.1; buf[i + 2] = c.2; buf[i + 3] = c.3;
-    };
-    let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
-        for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
-    };
+    let (w, h) = (80u32, 40u32);
+    let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-    // battery body (1px outline, rounded corners, faint drop shadow) + proportional fill with a
-    // 1px air gap to the outline, like macOS's own icon
-    let (bx0, by0, bx1, by1) = (1i32, 2i32, 33i32, 18i32);
-    for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
-        rect(&mut buf, bx0 + 2 + o, by0 + o, bx1 - 2 + o, by0 + 1 + o, c);
-        rect(&mut buf, bx0 + 2 + o, by1 - 1 + o, bx1 - 2 + o, by1 + o, c);
-        rect(&mut buf, bx0 + o, by0 + 2 + o, bx0 + 1 + o, by1 - 2 + o, c);
-        rect(&mut buf, bx1 - 1 + o, by0 + 2 + o, bx1 + o, by1 - 2 + o, c);
-        for &(cx, cy) in &[(bx0 + 1, by0 + 1), (bx1 - 2, by0 + 1), (bx0 + 1, by1 - 2), (bx1 - 2, by1 - 2)] { px(&mut buf, cx + o, cy + o, c); }
-        rect(&mut buf, bx1 + o, 8 + o, bx1 + 2 + o, 12 + o, c);
-    }
-    let (ix0, iy0, ix1, iy1) = (bx0 + 2, by0 + 2, bx1 - 2, by1 - 2);
-    let fw = ((ix1 - ix0) as f64 * pct / 100.0).round() as i32;
-    rect(&mut buf, ix0, iy0, ix0 + fw.max(1), iy1, fill);
-    // charge status on the left of the body, dark ink so the number stays clear
-    let ind_ink = (16u8, 20u8, 26u8, 255u8);
-    let ind_w = if l.charging || l.full { 7i32 } else { 0 };
-    if l.charging {
-        for &(x, y) in &[(6, 4), (5, 5), (5, 6), (7, 8), (6, 9), (6, 10), (5, 11)] { px(&mut buf, x, y, ind_ink); }
-        rect(&mut buf, 4, 7, 8, 8, ind_ink);
-    } else if l.full {
-        for &(x, y) in &[(4, 4), (6, 4)] { px(&mut buf, x, y, ind_ink); }
-        rect(&mut buf, 3, 5, 8, 9, ind_ink);
-        for y in 9..12 { px(&mut buf, 5, y, ind_ink); }
-    }
-    // % number, 2×, centered in the space right of the indicator. Backed by a 4-side OUTLINE
-    // (was a +1,+1 drop shadow, which filled '4's open top and smeared two-digit numbers) so the
-    // white strokes stay separated over both the fill and the empty part.
-    let digits: Vec<u8> = (pct.round() as u32).to_string().bytes().map(|b| b - b'0').collect();
-    let (scale, gap) = (2i32, 1i32);
-    let dw = 3 * scale + gap;
-    let total = digits.len() as i32 * dw - gap;
-    let (dl, dr) = (bx0 + 2 + ind_w, bx1 - 1);
-    let x0 = (dl + dr) / 2 - total / 2;
-    let y0 = (h as i32 - 5 * scale) / 2;
-    let passes: [(&[(i32, i32)], (u8, u8, u8, u8)); 2] = [(&OUT4, DIGIT_SHADOW), (&[(0, 0)], INK)];
-    for (offs, col_c) in passes {
-        for &(ox, oy) in offs {
-            let mut x = x0;
-            for &d in &digits {
-                let g = DIGITS[d as usize % 10];
-                for (row, bits) in g.iter().enumerate() {
-                    for c in 0..3i32 {
-                        if bits & (1 << (2 - c)) != 0 {
-                            let (dx, dy) = (x + c * scale + ox, y0 + row as i32 * scale + oy);
-                            rect(&mut buf, dx, dy, dx + scale, dy + scale, col_c);
-                        }
-                    }
-                }
-                x += dw;
-            }
-        }
-    }
-    (buf, w, h)
+    // rounded body + nub (shadowed), proportional fill with an air gap to the outline
+    hi.stroke_rrect(2.0, 4.8, 66.0, 36.8, 6.0, 2.0, SHADOW);
+    hi.fill_rrect(66.5, 16.8, 70.5, 24.8, 2.0, SHADOW);
+    hi.stroke_rrect(2.0, 4.0, 66.0, 36.0, 6.0, 2.0, INK);
+    hi.fill_rrect(66.5, 16.0, 70.5, 24.0, 2.0, INK);
+    let fw = (56.0 * pct as f32 / 100.0).max(3.0);
+    hi.fill_rrect(6.0, 8.0, 6.0 + fw, 32.0, 3.0, fill);
+    // charge status at the left + the % as real type over the fill
+    let ind = if l.charging || l.full { 12.0f32 } else { 0.0 };
+    charge_overlay(&mut hi, l, 13.0, 20.0, 10.0, 17.0);
+    let digits = format!("{}", pct.round() as u32);
+    stamp_digits(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, INK, true);
+    hi.down()
 }
 
 // % number stacked ABOVE a mini horizontal battery — narrowest horizontal footprint for a tight
 // menu bar. Drawn at NATIVE 2× (48×40, no up2) with the finer 5×7 font, so the number — the hero
 // of this style — stays sharp on Retina. `deco`=false → plain white digits: no tint, no outline.
 pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, u32, u32) {
-    let (w, h) = (44u32, 36u32);   // hugs the content — empty margin would shrink everything when macOS scales to bar height
-    let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
-        if x < 0 || y < 0 || x as u32 >= w || y as u32 >= h { return; }
-        let i = ((y as u32 * w + x as u32) * 4) as usize;
-        buf[i] = c.0; buf[i + 1] = c.1; buf[i + 2] = c.2; buf[i + 3] = c.3;
-    };
-    let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
-        for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
-    };
-    let mut buf = vec![0u8; (w * h * 4) as usize];
+    let (w, h) = (44u32, 36u32);
+    let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-    // 5×7 digits @2× (10×14), centered on top; deco → state tint while charging/LPM + thin outline
+    // the % as real type on top; deco → state tint while charging/LPM + soft shadow, else plain
     let dcol = if deco && (l.charging || l.full || lpm) { fill } else { INK };
-    let digits: Vec<u8> = (pct.round() as u32).to_string().bytes().map(|b| b - b'0').collect();
-    let (scale, gap) = (2i32, 2i32);
-    let dw = 5 * scale + gap;
-    let total = digits.len() as i32 * dw - gap;
-    let (x0, ny) = (w as i32 / 2 - total / 2, 1i32);
-    let draw_digits = |buf: &mut Vec<u8>, ox: i32, oy: i32, c: (u8, u8, u8, u8)| {
-        let mut x = x0;
-        for &d in &digits {
-            let g = DIGITS57[d as usize % 10];
-            for (row, bits) in g.iter().enumerate() {
-                for col in 0..5i32 {
-                    if bits & (1 << (4 - col)) != 0 { rect(buf, x + col * scale + ox, ny + row as i32 * scale + oy, x + col * scale + scale + ox, ny + row as i32 * scale + scale + oy, c); }
-                }
-            }
-            x += dw;
-        }
-    };
-    if deco { for &(ox, oy) in &OUT4 { draw_digits(&mut buf, ox, oy, DIGIT_SHADOW); } }
-    draw_digits(&mut buf, 0, 0, dcol);
-    // mini horizontal battery below — 2px (=1px logical) walls, rounded corners, air gap to fill
-    let (bx0, by0, bx1, by1) = (1i32, 18i32, 41i32, 34i32);
-    for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
-        rect(&mut buf, bx0 + 4 + o, by0 + o, bx1 - 4 + o, by0 + 2 + o, c);
-        rect(&mut buf, bx0 + 4 + o, by1 - 2 + o, bx1 - 4 + o, by1 + o, c);
-        rect(&mut buf, bx0 + o, by0 + 4 + o, bx0 + 2 + o, by1 - 4 + o, c);
-        rect(&mut buf, bx1 - 2 + o, by0 + 4 + o, bx1 + o, by1 - 4 + o, c);
-        for &(cx, cy) in &[(bx0 + 2, by0 + 2), (bx1 - 4, by0 + 2), (bx0 + 2, by1 - 4), (bx1 - 4, by1 - 4)] { rect(&mut buf, cx + o, cy + o, cx + 2 + o, cy + 2 + o, c); }
-        rect(&mut buf, bx1 + o, by0 + 5 + o, bx1 + 3 + o, by1 - 5 + o, c);   // nub
-    }
-    let (ix0, iy0, ix1, iy1) = (bx0 + 4, by0 + 4, bx1 - 4, by1 - 4);
-    let fw = ((ix1 - ix0) as f64 * pct / 100.0).round() as i32;
-    rect(&mut buf, ix0, iy0, ix0 + fw.max(2), iy1, fill);
-    // charge status over the mini battery: bolt (charging) / plug (full), white + dark backing
-    if l.charging || l.full {
-        for (off, c) in [(1i32, DIGIT_SHADOW), (0i32, INK)] {
-            if l.charging {
-                for &(x0b, y0b) in &[(24, 19), (22, 21), (23, 27), (21, 29)] { rect(&mut buf, x0b + off, y0b + off, x0b + 2 + off, y0b + 2 + off, c); }
-                rect(&mut buf, 18 + off, 23 + off, 28 + off, 27 + off, c);   // crossbar → lightning
-            } else {
-                for &(x0b, y0b) in &[(17, 20), (23, 20)] { rect(&mut buf, x0b + off, y0b + off, x0b + 2 + off, y0b + 2 + off, c); }   // prongs
-                rect(&mut buf, 15 + off, 22 + off, 27 + off, 29 + off, c);   // plug body
-                rect(&mut buf, 20 + off, 29 + off, 22 + off, 33 + off, c);   // cord
-            }
-        }
-    }
-    (buf, w, h)
+    let digits = format!("{}", pct.round() as u32);
+    stamp_digits(&mut hi, &digits, 16.5, 22.0, 8.5, dcol, deco);
+    // mini rounded battery below, air gap before the fill
+    hi.stroke_rrect(1.0, 18.7, 41.0, 34.7, 4.5, 2.0, SHADOW);
+    hi.fill_rrect(41.5, 23.7, 44.0, 29.7, 1.5, SHADOW);
+    hi.stroke_rrect(1.0, 18.0, 41.0, 34.0, 4.5, 2.0, INK);
+    hi.fill_rrect(41.5, 23.0, 44.0, 29.0, 1.5, INK);
+    let fw = (32.0 * pct as f32 / 100.0).max(2.5);
+    hi.fill_rrect(5.0, 22.0, 5.0 + fw, 30.0, 2.0, fill);
+    charge_overlay(&mut hi, l, 21.0, 26.0, 8.5, 13.0);
+    hi.down()
 }
 
 // ---- menu-bar battery GLYPH (like Stats): a battery outline filling proportional to charge,
@@ -449,56 +472,21 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
 // the body fills more of the canvas — since macOS scales the tray image to the menu-bar height,
 // that renders the glyph visibly larger. Returns raw RGBA + dims.
 pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
-    let (w, h) = (40u32, 20u32);
-    let mut buf = vec![0u8; (w * h * 4) as usize];
-    let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
-        if x < 0 || y < 0 || x as u32 >= w || y as u32 >= h { return; }
-        let i = ((y as u32 * w + x as u32) * 4) as usize;
-        buf[i] = c.0; buf[i + 1] = c.1; buf[i + 2] = c.2; buf[i + 3] = c.3;
-    };
-    let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
-        for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
-    };
+    let (w, h) = (80u32, 40u32);
+    let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-
-    // body outline (1px, ROUNDED corners like macOS's own glyph — edges stop 2px short and a
-    // corner pixel bridges the step), faint drop shadow under the white. XL uses a smaller
-    // vertical margin so the body is taller.
-    let m = if xl { 1i32 } else { 3 };
-    let (bx0, by0, bx1, by1) = (1i32, m, 33i32, h as i32 - m);
-    for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
-        rect(&mut buf, bx0 + 2 + o, by0 + o, bx1 - 2 + o, by0 + 1 + o, c);   // top
-        rect(&mut buf, bx0 + 2 + o, by1 - 1 + o, bx1 - 2 + o, by1 + o, c);   // bottom
-        rect(&mut buf, bx0 + o, by0 + 2 + o, bx0 + 1 + o, by1 - 2 + o, c);   // left
-        rect(&mut buf, bx1 - 1 + o, by0 + 2 + o, bx1 + o, by1 - 2 + o, c);   // right
-        for &(cx, cy) in &[(bx0 + 1, by0 + 1), (bx1 - 2, by0 + 1), (bx0 + 1, by1 - 2), (bx1 - 2, by1 - 2)] { px(&mut buf, cx + o, cy + o, c); }
-        rect(&mut buf, bx1 + o, 8 + o, bx1 + 2 + o, 12 + o, c);      // nub cap (vertically centered)
-    }
-
-    // inner fill proportional to % (1px outline + 1px gap)
-    let (ix0, iy0, ix1, iy1) = (bx0 + 2, by0 + 2, bx1 - 2, by1 - 2);
-    let full_w = (ix1 - ix0) as f64;
-    let fw = (full_w * pct / 100.0).round() as i32;
-    rect(&mut buf, ix0, iy0, ix0 + fw.max(1), iy1, fill);
-
-    // charging bolt / plug, roughly centered in the body — white with a soft dark backing so it
-    // reads over the fill AND the empty (bar-colored) part (mid-% puts it right on the boundary)
-    if l.charging || l.full {
-        for &(ox, oy) in OUT4.iter().chain(&[(0i32, 0i32)]) {
-            let c = if (ox, oy) == (0, 0) { INK } else { DIGIT_SHADOW };
-            if l.charging {
-                for &(x, y) in &[(18, 6), (17, 7), (16, 8), (18, 8), (17, 9), (16, 10), (15, 11), (18, 10), (19, 9), (20, 8)] {
-                    px(&mut buf, x + ox, y + oy, c); px(&mut buf, x + ox, y + 1 + oy, c);
-                }
-            } else {
-                for &(x, y) in &[(15, 6), (15, 7), (18, 6), (18, 7)] { px(&mut buf, x + ox, y + oy, c); }   // prongs
-                rect(&mut buf, 14 + ox, 8 + oy, 20 + ox, 12 + oy, c);                                       // body
-                for y in 12..15 { px(&mut buf, 16 + ox, y + oy, c); px(&mut buf, 17 + ox, y + oy, c); }     // cord
-            }
-        }
-    }
-    (buf, w, h)
+    // rounded body + nub (shadowed). XL uses a smaller vertical margin so the body is taller.
+    let m = if xl { 2.0f32 } else { 6.0 };
+    hi.stroke_rrect(2.0, m + 0.8, 66.0, 40.0 - m + 0.8, 6.0, 2.0, SHADOW);
+    hi.fill_rrect(66.5, 16.8, 70.5, 24.8, 2.0, SHADOW);
+    hi.stroke_rrect(2.0, m, 66.0, 40.0 - m, 6.0, 2.0, INK);
+    hi.fill_rrect(66.5, 16.0, 70.5, 24.0, 2.0, INK);
+    // fill with an air gap to the outline (macOS's own battery-icon grammar)
+    let fw = (56.0 * pct as f32 / 100.0).max(3.0);
+    hi.fill_rrect(6.0, m + 4.0, 6.0 + fw, 36.0 - m, 3.0, fill);
+    charge_overlay(&mut hi, l, 34.0, 20.0, 13.0, 21.0);
+    hi.down()
 }
 
 // ---- settings-panel preview bridge ----------------------------------------------------------
@@ -521,13 +509,13 @@ fn b64(data: &[u8]) -> String {
 }
 fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     match style {
-        "icon_xl" => up2(battery_icon(l, colorize, true, lpm)),
-        "combo" => up2(combo_icon(l, colorize, lpm)),
-        "iconpct" => up2(battery_pct_icon(l, colorize, lpm)),
-        "stack" => stack_icon(l, colorize, lpm, true),         // native 2×
+        "icon_xl" => battery_icon(l, colorize, true, lpm),
+        "combo" => combo_icon(l, colorize, lpm),
+        "iconpct" => battery_pct_icon(l, colorize, lpm),
+        "stack" => stack_icon(l, colorize, lpm, true),
         "stack_plain" => stack_icon(l, colorize, lpm, false),  // 민무늬 digits variant
-        "bar" => up2(bar_glyph(l, colorize, lpm)),
-        _ => up2(battery_icon(l, colorize, false, lpm)),
+        "bar" => bar_glyph(l, colorize, lpm),
+        _ => battery_icon(l, colorize, false, lpm),
     }
 }
 pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
@@ -565,48 +553,19 @@ pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
 
 // ---- vertical bar glyph (Stats' "bar_chart"): a thin upright cell filling from the bottom.
 pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
-    let (w, h) = (14u32, 20u32);
-    let mut buf = vec![0u8; (w * h * 4) as usize];
-    let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
-        if x < 0 || y < 0 || x as u32 >= w || y as u32 >= h { return; }
-        let i = ((y as u32 * w + x as u32) * 4) as usize;
-        buf[i] = c.0; buf[i + 1] = c.1; buf[i + 2] = c.2; buf[i + 3] = c.3;
-    };
-    let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
-        for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
-    };
+    let (w, h) = (28u32, 40u32);
+    let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-    let (bx0, by0, bx1, by1) = (3i32, 1i32, 11i32, 19i32);   // upright cell, 1px walls, rounded corners
-    for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
-        rect(&mut buf, bx0 + 2 + o, by0 + o, bx1 - 2 + o, by0 + 1 + o, c);
-        rect(&mut buf, bx0 + 2 + o, by1 - 1 + o, bx1 - 2 + o, by1 + o, c);
-        rect(&mut buf, bx0 + o, by0 + 2 + o, bx0 + 1 + o, by1 - 2 + o, c);
-        rect(&mut buf, bx1 - 1 + o, by0 + 2 + o, bx1 + o, by1 - 2 + o, c);
-        for &(cx, cy) in &[(bx0 + 1, by0 + 1), (bx1 - 2, by0 + 1), (bx0 + 1, by1 - 2), (bx1 - 2, by1 - 2)] { px(&mut buf, cx + o, cy + o, c); }
-        rect(&mut buf, bx0 + 2 + o, by0 - 1 + o, bx1 - 2 + o, by0 + o, c); // top terminal
-    }
-    // fill from the bottom (1px air gap to the walls)
-    let (ix0, ix1) = (bx0 + 2, bx1 - 2);
-    let inner_top = by0 + 2;
-    let inner_bot = by1 - 2;
-    let fh = ((inner_bot - inner_top) as f64 * pct / 100.0).round() as i32;
-    rect(&mut buf, ix0, inner_bot - fh.max(1), ix1, inner_bot, fill);
-    // charge status overlaid on the cell: bolt (charging) / plug (full), white + dark backing
-    // (the cell is only 4px of inner width, so the overlay spans the whole glyph)
-    if l.charging || l.full {
-        for (off, c) in [(1i32, DIGIT_SHADOW), (0i32, INK)] {
-            if l.charging {
-                for &(x, y) in &[(8, 4), (8, 5), (7, 6), (8, 9), (7, 10), (7, 11), (6, 12)] { px(&mut buf, x + off, y + off, c); }
-                rect(&mut buf, 5 + off, 7 + off, 9 + off, 9 + off, c);   // crossbar → lightning
-            } else {
-                for &(x, y) in &[(5, 4), (8, 4)] { px(&mut buf, x + off, y + off, c); }   // prongs
-                rect(&mut buf, 5 + off, 5 + off, 9 + off, 9 + off, c);                    // plug body
-                for y in 9..12 { px(&mut buf, 7 + off, y + off, c); }                     // cord
-            }
-        }
-    }
-    (buf, w, h)
+    // upright rounded cell + top terminal, fill rising from the bottom behind an air gap
+    hi.stroke_rrect(6.0, 3.3, 22.0, 38.8, 5.0, 2.0, SHADOW);
+    hi.fill_rrect(10.0, 0.8, 18.0, 3.3, 1.2, SHADOW);
+    hi.stroke_rrect(6.0, 2.5, 22.0, 38.0, 5.0, 2.0, INK);
+    hi.fill_rrect(10.0, 0.0, 18.0, 2.5, 1.2, INK);
+    let fh = (27.5f32 * pct as f32 / 100.0).max(2.5);
+    hi.fill_rrect(10.0, 34.0 - fh, 18.0, 34.0, 2.0, fill);
+    charge_overlay(&mut hi, l, 14.0, 20.0, 10.0, 16.0);
+    hi.down()
 }
 
 // The compact tray-title text macOS shows next to the icon, composed from the independent
@@ -676,6 +635,13 @@ mod tests {
         assert_eq!(tray_title(&l, &t, 9.96), "67%");
         t.widget = "icon".into();
         assert_eq!(tray_title(&l, &t, 9.96), "");                    // icon-only: no title at all
+    }
+
+    // the digits should be REAL type — a system font must parse on any macOS (else the 5×7
+    // fallback kicks in and the tray silently degrades to pixel digits)
+    #[test]
+    fn system_font_loads() {
+        assert!(sys_font().is_some(), "no system font parsed — digits will fall back to the pixel font");
     }
 
     #[test]
