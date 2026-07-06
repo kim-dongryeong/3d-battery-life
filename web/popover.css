@@ -232,18 +232,17 @@ body.settings-open #foot .vsel { opacity: .4; }
 .shint { color: var(--faint); font-size: 10.5px; margin-top: 13px; line-height: 1.5; }
 
 /* ── menu-bar widget picker (settings): preview strip + shape gallery + text chips ──
-   The strip/thumbnail swatches mirror the MENU BAR's appearance (.mbl = light bar), not the
-   popover theme — the glyphs are the tray renderer's real pixels, inked for that appearance. */
+   Swatches are a mid graphite "menu bar over wallpaper" backdrop in BOTH themes — the glyphs are
+   white-with-shadow (like every menu-bar app), which is how they actually look on the real bar. */
 .pvstrip {
   display: flex; align-items: center; justify-content: center; gap: 5px;
   min-height: 40px; padding: 8px 12px; margin-top: 2px;
-  background: #10131a; border: 1px solid var(--line); border-radius: 10px;
+  background: linear-gradient(180deg, #3d4351, #2b303c);
+  border: 1px solid var(--line); border-radius: 10px;
   font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, .93); white-space: nowrap;
+  color: rgba(255, 255, 255, .95); white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .45);   /* the bar text shadow macOS draws */
 }
-.pvstrip.mbl { background: #f1f2f5; border-color: #d7dce4; color: #1d2330; }
-.gal .gth.mbl { background: #f1f2f5; }
-.gal .gth.mbl b { color: #1d2330; }
 .pvstrip canvas, .gal canvas { display: block; }
 .pvph { color: var(--faint); font-size: 11px; font-weight: 500; }
 .pvmeta { display: flex; justify-content: space-between; align-items: center; margin-top: 7px; }
@@ -263,8 +262,8 @@ body.settings-open #foot .vsel { opacity: .4; }
   display: flex; flex-direction: column; align-items: center; gap: 5px;
 }
 .gal button.on { border-color: var(--accent); color: var(--fg); background: color-mix(in srgb, var(--accent) 9%, var(--card)); }
-.gal .gth { width: 100%; height: 28px; display: flex; align-items: center; justify-content: center; background: #10131a; border-radius: 6px; }
-.gal .gth b { font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, .93); }
+.gal .gth { width: 100%; height: 28px; display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, #3d4351, #2b303c); border-radius: 6px; }
+.gal .gth b { font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, .95); text-shadow: 0 1px 2px rgba(0, 0, 0, .45); }
 .gal .glb { font-size: 10px; font-weight: 650; text-align: center; line-height: 1.25; }
 .gal .glb small { display: block; font-weight: 500; color: var(--faint); font-size: 9px; }
 .chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }

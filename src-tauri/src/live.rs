@@ -160,17 +160,14 @@ fn parse_pmset_pct(s: &str) -> Option<f64> {
     head[start..].parse::<f64>().ok().filter(|p| (0.0..=100.0).contains(p))
 }
 
-// Menu-bar appearance. A light menu bar makes white glyph ink invisible, so outlines/digits flip
-// to dark slate there (fills keep their state colors). `defaults read -g AppleInterfaceStyle`
-// prints "Dark" in dark mode and exits non-zero in light mode; Auto reflects the current phase.
-pub fn menu_bar_dark() -> bool {
-    std::process::Command::new("defaults").args(["read", "-g", "AppleInterfaceStyle"]).output()
-        .ok().is_some_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "Dark")
-}
-// glyph foreground/backing for the bar appearance — the shadow keeps overlays (bolt/plug) legible
-// whether they land on the colored fill or the transparent (bar-colored) empty part
-fn fg(dark_bar: bool) -> (u8, u8, u8, u8) { if dark_bar { (255, 255, 255, 255) } else { (55, 60, 70, 255) } }
-fn fg_shadow(dark_bar: bool) -> (u8, u8, u8, u8) { if dark_bar { (10, 12, 16, 220) } else { (255, 255, 255, 235) } }
+// Menu-bar glyph ink: WHITE with a subtle dark shadow — the way macOS itself (and every other
+// menu-bar app) draws bar contents over the wallpaper, in light AND dark system mode. The shadow
+// is what keeps white legible on light backdrops, so no appearance detection is needed (an
+// AppleInterfaceStyle-based dark-ink variant looked alien next to the neighboring icons).
+const INK: (u8, u8, u8, u8) = (255, 255, 255, 255);
+const SHADOW: (u8, u8, u8, u8) = (0, 0, 0, 135);        // soft +1,+1 drop under body outlines
+const DIGIT_SHADOW: (u8, u8, u8, u8) = (0, 0, 0, 205);  // crisp backing for digits/bolt/plug
+const OUT4: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];   // 4-side outline offsets
 
 // Level → fill color (shared by the icon + bar glyphs). Low Power Mode → yellow, like macOS' own
 // battery icon (overrides level). Else: red <20% always, amber <40% / green, teal while
@@ -192,14 +189,14 @@ fn fill_color(l: &Live, colorize: bool, lpm: bool) -> (u8, u8, u8, u8) {
 //   "combo"   → battery FILLED by % + number overlaid + charge status (max info, min width)
 //   "stack"   → % number stacked ABOVE a mini filled battery (narrowest footprint)
 //   _ (icon)  → filled battery + charge status
-pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool, dark: bool) -> Option<(Vec<u8>, u32, u32)> {
+pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool) -> Option<(Vec<u8>, u32, u32)> {
     match widget {
         "text" => None,
-        "bar" => Some(bar_glyph(l, colorize, lpm, dark)),
-        "iconpct" => Some(battery_pct_icon(l, colorize, lpm, dark)),
-        "combo" => Some(combo_icon(l, colorize, lpm, dark)),
-        "stack" => Some(stack_icon(l, colorize, lpm, dark)),
-        _ => Some(battery_icon(l, colorize, xl, lpm, dark)),
+        "bar" => Some(bar_glyph(l, colorize, lpm)),
+        "iconpct" => Some(battery_pct_icon(l, colorize, lpm)),
+        "combo" => Some(combo_icon(l, colorize, lpm)),
+        "stack" => Some(stack_icon(l, colorize, lpm)),
+        _ => Some(battery_icon(l, colorize, xl, lpm)),
     }
 }
 
@@ -211,7 +208,7 @@ const DIGITS: [[u8; 5]; 10] = [
 
 // Battery outline with the % number inside, digits colored by state (macOS "show percentage in
 // icon" style). Compact: the number lives in the icon, so no separate title text is needed.
-pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool, dark: bool) -> (Vec<u8>, u32, u32) {
+pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (40u32, 20u32);
     let mut buf = vec![0u8; (w * h * 4) as usize];
     let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
@@ -222,51 +219,60 @@ pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool, dark: bool) -> (Vec
     let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
-    let outline = fg(dark);
     let ink = fill_color(l, colorize, lpm);   // number colored by level / LPM
-    // thin battery outline + cap
+    // thin battery outline + cap — soft drop shadow first, white on top
     let (bx0, by0, bx1, by1) = (1i32, 2i32, 33i32, 18i32);
-    rect(&mut buf, bx0, by0, bx1, by0 + 1, outline);
-    rect(&mut buf, bx0, by1 - 1, bx1, by1, outline);
-    rect(&mut buf, bx0, by0, bx0 + 1, by1, outline);
-    rect(&mut buf, bx1 - 1, by0, bx1, by1, outline);
-    rect(&mut buf, bx1, 7, bx1 + 3, 13, outline);
-    // left indicator so iconpct still shows charge state: bolt (charging) / plug (full).
-    let ind_w = if l.charging || l.full { 8i32 } else { 0 };
-    if l.charging {
-        for &(x, y) in &[(6, 4), (5, 5), (5, 6), (4, 7), (7, 8), (6, 9), (6, 10), (5, 11)] { px(&mut buf, x, y, ink); }
-        rect(&mut buf, 4, 7, 8, 8, ink);                       // crossbar → lightning
-    } else if l.full {
-        for &(x, y) in &[(4, 4), (4, 5), (6, 4), (6, 5)] { px(&mut buf, x, y, ink); }   // prongs
-        rect(&mut buf, 3, 6, 8, 10, ink);                                              // plug body
-        for y in 10..13 { px(&mut buf, 5, y, ink); }                                    // cord
+    for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
+        rect(&mut buf, bx0 + o, by0 + o, bx1 + o, by0 + 1 + o, c);
+        rect(&mut buf, bx0 + o, by1 - 1 + o, bx1 + o, by1 + o, c);
+        rect(&mut buf, bx0 + o, by0 + o, bx0 + 1 + o, by1 + o, c);
+        rect(&mut buf, bx1 - 1 + o, by0 + o, bx1 + o, by1 + o, c);
+        rect(&mut buf, bx1 + o, 7 + o, bx1 + 3 + o, 13 + o, c);
     }
-    // % digits, 2× scale, centered in the space to the right of the indicator
+    // left indicator (bolt/plug) + % digits — 4-side dark outline under the level-colored ink so
+    // they stay crisp on any backdrop (a diagonal shadow would fill '4's open top → reads as 9)
+    let ind_w = if l.charging || l.full { 8i32 } else { 0 };
+    let draw_ind = |buf: &mut Vec<u8>, ox: i32, oy: i32, c: (u8, u8, u8, u8)| {
+        if l.charging {
+            for &(x, y) in &[(6, 4), (5, 5), (5, 6), (4, 7), (7, 8), (6, 9), (6, 10), (5, 11)] { px(buf, x + ox, y + oy, c); }
+            rect(buf, 4 + ox, 7 + oy, 8 + ox, 8 + oy, c);      // crossbar → lightning
+        } else if l.full {
+            for &(x, y) in &[(4, 4), (4, 5), (6, 4), (6, 5)] { px(buf, x + ox, y + oy, c); }   // prongs
+            rect(buf, 3 + ox, 6 + oy, 8 + ox, 10 + oy, c);                                     // plug body
+            for y in 10..13 { px(buf, 5 + ox, y + oy, c); }                                    // cord
+        }
+    };
     let digits: Vec<u8> = (l.pct.clamp(0.0, 100.0).round() as u32).to_string().bytes().map(|b| b - b'0').collect();
     let (scale, gap) = (2i32, 1i32);
     let dw = 3 * scale + gap;
     let total = digits.len() as i32 * dw - gap;
     let (dl, dr) = (bx0 + 1 + ind_w, bx1 - 1);
-    let mut x = (dl + dr) / 2 - total / 2;
+    let x0 = (dl + dr) / 2 - total / 2;
     let y0 = (h as i32 - 5 * scale) / 2;
-    for &d in &digits {
-        let g = DIGITS[d as usize % 10];
-        for (row, bits) in g.iter().enumerate() {
-            for col in 0..3i32 {
-                if bits & (1 << (2 - col)) != 0 {
-                    rect(&mut buf, x + col * scale, y0 + row as i32 * scale, x + col * scale + scale, y0 + row as i32 * scale + scale, ink);
+    let draw_digits = |buf: &mut Vec<u8>, ox: i32, oy: i32, c: (u8, u8, u8, u8)| {
+        let mut x = x0;
+        for &d in &digits {
+            let g = DIGITS[d as usize % 10];
+            for (row, bits) in g.iter().enumerate() {
+                for col in 0..3i32 {
+                    if bits & (1 << (2 - col)) != 0 {
+                        rect(buf, x + col * scale + ox, y0 + row as i32 * scale + oy, x + col * scale + scale + ox, y0 + row as i32 * scale + scale + oy, c);
+                    }
                 }
             }
+            x += dw;
         }
-        x += dw;
-    }
+    };
+    for &(ox, oy) in &OUT4 { draw_ind(&mut buf, ox, oy, DIGIT_SHADOW); draw_digits(&mut buf, ox, oy, DIGIT_SHADOW); }
+    draw_ind(&mut buf, 0, 0, ink);
+    draw_digits(&mut buf, 0, 0, ink);
     (buf, w, h)
 }
 
 // Compact single cell: battery FILLED proportional to % (color by level) + % number overlaid
 // (white with a dark shadow so it reads over both the fill and the empty part) + charge status
 // bolt/plug. Max info in one battery-width slot — no separate title text needed.
-pub fn combo_icon(l: &Live, colorize: bool, lpm: bool, dark: bool) -> (Vec<u8>, u32, u32) {
+pub fn combo_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (40u32, 20u32);
     let mut buf = vec![0u8; (w * h * 4) as usize];
     let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
@@ -277,16 +283,17 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool, dark: bool) -> (Vec<u8>, 
     let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
-    let outline = fg(dark);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-    // battery body + proportional fill (as battery_icon)
+    // battery body (soft drop shadow under the white outline) + proportional fill
     let (bx0, by0, bx1, by1) = (1i32, 2i32, 33i32, 18i32);
-    rect(&mut buf, bx0, by0, bx1, by0 + 2, outline);
-    rect(&mut buf, bx0, by1 - 2, bx1, by1, outline);
-    rect(&mut buf, bx0, by0, bx0 + 2, by1, outline);
-    rect(&mut buf, bx1 - 2, by0, bx1, by1, outline);
-    rect(&mut buf, bx1, 7, bx1 + 3, 13, outline);
+    for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
+        rect(&mut buf, bx0 + o, by0 + o, bx1 + o, by0 + 2 + o, c);
+        rect(&mut buf, bx0 + o, by1 - 2 + o, bx1 + o, by1 + o, c);
+        rect(&mut buf, bx0 + o, by0 + o, bx0 + 2 + o, by1 + o, c);
+        rect(&mut buf, bx1 - 2 + o, by0 + o, bx1 + o, by1 + o, c);
+        rect(&mut buf, bx1 + o, 7 + o, bx1 + 3 + o, 13 + o, c);
+    }
     let (ix0, iy0, ix1, iy1) = (bx0 + 2, by0 + 2, bx1 - 2, by1 - 2);
     let fw = ((ix1 - ix0) as f64 * pct / 100.0).round() as i32;
     rect(&mut buf, ix0, iy0, ix0 + fw.max(1), iy1, fill);
@@ -311,9 +318,7 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool, dark: bool) -> (Vec<u8>, 
     let (dl, dr) = (bx0 + 2 + ind_w, bx1 - 1);
     let x0 = (dl + dr) / 2 - total / 2;
     let y0 = (h as i32 - 5 * scale) / 2;
-    let shadow = (0u8, 0u8, 0u8, 205u8);
-    let white = (255u8, 255u8, 255u8, 255u8);
-    let passes: [(&[(i32, i32)], (u8, u8, u8, u8)); 2] = [(&[(1, 0), (-1, 0), (0, 1), (0, -1)], shadow), (&[(0, 0)], white)];
+    let passes: [(&[(i32, i32)], (u8, u8, u8, u8)); 2] = [(&OUT4, DIGIT_SHADOW), (&[(0, 0)], INK)];
     for (offs, col_c) in passes {
         for &(ox, oy) in offs {
             let mut x = x0;
@@ -336,7 +341,7 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool, dark: bool) -> (Vec<u8>, 
 
 // % number stacked ABOVE a mini horizontal battery — narrowest horizontal footprint for a tight
 // menu bar (packs level graphic + number into ~1 battery width, using height instead of width).
-pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, dark: bool) -> (Vec<u8>, u32, u32) {
+pub fn stack_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (26u32, 22u32);
     let mut buf = vec![0u8; (w * h * 4) as usize];
     let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
@@ -347,40 +352,48 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, dark: bool) -> (Vec<u8>, 
     let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
-    let outline = fg(dark);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-    // number on top (2× tall but tight), centered; charging tint uses the fill color for the digits
-    let dcol = if l.charging || l.full || lpm { fill } else { outline };
+    // number on top (2× tall but tight), centered, 4-side dark outline under it; charging/LPM
+    // tints the digits with the fill color
+    let dcol = if l.charging || l.full || lpm { fill } else { INK };
     let digits: Vec<u8> = (pct.round() as u32).to_string().bytes().map(|b| b - b'0').collect();
     let (scale, gap) = (2i32, 1i32);
     let dw = 3 * scale + gap;
     let total = digits.len() as i32 * dw - gap;
-    let mut x = w as i32 / 2 - total / 2;
+    let x0 = w as i32 / 2 - total / 2;
     let ny = 0;
-    for &d in &digits {
-        let g = DIGITS[d as usize % 10];
-        for (row, bits) in g.iter().enumerate() {
-            for c in 0..3i32 {
-                if bits & (1 << (2 - c)) != 0 { rect(&mut buf, x + c * scale, ny + row as i32 * scale, x + c * scale + scale, ny + row as i32 * scale + scale, dcol); }
+    let passes: [(&[(i32, i32)], (u8, u8, u8, u8)); 2] = [(&OUT4, DIGIT_SHADOW), (&[(0, 0)], dcol)];
+    for (offs, col_c) in passes {
+        for &(ox, oy) in offs {
+            let mut x = x0;
+            for &d in &digits {
+                let g = DIGITS[d as usize % 10];
+                for (row, bits) in g.iter().enumerate() {
+                    for c in 0..3i32 {
+                        if bits & (1 << (2 - c)) != 0 { rect(&mut buf, x + c * scale + ox, ny + row as i32 * scale + oy, x + c * scale + scale + ox, ny + row as i32 * scale + scale + oy, col_c); }
+                    }
+                }
+                x += dw;
             }
         }
-        x += dw;
     }
-    // mini horizontal battery below (fills proportional to %)
+    // mini horizontal battery below (fills proportional to %) — shadowed white outline
     let (bx0, by0, bx1, by1) = (2i32, 13i32, 22i32, 22i32);
-    rect(&mut buf, bx0, by0, bx1, by0 + 1, outline);
-    rect(&mut buf, bx0, by1 - 1, bx1, by1, outline);
-    rect(&mut buf, bx0, by0, bx0 + 1, by1, outline);
-    rect(&mut buf, bx1 - 1, by0, bx1, by1, outline);
-    rect(&mut buf, bx1, by0 + 2, bx1 + 2, by1 - 2, outline);
+    for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
+        rect(&mut buf, bx0 + o, by0 + o, bx1 + o, by0 + 1 + o, c);
+        rect(&mut buf, bx0 + o, by1 - 1 + o, bx1 + o, by1 + o, c);
+        rect(&mut buf, bx0 + o, by0 + o, bx0 + 1 + o, by1 + o, c);
+        rect(&mut buf, bx1 - 1 + o, by0 + o, bx1 + o, by1 + o, c);
+        rect(&mut buf, bx1 + o, by0 + 2 + o, bx1 + 2 + o, by1 - 2 + o, c);
+    }
     let (ix0, iy0, ix1, iy1) = (bx0 + 1, by0 + 1, bx1 - 1, by1 - 1);
     let fw = ((ix1 - ix0) as f64 * pct / 100.0).round() as i32;
     rect(&mut buf, ix0, iy0, ix0 + fw.max(1), iy1, fill);
-    // charge status over the mini battery: bolt (charging) / plug (full), fg ink with a contrast
-    // shadow so it reads on the fill AND the transparent empty part — was missing entirely.
+    // charge status over the mini battery: bolt (charging) / plug (full), white with a dark
+    // backing so it reads on the fill AND the transparent empty part
     if l.charging || l.full {
-        for (off, c) in [(1i32, fg_shadow(dark)), (0i32, fg(dark))] {
+        for (off, c) in [(1i32, DIGIT_SHADOW), (0i32, INK)] {
             if l.charging {
                 for &(x, y) in &[(13, 14), (12, 15), (13, 18), (12, 19)] { px(&mut buf, x + off, y + off, c); }
                 rect(&mut buf, 10 + off, 16 + off, 15 + off, 18 + off, c);   // crossbar → lightning
@@ -398,7 +411,7 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, dark: bool) -> (Vec<u8>, 
 // teal + bolt while charging, plug while plugged-and-holding. `xl` shrinks the vertical margin so
 // the body fills more of the canvas — since macOS scales the tray image to the menu-bar height,
 // that renders the glyph visibly larger. Returns raw RGBA + dims.
-pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool, dark: bool) -> (Vec<u8>, u32, u32) {
+pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (40u32, 20u32);
     let mut buf = vec![0u8; (w * h * 4) as usize];
     let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
@@ -409,18 +422,20 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool, dark: bool) -
     let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
-    let outline = fg(dark);   // white on a dark menu bar, dark slate on a light one
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
 
-    // body outline (2px). XL uses a smaller vertical margin so the body is taller.
+    // body outline (2px), soft drop shadow under the white. XL uses a smaller vertical margin
+    // so the body is taller.
     let m = if xl { 1i32 } else { 3 };
     let (bx0, by0, bx1, by1) = (1i32, m, 33i32, h as i32 - m);
-    rect(&mut buf, bx0, by0, bx1, by0 + 2, outline);         // top
-    rect(&mut buf, bx0, by1 - 2, bx1, by1, outline);         // bottom
-    rect(&mut buf, bx0, by0, bx0 + 2, by1, outline);         // left
-    rect(&mut buf, bx1 - 2, by0, bx1, by1, outline);         // right
-    rect(&mut buf, bx1, 7, bx1 + 3, 13, outline);            // nub cap (vertically centered)
+    for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
+        rect(&mut buf, bx0 + o, by0 + o, bx1 + o, by0 + 2 + o, c);   // top
+        rect(&mut buf, bx0 + o, by1 - 2 + o, bx1 + o, by1 + o, c);   // bottom
+        rect(&mut buf, bx0 + o, by0 + o, bx0 + 2 + o, by1 + o, c);   // left
+        rect(&mut buf, bx1 - 2 + o, by0 + o, bx1 + o, by1 + o, c);   // right
+        rect(&mut buf, bx1 + o, 7 + o, bx1 + 3 + o, 13 + o, c);      // nub cap (vertically centered)
+    }
 
     // inner fill proportional to %
     let (ix0, iy0, ix1, iy1) = (bx0 + 3, by0 + 3, bx1 - 3, by1 - 3);
@@ -461,17 +476,17 @@ fn b64(data: &[u8]) -> String {
     }
     s
 }
-fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool, dark: bool) -> (Vec<u8>, u32, u32) {
+fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     match style {
-        "icon_xl" => battery_icon(l, colorize, true, lpm, dark),
-        "combo" => combo_icon(l, colorize, lpm, dark),
-        "iconpct" => battery_pct_icon(l, colorize, lpm, dark),
-        "stack" => stack_icon(l, colorize, lpm, dark),
-        "bar" => bar_glyph(l, colorize, lpm, dark),
-        _ => battery_icon(l, colorize, false, lpm, dark),
+        "icon_xl" => battery_icon(l, colorize, true, lpm),
+        "combo" => combo_icon(l, colorize, lpm),
+        "iconpct" => battery_pct_icon(l, colorize, lpm),
+        "stack" => stack_icon(l, colorize, lpm),
+        "bar" => bar_glyph(l, colorize, lpm),
+        _ => battery_icon(l, colorize, false, lpm),
     }
 }
-pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool, dark: bool) {
+pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
     let mk = |pct: f64, charging: bool, min: i64, w: f64| Live {
         ok: true, pct, charging, time_min: Some(min), watts: w, ..Default::default()
     };
@@ -488,8 +503,8 @@ pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool, dark: bool) {
     for (name, l, is_lpm, sys_w) in &states {
         let mut styles = serde_json::Map::new();
         for style in ["icon", "icon_xl", "combo", "iconpct", "stack", "bar"] {
-            let (col, w, h) = render_style(style, l, true, *is_lpm, dark);
-            let (mono, ..) = render_style(style, l, false, *is_lpm, dark);
+            let (col, w, h) = render_style(style, l, true, *is_lpm);
+            let (mono, ..) = render_style(style, l, false, *is_lpm);
             styles.insert(style.into(), serde_json::json!({ "w": w, "h": h, "c": b64(&col), "m": b64(&mono) }));
         }
         glyphs.insert((*name).into(), styles.into());
@@ -498,16 +513,14 @@ pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool, dark: bool) {
             "min": l.time_min, "sysW": sys_w, "batW": l.watts,
         }));
     }
-    // "dark" = the menu-bar appearance these glyphs were inked for → the popover colors its
-    // preview swatches to match (light swatch + dark ink on a light menu bar)
-    let out = serde_json::json!({ "dark": dark, "states": meta, "glyphs": glyphs }).to_string();
+    let out = serde_json::json!({ "states": meta, "glyphs": glyphs }).to_string();
     // tmp + rename so a concurrent /api/tray-preview read never sees a half-written file
     let tmp = dir.join("tray-preview.json.tmp");
     if std::fs::write(&tmp, out).is_ok() { let _ = std::fs::rename(&tmp, dir.join("tray-preview.json")); }
 }
 
 // ---- vertical bar glyph (Stats' "bar_chart"): a thin upright cell filling from the bottom.
-pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool, dark: bool) -> (Vec<u8>, u32, u32) {
+pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (14u32, 20u32);
     let mut buf = vec![0u8; (w * h * 4) as usize];
     let px = |buf: &mut Vec<u8>, x: i32, y: i32, c: (u8, u8, u8, u8)| {
@@ -518,25 +531,26 @@ pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool, dark: bool) -> (Vec<u8>, u
     let rect = |buf: &mut Vec<u8>, x0: i32, y0: i32, x1: i32, y1: i32, c: (u8, u8, u8, u8)| {
         for y in y0..y1 { for x in x0..x1 { px(buf, x, y, c); } }
     };
-    let outline = fg(dark);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
     let (bx0, by0, bx1, by1) = (3i32, 1i32, 11i32, 19i32);   // upright cell
-    rect(&mut buf, bx0, by0, bx1, by0 + 2, outline);
-    rect(&mut buf, bx0, by1 - 2, bx1, by1, outline);
-    rect(&mut buf, bx0, by0, bx0 + 2, by1, outline);
-    rect(&mut buf, bx1 - 2, by0, bx1, by1, outline);
-    rect(&mut buf, bx0 + 2, by0 - 2, bx1 - 2, by0, outline); // top terminal
+    for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
+        rect(&mut buf, bx0 + o, by0 + o, bx1 + o, by0 + 2 + o, c);
+        rect(&mut buf, bx0 + o, by1 - 2 + o, bx1 + o, by1 + o, c);
+        rect(&mut buf, bx0 + o, by0 + o, bx0 + 2 + o, by1 + o, c);
+        rect(&mut buf, bx1 - 2 + o, by0 + o, bx1 + o, by1 + o, c);
+        rect(&mut buf, bx0 + 2 + o, by0 - 2 + o, bx1 - 2 + o, by0 + o, c); // top terminal
+    }
     // fill from the bottom
     let (ix0, ix1) = (bx0 + 2, bx1 - 2);
     let inner_top = by0 + 2;
     let inner_bot = by1 - 2;
     let fh = ((inner_bot - inner_top) as f64 * pct / 100.0).round() as i32;
     rect(&mut buf, ix0, inner_bot - fh.max(1), ix1, inner_bot, fill);
-    // charge status overlaid on the cell: bolt (charging) / plug (full), fg ink + contrast shadow
-    // (the cell is only 4px of inner width, so the overlay spans the whole glyph) — was missing.
+    // charge status overlaid on the cell: bolt (charging) / plug (full), white + dark backing
+    // (the cell is only 4px of inner width, so the overlay spans the whole glyph)
     if l.charging || l.full {
-        for (off, c) in [(1i32, fg_shadow(dark)), (0i32, fg(dark))] {
+        for (off, c) in [(1i32, DIGIT_SHADOW), (0i32, INK)] {
             if l.charging {
                 for &(x, y) in &[(8, 4), (8, 5), (7, 6), (8, 9), (7, 10), (7, 11), (6, 12)] { px(&mut buf, x + off, y + off, c); }
                 rect(&mut buf, 5 + off, 7 + off, 9 + off, 9 + off, c);   // crossbar → lightning
@@ -632,9 +646,8 @@ mod tests {
     fn preview_dump_shape() {
         let dir = std::env::temp_dir().join("bl-preview-test");
         let _ = std::fs::create_dir_all(&dir);
-        write_preview(&dir, &live(67.0, Some(312), 7.4), false, true);
+        write_preview(&dir, &live(67.0, Some(312), 7.4), false);
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("tray-preview.json")).unwrap()).unwrap();
-        assert_eq!(v["dark"], serde_json::json!(true));
         for s in ["cur", "chg", "low", "lpm"] {
             assert!(v["states"][s]["pct"].is_number(), "state {s}");
             for g in ["icon", "icon_xl", "combo", "iconpct", "stack", "bar"] {

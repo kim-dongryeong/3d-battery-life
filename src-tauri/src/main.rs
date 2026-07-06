@@ -243,9 +243,9 @@ fn main() {
                 let (mut low, mut crit, mut high) = (false, false, false);
                 let mut sc_on = false;   // whether the global ⌥⌃B is currently registered
                 let (mut lpm, mut tick) = (low_power_mode(), 0u32);
-                // slow-cadence system facts refreshed with lpm (~6s): macOS's displayed battery %
-                // (tray digits must match the system's own figure) + menu-bar appearance (glyph ink)
-                let (mut disp_pct, mut mb_dark) = (live::displayed_pct(), live::menu_bar_dark());
+                // slow-cadence system fact refreshed with lpm (~6s): macOS's displayed battery %
+                // (the tray digits must match the system's own figure)
+                let mut disp_pct = live::displayed_pct();
                 let mut rec_state = rec0;
                 let mut last_pop_h = 0.0f64;   // last height the popover reported (to size its window)
                 let mut last_title = String::new();   // last native window title the viewer requested (i18n)
@@ -253,7 +253,7 @@ fn main() {
                 loop {
                     let mut l = reader.read();
                     let c = live::load_cfg();   // re-read each tick so menu AND popover-settings changes apply live
-                    if tick % 3 == 0 { lpm = low_power_mode(); disp_pct = live::displayed_pct(); mb_dark = live::menu_bar_dark(); }   // refresh every ~6s
+                    if tick % 3 == 0 { lpm = low_power_mode(); disp_pct = live::displayed_pct(); }   // refresh every ~6s
                     if l.ok { if let Some(p) = disp_pct { l.pct = p; } }   // starship's ratio % can sit 1–2% off macOS's shown %
                     tick = tick.wrapping_add(1);
                     // keep the tray recording label synced to the real launchd state (menu/popover/external)
@@ -307,11 +307,11 @@ fn main() {
                         // glyph draws it) — the rules live in ONE place and the settings UI mirrors them.
                         let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts));
                         let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
-                        // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/bar appearance)
-                        let key = format!("{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, mb_dark);
+                        // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm)
+                        let key = format!("{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm);
                         if l.ok && key != last_key {
                             last_key = key;
-                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, mb_dark) {
+                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm) {
                                 Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
                                 None => { let _ = tray.set_icon(None); }   // text-only widget
                             }
@@ -320,10 +320,10 @@ fn main() {
                     // settings-panel preview bridge: dump the real glyph renders (all styles ×
                     // color/mono × normal/XL) when their inputs change (~every 1% of battery).
                     // cfg toggles need no re-dump — the popover picks the matching variant itself.
-                    let pv_key = format!("{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, lpm, mb_dark);
+                    let pv_key = format!("{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, lpm);
                     if l.ok && pv_key != last_pv_key {
                         last_pv_key = pv_key;
-                        live::write_preview(&data_dir(), &l, lpm, mb_dark);
+                        live::write_preview(&data_dir(), &l, lpm);
                     }
                     // ~2s cadence for the continuously-changing values (W/temp), but break early
                     // when IOKit signals a power-source change so plug/unplug reflects near-instantly.
