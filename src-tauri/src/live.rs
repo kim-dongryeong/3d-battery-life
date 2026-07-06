@@ -456,13 +456,17 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
     let digits = format!("{}", pct.round() as u32);
     stamp_digits(&mut hi, &digits, 19.0, 22.0, 7.3, dcol, deco);
     // mini rounded battery below — digits hug the ceiling and the body takes every remaining
-    // pixel down to the canvas floor (only the soft shadow hangs past the ink)
-    hi.stroke_rrect(1.0, 15.7, 41.0, 36.0, 5.0, 2.0, SHADOW);
-    hi.fill_rrect(41.5, 22.2, 44.0, 28.2, 1.5, SHADOW);
+    // pixel down to the canvas floor (only the soft shadow hangs past the ink). The outline
+    // shadow is a touch stronger here: on light menu bars the white outline washes out and the
+    // FILL then reads as the battery's edge, making the body look smaller than it is.
+    let body_sh = (0u8, 0u8, 0u8, 95u8);
+    hi.stroke_rrect(1.0, 15.7, 41.0, 36.0, 5.0, 2.0, body_sh);
+    hi.fill_rrect(41.5, 22.2, 44.0, 28.2, 1.5, body_sh);
     hi.stroke_rrect(1.0, 15.0, 41.0, 35.3, 5.0, 2.0, INK);
     hi.fill_rrect(41.5, 21.5, 44.0, 27.5, 1.5, INK);
-    let fw = (32.0 * pct as f32 / 100.0).max(2.5);
-    hi.fill_rrect(5.0, 19.0, 5.0 + fw, 31.3, 2.5, fill);
+    // slim air gap (1px) so the visible fill mass carries the body's height
+    let fw = (34.0 * pct as f32 / 100.0).max(2.5);
+    hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
     charge_overlay(&mut hi, l, 21.0, 25.15, 9.5, 15.0);
     hi.down()
 }
