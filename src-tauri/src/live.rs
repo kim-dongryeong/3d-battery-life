@@ -165,21 +165,22 @@ fn parse_pmset_pct(s: &str) -> Option<f64> {
 // is what keeps white legible on light backdrops, so no appearance detection is needed (an
 // AppleInterfaceStyle-based dark-ink variant looked alien next to the neighboring icons).
 const INK: (u8, u8, u8, u8) = (255, 255, 255, 255);
-const SHADOW: (u8, u8, u8, u8) = (0, 0, 0, 135);        // soft +1,+1 drop under body outlines
-const DIGIT_SHADOW: (u8, u8, u8, u8) = (0, 0, 0, 205);  // crisp backing for digits/bolt/plug
+const SHADOW: (u8, u8, u8, u8) = (0, 0, 0, 70);         // faint +1,+1 drop under body outlines
+const DIGIT_SHADOW: (u8, u8, u8, u8) = (0, 0, 0, 140);  // soft backing for digits/bolt/plug
 const OUT4: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];   // 4-side outline offsets
 
 // Level → fill color (shared by the icon + bar glyphs). Low Power Mode → yellow, like macOS' own
-// battery icon (overrides level). Else: red <20% always, amber <40% / green, teal while
-// charging/full; monochrome gray when colorize is off.
+// battery icon (overrides level). Else: red <20% always, orange <40% / green, the app's bright
+// 연두 while charging/full; monochrome gray when colorize is off.
+// VIVID inks only (macOS system palette + brand accent) — muted fills read as lifeless up there.
 fn fill_color(l: &Live, colorize: bool, lpm: bool) -> (u8, u8, u8, u8) {
     if lpm { return (255, 204, 10, 255); }   // macOS systemYellow — the LPM signal
     let pct = l.pct.clamp(0.0, 100.0);
-    if pct <= 20.0 { (229, 72, 77, 255) }
+    if pct <= 20.0 { (255, 69, 58, 255) }                   // systemRed
     else if !colorize { (170, 176, 188, 255) }
-    else if l.charging || l.full { (77, 208, 192, 255) }
-    else if pct <= 40.0 { (232, 133, 12, 255) }
-    else { (74, 200, 120, 255) }
+    else if l.charging || l.full { (168, 255, 51, 255) }    // app accent 연두 (#a8ff33)
+    else if pct <= 40.0 { (255, 159, 10, 255) }             // systemOrange
+    else { (48, 209, 88, 255) }                             // systemGreen
 }
 
 // Which menu-bar glyph to draw. Packs varying amounts of info into a tight menu-bar slot:
@@ -285,16 +286,17 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     };
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-    // battery body (soft drop shadow under the white outline) + proportional fill
+    // battery body (1px outline, faint drop shadow under the white) + proportional fill that
+    // runs right up to the outline — the "filled cell" look
     let (bx0, by0, bx1, by1) = (1i32, 2i32, 33i32, 18i32);
     for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
-        rect(&mut buf, bx0 + o, by0 + o, bx1 + o, by0 + 2 + o, c);
-        rect(&mut buf, bx0 + o, by1 - 2 + o, bx1 + o, by1 + o, c);
-        rect(&mut buf, bx0 + o, by0 + o, bx0 + 2 + o, by1 + o, c);
-        rect(&mut buf, bx1 - 2 + o, by0 + o, bx1 + o, by1 + o, c);
-        rect(&mut buf, bx1 + o, 7 + o, bx1 + 3 + o, 13 + o, c);
+        rect(&mut buf, bx0 + o, by0 + o, bx1 + o, by0 + 1 + o, c);
+        rect(&mut buf, bx0 + o, by1 - 1 + o, bx1 + o, by1 + o, c);
+        rect(&mut buf, bx0 + o, by0 + o, bx0 + 1 + o, by1 + o, c);
+        rect(&mut buf, bx1 - 1 + o, by0 + o, bx1 + o, by1 + o, c);
+        rect(&mut buf, bx1 + o, 8 + o, bx1 + 2 + o, 12 + o, c);
     }
-    let (ix0, iy0, ix1, iy1) = (bx0 + 2, by0 + 2, bx1 - 2, by1 - 2);
+    let (ix0, iy0, ix1, iy1) = (bx0 + 1, by0 + 1, bx1 - 1, by1 - 1);
     let fw = ((ix1 - ix0) as f64 * pct / 100.0).round() as i32;
     rect(&mut buf, ix0, iy0, ix0 + fw.max(1), iy1, fill);
     // charge status on the left of the body, dark ink so the number stays clear
@@ -425,35 +427,39 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool) -> (Vec<u8>, 
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
 
-    // body outline (2px), soft drop shadow under the white. XL uses a smaller vertical margin
-    // so the body is taller.
+    // body outline (1px — thin, like the system's own glyph), faint drop shadow under the white.
+    // XL uses a smaller vertical margin so the body is taller.
     let m = if xl { 1i32 } else { 3 };
     let (bx0, by0, bx1, by1) = (1i32, m, 33i32, h as i32 - m);
     for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
-        rect(&mut buf, bx0 + o, by0 + o, bx1 + o, by0 + 2 + o, c);   // top
-        rect(&mut buf, bx0 + o, by1 - 2 + o, bx1 + o, by1 + o, c);   // bottom
-        rect(&mut buf, bx0 + o, by0 + o, bx0 + 2 + o, by1 + o, c);   // left
-        rect(&mut buf, bx1 - 2 + o, by0 + o, bx1 + o, by1 + o, c);   // right
-        rect(&mut buf, bx1 + o, 7 + o, bx1 + 3 + o, 13 + o, c);      // nub cap (vertically centered)
+        rect(&mut buf, bx0 + o, by0 + o, bx1 + o, by0 + 1 + o, c);   // top
+        rect(&mut buf, bx0 + o, by1 - 1 + o, bx1 + o, by1 + o, c);   // bottom
+        rect(&mut buf, bx0 + o, by0 + o, bx0 + 1 + o, by1 + o, c);   // left
+        rect(&mut buf, bx1 - 1 + o, by0 + o, bx1 + o, by1 + o, c);   // right
+        rect(&mut buf, bx1 + o, 8 + o, bx1 + 2 + o, 12 + o, c);      // nub cap (vertically centered)
     }
 
-    // inner fill proportional to %
-    let (ix0, iy0, ix1, iy1) = (bx0 + 3, by0 + 3, bx1 - 3, by1 - 3);
+    // inner fill proportional to % (1px outline + 1px gap)
+    let (ix0, iy0, ix1, iy1) = (bx0 + 2, by0 + 2, bx1 - 2, by1 - 2);
     let full_w = (ix1 - ix0) as f64;
     let fw = (full_w * pct / 100.0).round() as i32;
     rect(&mut buf, ix0, iy0, ix0 + fw.max(1), iy1, fill);
 
-    // charging bolt / plug (dark, over the fill), roughly centered in the body
-    if l.charging {
-        let bolt = (20u8, 24u8, 30u8, 255u8);
-        for &(x, y) in &[(18, 6), (17, 7), (16, 8), (18, 8), (17, 9), (16, 10), (15, 11), (18, 10), (19, 9), (20, 8)] {
-            px(&mut buf, x, y, bolt); px(&mut buf, x, y + 1, bolt);
+    // charging bolt / plug, roughly centered in the body — white with a soft dark backing so it
+    // reads over the fill AND the empty (bar-colored) part (mid-% puts it right on the boundary)
+    if l.charging || l.full {
+        for &(ox, oy) in OUT4.iter().chain(&[(0i32, 0i32)]) {
+            let c = if (ox, oy) == (0, 0) { INK } else { DIGIT_SHADOW };
+            if l.charging {
+                for &(x, y) in &[(18, 6), (17, 7), (16, 8), (18, 8), (17, 9), (16, 10), (15, 11), (18, 10), (19, 9), (20, 8)] {
+                    px(&mut buf, x + ox, y + oy, c); px(&mut buf, x + ox, y + 1 + oy, c);
+                }
+            } else {
+                for &(x, y) in &[(15, 6), (15, 7), (18, 6), (18, 7)] { px(&mut buf, x + ox, y + oy, c); }   // prongs
+                rect(&mut buf, 14 + ox, 8 + oy, 20 + ox, 12 + oy, c);                                       // body
+                for y in 12..15 { px(&mut buf, 16 + ox, y + oy, c); px(&mut buf, 17 + ox, y + oy, c); }     // cord
+            }
         }
-    } else if l.full {
-        let plug = (20u8, 24u8, 30u8, 255u8);
-        for &(x, y) in &[(15, 6), (15, 7), (18, 6), (18, 7)] { px(&mut buf, x, y, plug); } // prongs
-        rect(&mut buf, 14, 8, 20, 12, plug);                                               // body
-        for y in 12..15 { px(&mut buf, 16, y, plug); px(&mut buf, 17, y, plug); }           // cord
     }
     (buf, w, h)
 }
@@ -533,18 +539,18 @@ pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     };
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-    let (bx0, by0, bx1, by1) = (3i32, 1i32, 11i32, 19i32);   // upright cell
+    let (bx0, by0, bx1, by1) = (3i32, 1i32, 11i32, 19i32);   // upright cell, 1px walls
     for (o, c) in [(1i32, SHADOW), (0i32, INK)] {
-        rect(&mut buf, bx0 + o, by0 + o, bx1 + o, by0 + 2 + o, c);
-        rect(&mut buf, bx0 + o, by1 - 2 + o, bx1 + o, by1 + o, c);
-        rect(&mut buf, bx0 + o, by0 + o, bx0 + 2 + o, by1 + o, c);
-        rect(&mut buf, bx1 - 2 + o, by0 + o, bx1 + o, by1 + o, c);
-        rect(&mut buf, bx0 + 2 + o, by0 - 2 + o, bx1 - 2 + o, by0 + o, c); // top terminal
+        rect(&mut buf, bx0 + o, by0 + o, bx1 + o, by0 + 1 + o, c);
+        rect(&mut buf, bx0 + o, by1 - 1 + o, bx1 + o, by1 + o, c);
+        rect(&mut buf, bx0 + o, by0 + o, bx0 + 1 + o, by1 + o, c);
+        rect(&mut buf, bx1 - 1 + o, by0 + o, bx1 + o, by1 + o, c);
+        rect(&mut buf, bx0 + 2 + o, by0 - 1 + o, bx1 - 2 + o, by0 + o, c); // top terminal
     }
     // fill from the bottom
-    let (ix0, ix1) = (bx0 + 2, bx1 - 2);
-    let inner_top = by0 + 2;
-    let inner_bot = by1 - 2;
+    let (ix0, ix1) = (bx0 + 1, bx1 - 1);
+    let inner_top = by0 + 1;
+    let inner_bot = by1 - 1;
     let fh = ((inner_bot - inner_top) as f64 * pct / 100.0).round() as i32;
     rect(&mut buf, ix0, inner_bot - fh.max(1), ix1, inner_bot, fill);
     // charge status overlaid on the cell: bolt (charging) / plug (full), white + dark backing
