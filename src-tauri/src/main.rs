@@ -306,7 +306,9 @@ fn main() {
                         // tray_title composes the enabled 텍스트 chips itself (incl. skipping % when the
                         // glyph draws it) — the rules live in ONE place and the settings UI mirrors them.
                         let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts));
-                        let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
+                        // ALWAYS Some(…): set_title(None) leaves the previous text in place on
+                        // macOS, so turning the last 텍스트 chip off left a zombie "9.8W" behind
+                        let _ = tray.set_title(Some(title));
                         // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/digit deco)
                         let key = format!("{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco);
                         if l.ok && key != last_key {
