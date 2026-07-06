@@ -232,8 +232,8 @@ body.settings-open #foot .vsel { opacity: .4; }
 .shint { color: var(--faint); font-size: 10.5px; margin-top: 13px; line-height: 1.5; }
 
 /* ── menu-bar widget picker (settings): preview strip + shape gallery + text chips ──
-   The strip and thumbnails stay DARK in both themes — the glyphs are the tray renderer's real
-   pixels (white outlines for a dark menu bar), so a dark swatch is what they actually look like. */
+   The strip/thumbnail swatches mirror the MENU BAR's appearance (.mbl = light bar), not the
+   popover theme — the glyphs are the tray renderer's real pixels, inked for that appearance. */
 .pvstrip {
   display: flex; align-items: center; justify-content: center; gap: 5px;
   min-height: 40px; padding: 8px 12px; margin-top: 2px;
@@ -241,6 +241,9 @@ body.settings-open #foot .vsel { opacity: .4; }
   font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums;
   color: rgba(255, 255, 255, .93); white-space: nowrap;
 }
+.pvstrip.mbl { background: #f1f2f5; border-color: #d7dce4; color: #1d2330; }
+.gal .gth.mbl { background: #f1f2f5; }
+.gal .gth.mbl b { color: #1d2330; }
 .pvstrip canvas, .gal canvas { display: block; }
 .pvph { color: var(--faint); font-size: 11px; font-weight: 500; }
 .pvmeta { display: flex; justify-content: space-between; align-items: center; margin-top: 7px; }

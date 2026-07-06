@@ -114,7 +114,7 @@
   "시각 축 (X · 가로 폭)": "Time axis (X · width)",
 
   "색상": "Color",
-  "충/방전": "Charge/Discharge", "저전력": "Low Power", "온도": "Temperature", "CPU부하": "CPU load", "전력": "Power",
+  "충/방전": "Chg/Dis", "저전력": "LPM", "온도": "Temp", "CPU부하": "CPU", "전력": "Power",
 
   "자동회전": "Auto-rotate",
   "🌙 다크": "🌙 Dark", "☀︎ 라이트": "☀︎ Light",

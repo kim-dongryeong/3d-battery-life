@@ -93,7 +93,13 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 // perceptual-ish ramp: blue -> cyan -> green -> yellow -> red
 // magnitude ramp: cold(dim blue) → hot(bright orange) via violet — no green leg, so it
 // stays ordered under red-green CVD (a full rainbow doesn't)
-function ramp(t) { t = clamp(t, 0, 1); return new THREE.Color().setHSL(((215 + 180 * t) % 360) / 360, 0.45 + 0.5 * t, 0.45 + 0.15 * t); }
+function ramp(t) {   // numeric color modes; light theme runs darker so 1px lines hold on white
+  t = clamp(t, 0, 1);
+  const h = ((215 + 180 * t) % 360) / 360;
+  return state.theme === 'light'
+    ? new THREE.Color().setHSL(h, 0.62 + 0.33 * t, 0.46 - 0.10 * t)
+    : new THREE.Color().setHSL(h, 0.45 + 0.5 * t, 0.45 + 0.15 * t);
+}
 
 function makeLabel(text, { size = 38, color = '#cfd6e6' } = {}) {
   const pad = 6, c = document.createElement('canvas'), g = c.getContext('2d');
@@ -170,12 +176,26 @@ function buildAxes(valMax, valLabel, maxDay, firstT) {
 }
 
 // ---- battery curves (continuous runs: charge + discharge, gap-split) ----
-const C_DISCHARGE = new THREE.Color().setHSL(0.02, 0.85, 0.55); // red-orange
-const C_CHARGE = new THREE.Color().setHSL(0.33, 0.80, 0.50);    // green
-const C_FULL = new THREE.Color().setHSL(0.55, 0.45, 0.50);      // dim blue
-const stateColor = p => (p.charging ? C_CHARGE : (p.ac ? C_FULL : C_DISCHARGE));
-const C_LPM = new THREE.Color(0xffcc0a);                        // 저전력 모드 ON (macOS systemYellow, matches live.rs)
-const C_LPM_OFF = new THREE.Color(0x51617a);                    // 저전력 off / 기록 이전(unknown)
+// per-theme palette: WebGL lines are 1px, so the lightness tuned for the dark scene washes out
+// on the light background — light theme gets darker, more saturated inks (incl. LPM yellow→ochre)
+const CURVE_C = {
+  dark: {
+    dis: new THREE.Color().setHSL(0.02, 0.85, 0.55),   // red-orange
+    chg: new THREE.Color().setHSL(0.33, 0.80, 0.50),   // green
+    full: new THREE.Color().setHSL(0.55, 0.45, 0.50),  // dim blue
+    lpm: new THREE.Color(0xffcc0a),                    // 저전력 ON (macOS systemYellow, matches live.rs)
+    lpmOff: new THREE.Color(0x51617a),                 // 저전력 off / 기록 이전(unknown)
+  },
+  light: {
+    dis: new THREE.Color().setHSL(0.02, 0.90, 0.42),
+    chg: new THREE.Color().setHSL(0.33, 0.90, 0.30),
+    full: new THREE.Color().setHSL(0.55, 0.60, 0.38),
+    lpm: new THREE.Color(0xc79b00),
+    lpmOff: new THREE.Color(0xb7c1d2),                 // recedes on white so the yellow pops
+  },
+};
+const CC = () => CURVE_C[state.theme] || CURVE_C.dark;
+const stateColor = p => (p.charging ? CC().chg : (p.ac ? CC().full : CC().dis));
 
 // per-point SIGNED rate d(잔량)/dt in %/min over a short backward window.
 // Uses the fine mAh-based level (p.cap, ~0.02% res) so the curve is smooth — pct is macOS's INTEGER %
@@ -265,7 +285,7 @@ function buildLines(report) {
       pos.push(xFromTod(todOf(p.t)), yFromVal(yv, yMax), zFromDay(d, maxDay));  // X=시각, Y=값, Z=날짜(점별)
       const c = numeric
         ? ramp(cMax > cMin && p[state.color] != null ? (p[state.color] - cMin) / (cMax - cMin) : 0.5)
-        : state.color === 'lowPower' ? (p.lowPower ? C_LPM : C_LPM_OFF)
+        : state.color === 'lowPower' ? (p.lowPower ? CC().lpm : CC().lpmOff)
           : stateColor(p);
       col.push(c.r, c.g, c.b);
       if (state.y === 'rate') p._rate = yv;   // stash the signed rate so the hover tooltip can show it
@@ -303,8 +323,13 @@ function battWatt(p) {
 const wattValueOf = p => state.wattsRail === 'battery' ? battWatt(p) : p[wattField()];
 // 부호축(0을 중앙, 아래=음수)이 필요한 모드: 잔량 변화율 · 배터리 전력
 const isSignedY = () => state.y === 'rate' || (state.y === 'watts' && state.wattsRail === 'battery');
-const GRAD_NUM = 'linear-gradient(90deg, hsl(215,45%,45%), hsl(260,56%,49%), hsl(305,68%,52%), hsl(350,80%,56%), hsl(35,95%,60%))';
-const GRAD_STATE = 'linear-gradient(90deg, hsl(7,85%,55%) 0 33%, hsl(198,45%,50%) 50%, hsl(119,80%,50%) 66% 100%)';
+// legend gradients follow the same per-theme curve inks as buildLines
+const GRAD_NUM = () => state.theme === 'light'
+  ? 'linear-gradient(90deg, hsl(215,62%,46%), hsl(260,70%,44%), hsl(305,78%,41%), hsl(350,87%,39%), hsl(35,95%,36%))'
+  : 'linear-gradient(90deg, hsl(215,45%,45%), hsl(260,56%,49%), hsl(305,68%,52%), hsl(350,80%,56%), hsl(35,95%,60%))';
+const GRAD_STATE = () => state.theme === 'light'
+  ? 'linear-gradient(90deg, hsl(7,90%,42%) 0 33%, hsl(198,60%,38%) 50%, hsl(119,90%,30%) 66% 100%)'
+  : 'linear-gradient(90deg, hsl(7,85%,55%) 0 33%, hsl(198,45%,50%) 50%, hsl(119,80%,50%) 66% 100%)';
 
 function rebuild() {
   const rwg = document.getElementById('rateWinGrp');
@@ -324,15 +349,17 @@ function rebuild() {
   if (state.color === 'state') {
     document.getElementById('legMin').textContent = '🔋방전';
     document.getElementById('legMax').textContent = '충전🔌';
-    bar.style.background = GRAD_STATE;
+    bar.style.background = GRAD_STATE();
   } else if (state.color === 'lowPower') {
     document.getElementById('legMin').textContent = '꺼짐';
     document.getElementById('legMax').textContent = '🟡 켜짐';
-    bar.style.background = 'linear-gradient(90deg, #51617a 0 50%, #ffcc0a 50% 100%)';
+    bar.style.background = state.theme === 'light'
+      ? 'linear-gradient(90deg, #b7c1d2 0 50%, #c79b00 50% 100%)'
+      : 'linear-gradient(90deg, #51617a 0 50%, #ffcc0a 50% 100%)';
   } else {
     document.getElementById('legMin').textContent = cMin != null ? `${cMin.toFixed(0)}${cm.unit}` : '';
     document.getElementById('legMax').textContent = cMax != null ? `${cMax.toFixed(0)}${cm.unit}` : '';
-    bar.style.background = GRAD_NUM;
+    bar.style.background = GRAD_NUM();
   }
   updateHud(r);
 }
@@ -538,16 +565,19 @@ function drawProjection3DInner(r) {
         projGroup.add(line); projLines.push(line);          // 레이캐스트 대상에 추가
       }
     };
-    const curveHex = isChg ? 0x46d17f : 0x4dd0c0, lineHex = isChg ? 0x8fd6a8 : 0x8aa0b8;
-    const curveStr = isChg ? '#46d17f' : '#4dd0c0', lineStr = isChg ? '#8fd6a8' : '#9fb2c6';
+    const lt = state.theme === 'light';   // 라이트 배경에선 예상선도 진하게 (1px 선이 희미해짐)
+    const curveHex = isChg ? (lt ? 0x1f9e57 : 0x46d17f) : (lt ? 0x0f8f80 : 0x4dd0c0);
+    const lineHex = isChg ? (lt ? 0x4d8f68 : 0x8fd6a8) : (lt ? 0x5b7691 : 0x8aa0b8);
+    const curveStr = isChg ? (lt ? '#1f9e57' : '#46d17f') : (lt ? '#0f8f80' : '#4dd0c0');
+    const lineStr = isChg ? (lt ? '#4d8f68' : '#8fd6a8') : (lt ? '#5b7691' : '#9fb2c6');
     build(P.curveMin, false, curveHex, false, 0.9, isChg ? 'chgCurve' : 'disCurve');   // 구간별 곡선 (실선)
-    build(P.linMin, true, lineHex, true, 0.6, isChg ? 'chgLine' : 'disLine');           // 등속 직선 (점선)
+    build(P.linMin, true, lineHex, true, lt ? 0.8 : 0.6, isChg ? 'chgLine' : 'disLine');   // 등속 직선 (점선)
     if (!startDrawn) {   // 시작점(현재 잔량) 표식 + '예상' 라벨 — 방전·충전이 같은 지점에서 출발하므로 한 번만
       startDrawn = true;
       const sp = new THREE.Vector3(xFromTod(todOf(P.baseT)), yFromVal(P.L0, yMax), zFromDay(dayOfT(P.baseT), maxDay));
-      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), new THREE.MeshBasicMaterial({ color: lt ? 0x2b3444 : 0xffffff }));
       dot.position.copy(sp); projGroup.add(dot);
-      const lab = makeLabel(t('예상'), { size: 26, color: '#dfeeea' }); lab.position.copy(sp).add(new THREE.Vector3(0, 1, 0)); projGroup.add(lab);
+      const lab = makeLabel(t('예상'), { size: 26, color: lt ? '#2f5e50' : '#dfeeea' }); lab.position.copy(sp).add(new THREE.Vector3(0, 1, 0)); projGroup.add(lab);
     }
     // 목표면(0% 또는 100%) 도달 지점: 작은 종점 점 + 화면좌표로 항상 뜨는 시각 태그
     const markEnd = (endMin, colHex, colStr, prefix, yBias) => {

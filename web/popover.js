@@ -415,7 +415,10 @@ function settingsHTML() {
 function pvState() {
   if (pvSim !== 'cur' && pvData && pvData.states && pvData.states[pvSim]) return pvData.states[pvSim];
   const s = live || {};
-  return { pct: s.pct ?? 0, min: s.timeRemain ?? null, sysW: s.systemW ?? s.watts ?? 0, batW: Math.abs(s.powerW ?? 0) };
+  // pct comes from the DUMP (the tray's own number) so the strip text can never disagree with
+  // the glyph digits next to it; W/time are live (they move every tick, cosmetic for preview)
+  const trayPct = pvData && pvData.states && pvData.states.cur ? pvData.states.cur.pct : null;
+  return { pct: trayPct ?? s.pct ?? 0, min: s.timeRemain ?? null, sysW: s.systemW ?? s.watts ?? 0, batW: Math.abs(s.powerW ?? 0) };
 }
 function composeTrayTitle(st) {
   const parts = [];
@@ -444,6 +447,10 @@ function glyphCanvas(styleKey, dispH, pixelated) {
 function renderPreviewZone() {
   const strip = $('pvstrip'); if (!strip) return;
   const st = pvState(), title = composeTrayTitle(st);
+  // swatches mirror the MENU BAR's appearance (from the dump), not the popover theme — a light
+  // menu bar gets a light strip with the dark-inked glyphs the tray actually draws there
+  const mbl = pvData ? !pvData.dark : resolveTheme() === 'light';
+  strip.classList.toggle('mbl', mbl);
   strip.textContent = '';
   const g = cfg.widget === 'text' ? null : glyphCanvas(cfg.widget, 17, false);
   if (g) strip.appendChild(g);
@@ -456,6 +463,7 @@ function renderPreviewZone() {
   const tw = title ? pvMeasure.measureText(title).width + (g ? 5 : 0) : 0;
   const wEl = $('pvwidth'); if (wEl) wEl.innerHTML = `점유 폭 <b>≈${Math.round(gw + tw + 14)}pt</b>`;
   document.querySelectorAll('.gal [data-gth]').forEach(th => {
+    th.classList.toggle('mbl', mbl);
     th.textContent = '';
     const k = th.dataset.gth;
     if (k === 'text') { const t = document.createElement('b'); t.textContent = `${Math.round(st.pct)}%`; th.appendChild(t); return; }
