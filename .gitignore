@@ -24,3 +24,4 @@ src-tauri/icons/
 # bun --compile temp artifacts
 *.bun-build
 .*.bun-build
+.vscode
