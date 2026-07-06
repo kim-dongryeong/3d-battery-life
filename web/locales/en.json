@@ -191,7 +191,7 @@
   "숫자↑아이콘": "Number↑icon", "세로 막대": "Vertical bar", "텍스트만": "Text only",
   "넓음": "Wide", "최다 정보": "Most info", "macOS풍": "macOS-style",
   "좁음": "Narrow", "가장 좁음": "Narrowest", "아이콘 없음": "No icon",
-  "잔량 %": "Level %", "남은/완충 시간": "Time to empty/full",
+  "잔량 %": "Level %", "남은/완충 시간": "Time to empty/full", "숫자 색·테두리": "Number color & outline",
   "아이콘에 포함": "in the icon", "기본 표시": "always on", "부족": "Low",
   "점유 폭": "Width", "미리보기 준비 중…": "Preparing preview…",
   "이 모양은 잔량 숫자를 아이콘 안에 그려요 — 옆 텍스트와 중복되지 않아요.": "This shape draws the % inside the icon — it won't repeat in the text.",

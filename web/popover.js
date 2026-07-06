@@ -9,14 +9,14 @@ const ls = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { retu
 const save = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 // display prefs (popover-only) live in localStorage; menu-bar/alert prefs (cfg) live server-side (/api/config)
 let pv = qs('pv') || ls('battPV', 'list');
-let theme = qs('theme') || ls('battTheme', 'dark');   // dark | light | system
+let theme = qs('theme') || ls('battTheme', 'light');   // light(기본) | dark | system
 let unit = ls('battUnit', 'system');                  // system | c | f
 let timeFmt = ls('battTimeFmt', 'long');              // short(1:20) | long(1시간 20분)
 let procN = +ls('battProcN', '6');                    // top-processes count · 0 = hide
 let sparkMode = qs('sm') || ls('battSparkMode', 'pct');   // mini-chart metric: pct | w | 3d
 let sparkH = +(qs('sh') ?? ls('battSparkH', '6'));        // mini-chart window hours: 6 | 24 | 0(all)
 let three = null, t3d = null, t3dLoading = false;     // lazy Three.js + persistent live-3D scene (survives DOM rebuilds)
-let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w: true, w_src: 'sys' };
+let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w: true, w_src: 'sys', digit_deco: true };
 let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
 // menu-bar preview (settings panel): glyph dumps from the Rust tray renderer via /api/tray-preview
 let pvSim = 'cur', pvData = null, pvTimer = 0, pvMeasure = null;
@@ -386,6 +386,7 @@ function menubarHTML() {
       : '켠 항목이 · 로 이어져 아이콘 옆에 붙어요. 시간은 계산될 때만 보여요.'}</div>
     <div class="srow"><span>상태별 색상</span>${tglEl('colorize', cfg.colorize)}</div>
     ${cfg.widget === 'icon' ? `<div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>` : ''}
+    ${cfg.widget === 'stack' ? `<div class="srow"><span>숫자 색·테두리</span>${tglEl('digit_deco', cfg.digit_deco)}</div>` : ''}
     <div class="srow"><span>열기 단축키 <kbd>⌥⌃B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>`;
 }
 
@@ -430,7 +431,9 @@ function composeTrayTitle(st) {
 }
 function glyphCanvas(styleKey, dispH, pixelated) {
   const set = pvData && pvData.glyphs && pvData.glyphs[pvSim];
-  const g = set && set[styleKey === 'icon' && cfg.glyph_xl ? 'icon_xl' : styleKey];
+  const variant = styleKey === 'icon' && cfg.glyph_xl ? 'icon_xl'
+    : styleKey === 'stack' && !cfg.digit_deco ? 'stack_plain' : styleKey;
+  const g = set && set[variant];
   if (!g) return null;
   try {
     const raw = atob(cfg.colorize ? g.c : g.m);

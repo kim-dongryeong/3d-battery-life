@@ -11,7 +11,7 @@ const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 
 
 // ---- state --------------------------------------------------------------
 const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, detail: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', projDis: 'on', projChg: 'on', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
-state.theme = (() => { try { return localStorage.getItem('battTheme') || 'dark'; } catch { return 'dark'; } })();
+state.theme = (() => { try { return localStorage.getItem('battTheme') || 'light'; } catch { return 'light'; } })();   // 라이트가 기본
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
 state.tab = '3d';

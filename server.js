@@ -45,7 +45,7 @@ let sparkCache = { at: 0, data: [] };    // /api/spark cache (recent %, for the 
 
 // tray.json = the settings the menu-bar (Rust) and the popover settings panel both share.
 // The Rust ticker re-reads it every 2s, so a popover change applies to the menu bar live.
-const TRAY_DEFAULTS = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true };
+const TRAY_DEFAULTS = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, digit_deco: true };
 const trayPath = () => path.join(userDataDir(), 'tray.json');
 function readTray() {
   let t;
@@ -77,6 +77,7 @@ function sanitizeCfg(p) {
   if (typeof p.text_time === 'boolean') o.text_time = p.text_time;
   if (typeof p.text_w === 'boolean') o.text_w = p.text_w;
   if (['sys', 'bat'].includes(p.w_src)) o.w_src = p.w_src;
+  if (typeof p.digit_deco === 'boolean') o.digit_deco = p.digit_deco;
   return o;
 }
 

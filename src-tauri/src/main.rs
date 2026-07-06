@@ -307,11 +307,11 @@ fn main() {
                         // glyph draws it) — the rules live in ONE place and the settings UI mirrors them.
                         let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts));
                         let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
-                        // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm)
-                        let key = format!("{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm);
+                        // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/digit deco)
+                        let key = format!("{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco);
                         if l.ok && key != last_key {
                             last_key = key;
-                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm) {
+                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco) {
                                 Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
                                 None => { let _ = tray.set_icon(None); }   // text-only widget
                             }
