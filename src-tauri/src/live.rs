@@ -445,25 +445,24 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
 }
 
 // % number stacked ABOVE a mini horizontal battery — narrowest horizontal footprint for a tight
-// menu bar. Drawn at NATIVE 2× (48×40, no up2) with the finer 5×7 font, so the number — the hero
-// of this style — stays sharp on Retina. `deco`=false → plain white digits: no tint, no outline.
+// menu bar. The number is the hero: sized to leave only ~1px headroom, with the battery body
+// taking the former bottom slack. `deco`=false → plain white digits: no tint, no shadow.
 pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (44u32, 36u32);
     let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-    // the % as real type on top; deco → state tint while charging/LPM + soft shadow, else plain
     let dcol = if deco && (l.charging || l.full || lpm) { fill } else { INK };
     let digits = format!("{}", pct.round() as u32);
-    stamp_digits(&mut hi, &digits, 16.5, 22.0, 8.5, dcol, deco);
-    // mini rounded battery below, air gap before the fill
-    hi.stroke_rrect(1.0, 18.7, 41.0, 34.7, 4.5, 2.0, SHADOW);
-    hi.fill_rrect(41.5, 23.7, 44.0, 29.7, 1.5, SHADOW);
-    hi.stroke_rrect(1.0, 18.0, 41.0, 34.0, 4.5, 2.0, INK);
-    hi.fill_rrect(41.5, 23.0, 44.0, 29.0, 1.5, INK);
+    stamp_digits(&mut hi, &digits, 19.0, 22.0, 8.0, dcol, deco);
+    // mini rounded battery below — taller body, air gap to the fill
+    hi.stroke_rrect(1.0, 17.7, 41.0, 35.3, 4.5, 2.0, SHADOW);
+    hi.fill_rrect(41.5, 23.5, 44.0, 29.5, 1.5, SHADOW);
+    hi.stroke_rrect(1.0, 17.0, 41.0, 34.6, 4.5, 2.0, INK);
+    hi.fill_rrect(41.5, 22.8, 44.0, 28.8, 1.5, INK);
     let fw = (32.0 * pct as f32 / 100.0).max(2.5);
-    hi.fill_rrect(5.0, 22.0, 5.0 + fw, 30.0, 2.0, fill);
-    charge_overlay(&mut hi, l, 21.0, 26.0, 8.5, 13.0);
+    hi.fill_rrect(5.0, 21.0, 5.0 + fw, 30.6, 2.2, fill);
+    charge_overlay(&mut hi, l, 21.0, 25.8, 9.0, 13.5);
     hi.down()
 }
 
