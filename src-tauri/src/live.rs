@@ -455,14 +455,15 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
     let dcol = if deco && (l.charging || l.full || lpm) { fill } else { INK };
     let digits = format!("{}", pct.round() as u32);
     stamp_digits(&mut hi, &digits, 19.0, 22.0, 8.0, dcol, deco);
-    // mini rounded battery below — taller body, air gap to the fill
-    hi.stroke_rrect(1.0, 17.7, 41.0, 35.3, 4.5, 2.0, SHADOW);
-    hi.fill_rrect(41.5, 23.5, 44.0, 29.5, 1.5, SHADOW);
-    hi.stroke_rrect(1.0, 17.0, 41.0, 34.6, 4.5, 2.0, INK);
-    hi.fill_rrect(41.5, 22.8, 44.0, 28.8, 1.5, INK);
+    // mini rounded battery below — body runs to the canvas floor (only the soft shadow hangs
+    // past the ink), air gap to the fill
+    hi.stroke_rrect(1.0, 17.7, 41.0, 35.9, 4.5, 2.0, SHADOW);
+    hi.fill_rrect(41.5, 23.8, 44.0, 29.8, 1.5, SHADOW);
+    hi.stroke_rrect(1.0, 17.0, 41.0, 35.2, 4.5, 2.0, INK);
+    hi.fill_rrect(41.5, 23.1, 44.0, 29.1, 1.5, INK);
     let fw = (32.0 * pct as f32 / 100.0).max(2.5);
-    hi.fill_rrect(5.0, 21.0, 5.0 + fw, 30.6, 2.2, fill);
-    charge_overlay(&mut hi, l, 21.0, 25.8, 9.0, 13.5);
+    hi.fill_rrect(5.0, 21.0, 5.0 + fw, 31.2, 2.2, fill);
+    charge_overlay(&mut hi, l, 21.0, 26.1, 9.0, 13.5);
     hi.down()
 }
 
