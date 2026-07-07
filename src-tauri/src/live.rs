@@ -420,10 +420,11 @@ pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u
     hi.fill_rrect(66.5, 16.8, 70.5, 24.8, 2.0, SHADOW);
     hi.stroke_rrect(2.0, 4.0, 66.0, 36.0, 6.0, 2.0, INK);
     hi.fill_rrect(66.5, 16.0, 70.5, 24.0, 2.0, INK);
-    // left indicator so iconpct still shows charge state: bolt (charging) / plug (full), in ink
-    let ind = if l.charging || l.full { 12.0f32 } else { 0.0 };
-    if l.charging { bolt(&mut hi, 13.0, 20.0, 10.0, 17.0, ink); }
-    else if l.full { plug(&mut hi, 13.0, 12.0, 16.0, ink); }
+    // left indicator so iconpct still shows charge state: bolt (charging) / plug (full), in ink.
+    // 번개를 큼지막하게 → 그만큼 숫자 자리를 오른쪽으로 더 확보(ind)
+    let ind = if l.charging || l.full { 15.0f32 } else { 0.0 };
+    if l.charging { bolt(&mut hi, 13.0, 20.0, 12.0, 27.0, ink); }
+    else if l.full { plug(&mut hi, 13.0, 9.0, 20.0, ink); }
     let digits = format!("{}", l.pct.clamp(0.0, 100.0).round() as u32);
     stamp_digits(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, ink, true);
     hi.down()
@@ -446,7 +447,7 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     hi.fill_rrect(6.0, 8.0, 6.0 + fw, 32.0, 3.0, fill);
     // charge status at the left + the % as real type over the fill
     let ind = if l.charging || l.full { 12.0f32 } else { 0.0 };
-    charge_overlay(&mut hi, l, 13.0, 20.0, 10.0, 17.0);
+    charge_overlay(&mut hi, l, 12.0, 20.0, 12.0, 26.0);   // combo: 큼지막한 번개
     let digits = format!("{}", pct.round() as u32);
     stamp_digits(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, INK, true);
     hi.down()
@@ -475,7 +476,7 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
     // slim air gap (1px) so the visible fill mass carries the body's height
     let fw = (34.0 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
-    charge_overlay(&mut hi, l, 21.0, 25.15, 9.5, 15.0);
+    charge_overlay(&mut hi, l, 21.0, 26.0, 13.0, 18.0);   // stack: 미니 배터리를 꽉 채우는 번개
     hi.down()
 }
 
@@ -497,7 +498,7 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool) -> (Vec<u8>, 
     // fill with an air gap to the outline (macOS's own battery-icon grammar)
     let fw = (56.0 * pct as f32 / 100.0).max(3.0);
     hi.fill_rrect(6.0, m + 4.0, 6.0 + fw, 36.0 - m, 3.0, fill);
-    charge_overlay(&mut hi, l, 34.0, 20.0, 13.0, 21.0);
+    charge_overlay(&mut hi, l, 34.0, 20.0, 17.0, 27.0);   // icon: 몸통 중앙의 큼지막한 번개
     hi.down()
 }
 
@@ -576,7 +577,7 @@ pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     hi.fill_rrect(10.0, 0.0, 18.0, 2.5, 1.2, INK);
     let fh = (27.5f32 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(10.0, 34.0 - fh, 18.0, 34.0, 2.0, fill);
-    charge_overlay(&mut hi, l, 14.0, 20.0, 10.0, 16.0);
+    charge_overlay(&mut hi, l, 14.0, 20.0, 11.0, 27.0);   // bar: 셀을 세로로 채우는 큰 번개
     hi.down()
 }
 
