@@ -81,6 +81,7 @@ const sceneRoot = new THREE.Group(); scene.add(sceneRoot);   // axes + grid (reb
 const lineRoot = new THREE.Group(); scene.add(lineRoot);     // session curves
 const overlay = new THREE.Group(); overlay.visible = false; scene.add(overlay);   // hover marker + guide lines (persists across rebuilds)
 const projGroup = new THREE.Group(); scene.add(projGroup);   // 방전 예상선(현재→0%) — 배터리 % 모드에서만
+const nowGroup = new THREE.Group(); scene.add(nowGroup);     // '현재' 위치 점(실시간 잔량) — 잔량 모드에서 항상
 let projYMax = 100, projMaxDay = 1;   // stashed from the last buildLines so loadRates can redraw the projection alone
 let pinned = null, curHover = null;   // 마커 고정 상태 · 현재 호버 결과 {vp,point,dayIndex,line}
 let tipManual = false;                // 고정 툴팁을 드래그해 직접 배치했는지 → 그러면 마커 추적 중단
@@ -342,6 +343,7 @@ function rebuild() {
   const { yMax, maxDay, cMin, cMax } = buildLines(r);
   buildAxes(yMax, yLabel(), maxDay, r.firstT);
   projYMax = yMax; projMaxDay = maxDay; drawProjection3D();   // 방전 예상선(현재→0%) 겹쳐 그리기
+  drawNowMarker(r, yMax, maxDay);   // '현재' 위치 점 — 자다 깬 직후에도 지금 잔량을 찍어줌
 
   const cm = COLOR_META[state.color];
   document.getElementById('legLbl').textContent = cm.label;
@@ -514,6 +516,23 @@ function addProjTag(vp, text, color, yBias = 0) {
   el.style.color = color; el.style.borderColor = color;
   document.body.appendChild(el);
   proj3DTags.push({ vp, el, yBias });
+}
+// '현재' 위치 점: 실시간 최신 표본(서버가 /api/report 끝에 붙여줌)의 잔량을 3D에 하나 찍는다.
+// 자다 깬 직후처럼 방전 이력에 sleep 공백이 있으면 그 점은 1-포인트 run이라 선으로는 안 그려지므로
+// (buildRuns가 ≥2점만 통과), 이렇게 별도 마커로 "지금 여기"를 항상 보이게 한다. 잔량(%) 모드 전용.
+function drawNowMarker(r, yMax, maxDay) {
+  disposeGroup(nowGroup);
+  if (!r || state.source !== 'real' || state.y !== 'pct') return;
+  const L = r.latest; if (!L || L.pct == null) return;
+  const d0 = new Date((r.firstT || 0) * 1000); d0.setHours(0, 0, 0, 0);
+  const day = Math.floor((L.t - d0.getTime() / 1000) / 86400);
+  const lvl = state.rateLevel === 'pct' ? L.pct : (L.cap != null ? L.cap : L.pct);
+  const pos = new THREE.Vector3(xFromTod(todOf(L.t)), yFromVal(lvl, yMax), zFromDay(day, maxDay));
+  const col = L.charging ? CC().chg : (L.ac ? CC().full : CC().dis);   // 상태색과 일치
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.26, 18, 18), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  dot.position.copy(pos); nowGroup.add(dot);
+  const halo = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 18), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.32 }));
+  halo.position.copy(pos); nowGroup.add(halo);
 }
 function drawProjection3D() {
   // 예상선을 dispose 하기 전에, 그 위의 호버 하이라이트(공유 HI 재질)를 원복해 dispose 대상에서 뺀다
@@ -1271,6 +1290,19 @@ async function load() {
   } else if (state.detail) { state.detail = null; if (state.report) updateHud(state.report); }
   scheduleLive();              // (re)arm the 60s live refresh for '내 데이터'
 }
+
+// 자다 깨거나 창을 다시 보면 60s 타이머를 기다리지 않고 즉시 새로고침 → 화면이 과거에 머무르지 않음.
+// (sleep 중 JS 타이머는 멈추고, 깨어난 뒤 setInterval 복귀엔 지연이 있을 수 있어 별도 트리거가 필요.)
+let lastWakeLoad = 0;
+function wakeRefresh() {
+  if (document.hidden || state.source !== 'real') return;
+  const now = Date.now();
+  if (now - lastWakeLoad < 3000) return;   // visibilitychange + focus 중복 억제
+  lastWakeLoad = now;
+  load();
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeRefresh(); });
+window.addEventListener('focus', wakeRefresh);
 
 // ---- UI wiring ----------------------------------------------------------
 document.querySelectorAll('.seg').forEach(seg => {

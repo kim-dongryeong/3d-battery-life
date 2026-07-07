@@ -130,7 +130,19 @@ export function startServer({ root, port } = {}) {
     if (url.pathname === '/api/report') {
       try {
         const level = url.searchParams.get('level') === 'pct' ? 'pct' : 'rawcap';   // HUD 10%-trend precision
-        const report = buildReport(readSource(url.searchParams.get('source'), assetDir), { level });
+        const source = url.searchParams.get('source');
+        let samples = readSource(source, assetDir);
+        // '내 데이터'엔 지금 이 순간을 실시간 ioreg 한 점으로 덧붙인다. 1분 샘플러가 아직 안 찍은
+        // 창(특히 자다 깬 직후 최대 1분)에도 그래프·HUD가 과거가 아니라 현재를 가리키게 하려는 것.
+        // best-effort: 실시간 읽기가 실패해도 저장된 샘플만으로 정상 리포트를 반환한다.
+        if (source !== 'demo' && source !== 'demo2') {
+          try {
+            const now = sample();
+            const last = samples.length ? samples[samples.length - 1] : null;
+            if (now && now.t && (!last || now.t > last.t)) samples = samples.concat(now);
+          } catch { /* live read failed → 저장 샘플만 사용 */ }
+        }
+        const report = buildReport(samples, { level });
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify(report));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
