@@ -309,11 +309,15 @@ fn main() {
                         // ALWAYS Some(…): set_title(None) leaves the previous text in place on
                         // macOS, so turning the last 텍스트 chip off left a zombie "9.8W" behind
                         let _ = tray.set_title(Some(title));
-                        // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/digit deco)
-                        let key = format!("{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco);
+                        // widget "wstack" draws a live power number → resolve it (sys or battery per
+                        // w7_src) and fold it (rounded) into the redraw key so the glyph updates as W moves
+                        let w7 = if c.w7_battery() { l.watts.abs() } else { sys_w.unwrap_or(l.watts) };
+                        let wkey = if c.widget == "wstack" { (w7.max(0.0)).round() as i64 } else { 0 };
+                        // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/digit deco/wstack W)
+                        let key = format!("{}-{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco, wkey);
                         if l.ok && key != last_key {
                             last_key = key;
-                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco) {
+                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7) {
                                 Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
                                 None => { let _ = tray.set_icon(None); }   // text-only widget
                             }
@@ -322,7 +326,7 @@ fn main() {
                         // set_icon above re-applied the 18pt image (both marshal to the main thread,
                         // FIFO). Idempotent (skips if already at target), so a plain title-only tick
                         // keeps the size too. No-op/graceful if the status button can't be located.
-                        let _ = handle.run_on_main_thread(|| grow_menu_glyph(MENU_GLYPH_H));
+                        let _ = handle.run_on_main_thread(grow_menu_glyph);
                     }
                     // settings-panel preview bridge: dump the real glyph renders (all styles ×
                     // color/mono × normal/XL) when their inputs change (~every 1% of battery).
@@ -468,11 +472,13 @@ fn round_popover_window(w: &tauri::WebviewWindow) {
 // tree (NSStatusBarButton is a public class) and enlarge its image to `target_h` points, keeping
 // aspect. Fully isolated: if the button isn't found the glyph just stays 18pt — the tray's
 // click/menu behaviour is never touched. Must run on the main thread.
-const MENU_GLYPH_H: f64 = 22.0;   // menu-bar content height on modern macOS (~24pt bar − padding)
-fn grow_menu_glyph(target_h: f64) {
-    use objc2_app_kit::{NSApplication, NSStatusBarButton, NSView};
+fn grow_menu_glyph() {
+    use objc2_app_kit::{NSApplication, NSStatusBar, NSStatusBarButton, NSView};
     use objc2_foundation::{MainThreadMarker, NSSize};
     let Some(mtm) = MainThreadMarker::new() else { return };   // no-op off the main thread
+    // Fill the ACTUAL menu-bar height (NSStatusBar thickness, ~24pt on modern Macs) rather than a
+    // fixed 22 — that's the true maximum. A 1pt inset keeps the glyph off the very top/bottom edges.
+    let target_h = (NSStatusBar::systemStatusBar().thickness() - 1.0).clamp(18.0, 30.0);
     // resize in place when the status button is reached → no need to own (retain) it
     fn resize(view: &NSView, target_h: f64) -> bool {
         if let Some(btn) = view.downcast_ref::<NSStatusBarButton>() {

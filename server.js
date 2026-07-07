@@ -53,13 +53,25 @@ function readTray() {
   // read-side migration: files predating the 텍스트 chips carry the legacy `info` enum (0–7).
   // Same mapping as Rust's Cfg::title_items — GET always returns the chip keys so the popover
   // never needs to know about `info`. First chip save persists them (sanitizeCfg below).
-  if (t.text_pct == null) {
+  if (t.text_pct == null && t.text_w_sys == null) {
     const i = Number.isInteger(t.info) && t.info >= 0 && t.info <= 7 ? t.info : 4;
     t.text_pct = [1, 4, 5, 7].includes(i);
     t.text_time = [2, 5].includes(i);
-    t.text_w = [3, 4, 6, 7].includes(i);
-    t.w_src = [6, 7].includes(i) ? 'bat' : 'sys';
   }
+  // power chips are now INDEPENDENT (system + battery). Derive from the old single text_w+w_src
+  // (or the legacy enum's sysW=3/4, batW=6/7) when the new keys are absent.
+  if (t.text_w_sys == null && t.text_w_bat == null) {
+    if (t.text_w != null) {
+      const bat = t.w_src === 'bat';
+      t.text_w_sys = !!t.text_w && !bat;
+      t.text_w_bat = !!t.text_w && bat;
+    } else {
+      const i = Number.isInteger(t.info) && t.info >= 0 && t.info <= 7 ? t.info : 4;
+      t.text_w_sys = [3, 4].includes(i);
+      t.text_w_bat = [6, 7].includes(i);
+    }
+  }
+  if (t.w7_src == null) t.w7_src = 'sys';
   return t;
 }
 // only accept known keys with valid types/ranges — tray.json is deserialized by Rust (serde),
@@ -70,13 +82,16 @@ function sanitizeCfg(p) {
   if (typeof p.colorize === 'boolean') o.colorize = p.colorize;
   if (Number.isInteger(p.low_pct) && p.low_pct >= 0 && p.low_pct <= 100) o.low_pct = p.low_pct;
   if (Number.isInteger(p.high_pct) && p.high_pct >= 0 && p.high_pct <= 100) o.high_pct = p.high_pct;
-  if (['icon', 'iconpct', 'combo', 'stack', 'bar', 'text'].includes(p.widget)) o.widget = p.widget;
+  if (['icon', 'iconpct', 'combo', 'stack', 'wstack', 'bar', 'text'].includes(p.widget)) o.widget = p.widget;
   if (typeof p.glyph_xl === 'boolean') o.glyph_xl = p.glyph_xl;
   if (typeof p.shortcut === 'boolean') o.shortcut = p.shortcut;
   if (typeof p.text_pct === 'boolean') o.text_pct = p.text_pct;
   if (typeof p.text_time === 'boolean') o.text_time = p.text_time;
   if (typeof p.text_w === 'boolean') o.text_w = p.text_w;
   if (['sys', 'bat'].includes(p.w_src)) o.w_src = p.w_src;
+  if (typeof p.text_w_sys === 'boolean') o.text_w_sys = p.text_w_sys;
+  if (typeof p.text_w_bat === 'boolean') o.text_w_bat = p.text_w_bat;
+  if (['sys', 'bat'].includes(p.w7_src)) o.w7_src = p.w7_src;
   if (typeof p.digit_deco === 'boolean') o.digit_deco = p.digit_deco;
   return o;
 }

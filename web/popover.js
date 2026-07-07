@@ -16,7 +16,7 @@ let procN = +ls('battProcN', '6');                    // top-processes count · 
 let sparkMode = qs('sm') || ls('battSparkMode', 'pct');   // mini-chart metric: pct | w | 3d
 let sparkH = +(qs('sh') ?? ls('battSparkH', '6'));        // mini-chart window hours: 6 | 24 | 0(all)
 let three = null, t3d = null, t3dLoading = false;     // lazy Three.js + persistent live-3D scene (survives DOM rebuilds)
-let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w: true, w_src: 'sys', digit_deco: true };
+let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w_sys: true, text_w_bat: false, w7_src: 'sys', digit_deco: true };
 let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
 // menu-bar preview (settings panel): glyph dumps from the Rust tray renderer via /api/tray-preview
 let pvSim = 'cur', pvData = null, pvTimer = 0, pvMeasure = null;
@@ -354,14 +354,14 @@ const pctOpts = steps => steps.map(v => [String(v), v === 0 ? '끄기' : `${v}%`
 // 미리보기(트레이 렌더러가 덤프한 진짜 픽셀)로 결과를 확인하고 고른다.
 const WIDGETS = [
   ['icon', '채움', '넓음'], ['combo', '채움+숫자', '최다 정보'], ['iconpct', '테두리+숫자', 'macOS풍'],
-  ['stack', '숫자↑아이콘', '좁음'], ['bar', '세로 막대', '가장 좁음'], ['text', '텍스트만', '아이콘 없음'],
+  ['stack', '숫자↑아이콘', '좁음'], ['wstack', '전력↑잔량', '전력+잔량'], ['bar', '세로 막대', '가장 좁음'], ['text', '텍스트만', '아이콘 없음'],
 ];
 const PV_SIMS = [['cur', '현재'], ['chg', '충전'], ['low', '부족'], ['lpm', '저전력']];
-const widgetHasDigits = w => w === 'combo' || w === 'iconpct' || w === 'stack';
+const widgetHasDigits = w => w === 'combo' || w === 'iconpct' || w === 'stack' || w === 'wstack';
 
 function menubarHTML() {
   const digitsIn = widgetHasDigits(cfg.widget);
-  const pctForced = cfg.widget === 'text' && !cfg.text_time && !cfg.text_w;   // text-only never goes blank
+  const pctForced = cfg.widget === 'text' && !cfg.text_time && !cfg.text_w_sys && !cfg.text_w_bat;   // text-only never goes blank
   const chip = (key, label, on, locked, badge) =>
     `<button class="chip${on ? ' on' : ''}${locked ? ' locked' : ''}"${locked ? '' : ` data-t="${key}"`} aria-pressed="${on}"><i class="cdot"></i>${label}${badge ? `<em>${badge}</em>` : ''}</button>`;
   return `
@@ -378,15 +378,16 @@ function menubarHTML() {
         : pctForced ? chip('pct', '잔량 %', true, true, '기본 표시')
         : chip('pct', '잔량 %', !!cfg.text_pct, false)}
       ${chip('time', '남은/완충 시간', !!cfg.text_time, false)}
-      ${chip('w', '전력 W', !!cfg.text_w, false)}
-      ${cfg.text_w ? `<span class="subseg"><button data-ws="sys" class="${cfg.w_src !== 'bat' ? 'on' : ''}">시스템</button><button data-ws="bat" class="${cfg.w_src === 'bat' ? 'on' : ''}">배터리</button></span>` : ''}
+      ${chip('wsys', '시스템 전력', !!cfg.text_w_sys, false)}
+      ${chip('wbat', '배터리 전력', !!cfg.text_w_bat, false)}
     </div>
     <div class="chiphint">${digitsIn ? '이 모양은 잔량 숫자를 아이콘 안에 그려요 — 옆 텍스트와 중복되지 않아요.'
       : pctForced ? '텍스트만 모양은 비워둘 수 없어 잔량을 기본 표시해요.'
-      : '켠 항목이 · 로 이어져 아이콘 옆에 붙어요. 시간은 계산될 때만 보여요.'}</div>
+      : '켠 항목이 · 로 이어져 아이콘 옆에 붙어요. 시스템·배터리 전력을 둘 다 켤 수도 있어요.'}</div>
     <div class="srow"><span>상태별 색상</span>${tglEl('colorize', cfg.colorize)}</div>
     ${cfg.widget === 'icon' ? `<div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>` : ''}
     ${cfg.widget === 'stack' ? `<div class="srow"><span>숫자 색·테두리</span>${tglEl('digit_deco', cfg.digit_deco)}</div>` : ''}
+    ${cfg.widget === 'wstack' ? `<div class="srow"><span>위 숫자 전력</span><span class="subseg"><button data-w7="sys" class="${cfg.w7_src !== 'bat' ? 'on' : ''}">시스템</button><button data-w7="bat" class="${cfg.w7_src === 'bat' ? 'on' : ''}">배터리</button></span></div>` : ''}
     <div class="srow"><span>열기 단축키 <kbd>⌥⌃B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>`;
 }
 
@@ -425,14 +426,16 @@ function composeTrayTitle(st) {
   const parts = [];
   if (cfg.text_pct && !widgetHasDigits(cfg.widget)) parts.push(`${Math.round(st.pct)}%`);
   if (cfg.text_time && st.min != null) parts.push(`${Math.floor(st.min / 60)}:${String(st.min % 60).padStart(2, '0')}`);
-  if (cfg.text_w) parts.push(`${(+(cfg.w_src === 'bat' ? st.batW : st.sysW) || 0).toFixed(1)}W`);
+  if (cfg.text_w_sys) parts.push(`${(+st.sysW || 0).toFixed(1)}W`);   // system & battery power are independent
+  if (cfg.text_w_bat) parts.push(`${(+st.batW || 0).toFixed(1)}W`);
   if (cfg.widget === 'text' && !parts.length) parts.push(`${Math.round(st.pct)}%`);
   return parts.join(' · ');
 }
 function glyphCanvas(styleKey, dispH, pixelated) {
   const set = pvData && pvData.glyphs && pvData.glyphs[pvSim];
   const variant = styleKey === 'icon' && cfg.glyph_xl ? 'icon_xl'
-    : styleKey === 'stack' && !cfg.digit_deco ? 'stack_plain' : styleKey;
+    : styleKey === 'stack' && !cfg.digit_deco ? 'stack_plain'
+    : styleKey === 'wstack' && cfg.w7_src === 'bat' ? 'wstack_bat' : styleKey;
   const g = set && set[variant];
   if (!g) return null;
   try {
@@ -473,13 +476,14 @@ async function pullPreview() {
   try { const r = await fetch('/api/tray-preview', { cache: 'no-store' }); if (r.ok) pvData = await r.json(); } catch { /* keep last */ }
   if (settingsOpen) renderPreviewZone();   // refresh strip/thumbs in place — no full re-render (would reset open selects)
 }
-// chips save as ONE patch (all 4 keys) so tray.json gains the full set at once — after the first
-// save neither side needs the legacy `info` fallback again.
+// chips save as ONE patch (all text keys) so tray.json gains the full set at once — after the
+// first save neither side needs the legacy `info`/`text_w` fallback again.
 function applyTextChip(k) {
-  const patch = { text_pct: !!cfg.text_pct, text_time: !!cfg.text_time, text_w: !!cfg.text_w, w_src: cfg.w_src === 'bat' ? 'bat' : 'sys' };
+  const patch = { text_pct: !!cfg.text_pct, text_time: !!cfg.text_time, text_w_sys: !!cfg.text_w_sys, text_w_bat: !!cfg.text_w_bat };
   if (k === 'pct') patch.text_pct = !patch.text_pct;
   else if (k === 'time') patch.text_time = !patch.text_time;
-  else if (k === 'w') patch.text_w = !patch.text_w;
+  else if (k === 'wsys') patch.text_w_sys = !patch.text_w_sys;   // system & battery power independent
+  else if (k === 'wbat') patch.text_w_bat = !patch.text_w_bat;
   cfg = { ...cfg, ...patch };
   render();
   fetch('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) }).catch(() => {});
@@ -615,10 +619,10 @@ $('pop').addEventListener('change', e => {
 $('pop').addEventListener('click', e => {
   const sim = e.target.closest('[data-sim]');          // preview state simulator (현재/충전/부족/저전력)
   if (sim) { pvSim = sim.dataset.sim; render(); return; }
+  const w7 = e.target.closest('[data-w7]');            // widget-7 power source (checked before [data-w])
+  if (w7) { applyCfg('w7_src', w7.dataset.w7); return; }
   const w = e.target.closest('[data-w]');              // widget shape gallery
   if (w) { applyCfg('widget', w.dataset.w); return; }
-  const ws = e.target.closest('[data-ws]');            // W source sub-segment — save via the full chip
-  if (ws) { cfg.w_src = ws.dataset.ws; applyTextChip(null); return; }   // patch so legacy files gain all 4 keys
   const t = e.target.closest('[data-t]');              // text item chips
   if (t) { applyTextChip(t.dataset.t); return; }
   const b = e.target.closest('.tgl'); if (!b) return;  // boolean toggle (settings)

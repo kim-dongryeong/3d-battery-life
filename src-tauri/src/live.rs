@@ -99,25 +99,39 @@ pub struct Cfg {
     // fall back to the legacy `info` enum (see title_items) so old configs keep their meaning.
     #[serde(default)] pub text_pct: Option<bool>,   // append "67%"
     #[serde(default)] pub text_time: Option<bool>,  // append "5:12" (time to empty/full, when known)
-    #[serde(default)] pub text_w: Option<bool>,     // append "7.4W"
-    #[serde(default)] pub w_src: Option<String>,    // which W: "sys" (SMC system draw) | "bat" (battery rail)
+    #[serde(default)] pub text_w: Option<bool>,     // LEGACY single power chip (with w_src) — superseded by text_w_sys/bat
+    #[serde(default)] pub w_src: Option<String>,    // LEGACY: which W the single chip meant ("sys" | "bat")
+    #[serde(default)] pub text_w_sys: Option<bool>, // append system power "7.4W"
+    #[serde(default)] pub text_w_bat: Option<bool>, // append battery-rail power "3.1W" (both may be on)
+    #[serde(default)] pub w7_src: Option<String>,   // widget "wstack" power source: "sys" | "bat"
     #[serde(default = "d_true")] pub digit_deco: bool, // stack digits: state color + outline (false = plain white)
 }
 
 impl Cfg {
-    // Effective title items as (pct, time, w, w_is_battery). New keys win; old files map the
-    // legacy 표시 텍스트 enum: 0 none · 1 % · 2 time · 3 sysW · 4 %+sysW · 5 %+time · 6 batW · 7 %+batW.
+    // Effective side-text items as (pct, time, w_sys, w_bat) — system & battery power are now
+    // INDEPENDENT (both can show). Precedence: explicit text_w_sys/bat > the old single text_w+w_src
+    // > the original 표시 텍스트 enum (0 none·1 %·2 time·3 sysW·4 %+sysW·5 %+time·6 batW·7 %+batW).
     pub fn title_items(&self) -> (bool, bool, bool, bool) {
-        if self.text_pct.is_none() && self.text_time.is_none() && self.text_w.is_none() {
+        // no chip keys at all → file predates the chips UI → map the legacy enum
+        if self.text_pct.is_none() && self.text_time.is_none() && self.text_w.is_none()
+            && self.text_w_sys.is_none() && self.text_w_bat.is_none() {
             let i = if self.info > 7 { 4 } else { self.info };
-            return (matches!(i, 1 | 4 | 5 | 7), matches!(i, 2 | 5), matches!(i, 3 | 4 | 6 | 7), matches!(i, 6 | 7));
+            return (matches!(i, 1 | 4 | 5 | 7), matches!(i, 2 | 5), matches!(i, 3 | 4), matches!(i, 6 | 7));
         }
-        (self.text_pct.unwrap_or(false), self.text_time.unwrap_or(false),
-         self.text_w.unwrap_or(false), self.w_src.as_deref() == Some("bat"))
+        let (w_sys, w_bat) = if self.text_w_sys.is_some() || self.text_w_bat.is_some() {
+            (self.text_w_sys.unwrap_or(false), self.text_w_bat.unwrap_or(false))
+        } else {   // migrate the old single power chip
+            let tw = self.text_w.unwrap_or(false);
+            let bat = self.w_src.as_deref() == Some("bat");
+            (tw && !bat, tw && bat)
+        };
+        (self.text_pct.unwrap_or(false), self.text_time.unwrap_or(false), w_sys, w_bat)
     }
     // styles that draw the % digits inside the glyph — the % title item is redundant there
     // (the settings UI shows this as a locked "아이콘에 포함" chip, so the rule is visible)
-    pub fn digits_in_icon(&self) -> bool { matches!(self.widget.as_str(), "combo" | "iconpct" | "stack") }
+    pub fn digits_in_icon(&self) -> bool { matches!(self.widget.as_str(), "combo" | "iconpct" | "stack" | "wstack") }
+    // widget "wstack": which power feeds the top number
+    pub fn w7_battery(&self) -> bool { self.w7_src.as_deref() == Some("bat") }
 }
 fn d_info() -> u8 { 4 }
 fn d_true() -> bool { true }
@@ -128,7 +142,7 @@ impl Default for Cfg {
     fn default() -> Self {
         Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: "icon".into(), glyph_xl: false, shortcut: true,
               text_pct: None, text_time: None, text_w: None, w_src: None,   // None → title_items falls back to `info`
-              digit_deco: true }
+              text_w_sys: None, text_w_bat: None, w7_src: None, digit_deco: true }
     }
 }
 pub fn cfg_path() -> std::path::PathBuf {
@@ -384,13 +398,14 @@ fn fill_color(l: &Live, colorize: bool, lpm: bool) -> (u8, u8, u8, u8) {
 //   "combo"   → battery FILLED by % + number overlaid + charge status (max info, min width)
 //   "stack"   → % number stacked ABOVE a mini filled battery (narrowest footprint)
 //   _ (icon)  → filled battery + charge status
-pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool, deco: bool) -> Option<(Vec<u8>, u32, u32)> {
+pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool, deco: bool, w_val: f64) -> Option<(Vec<u8>, u32, u32)> {
     match widget {
         "text" => None,
         "bar" => Some(bar_glyph(l, colorize, lpm)),
         "iconpct" => Some(battery_pct_icon(l, colorize, lpm)),
         "combo" => Some(combo_icon(l, colorize, lpm)),
         "stack" => Some(stack_icon(l, colorize, lpm, deco)),
+        "wstack" => Some(wstack_icon(l, colorize, lpm, w_val)),   // widget 7: power on top, level in battery
         _ => Some(battery_icon(l, colorize, xl, lpm)),
     }
 }
@@ -480,6 +495,31 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
     hi.down()
 }
 
+// Widget 7 ("wstack"): POWER on top (system or battery W, chosen in settings), a mini battery
+// below FILLED by level with the level % drawn inside it. Charging shows as the green fill (the
+// power number already conveys draw), so no bolt clutters the tight cell. `watt` = the resolved
+// power the ticker passes in (sys or battery per w7_src).
+pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64) -> (Vec<u8>, u32, u32) {
+    let (w, h) = (48u32, 36u32);   // a hair wider than stack so the level digits fit inside the battery
+    let mut hi = Hi::new(w, h);
+    let pct = l.pct.clamp(0.0, 100.0);
+    let fill = fill_color(l, colorize, lpm);
+    // top: power as real type ("31W"), hugging the ceiling
+    let wtxt = format!("{}W", w_val.max(0.0).round() as u32);
+    stamp_digits(&mut hi, &wtxt, 13.0, 24.0, 7.0, INK, true);
+    // bottom: mini rounded battery, fill by level, with the level % inside (combo-style)
+    let body_sh = (0u8, 0u8, 0u8, 95u8);
+    hi.stroke_rrect(1.0, 15.7, 45.0, 36.0, 5.0, 2.0, body_sh);
+    hi.fill_rrect(45.5, 22.2, 48.0, 28.2, 1.5, body_sh);
+    hi.stroke_rrect(1.0, 15.0, 45.0, 35.3, 5.0, 2.0, INK);
+    hi.fill_rrect(45.5, 21.5, 48.0, 27.5, 1.5, INK);
+    let fw = (40.0 * pct as f32 / 100.0).max(2.5);
+    hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
+    let digits = format!("{}", pct.round() as u32);
+    stamp_digits(&mut hi, &digits, 14.5, 23.0, 25.2, INK, true);   // level % inside the battery
+    hi.down()
+}
+
 // ---- menu-bar battery GLYPH (like Stats): a battery outline filling proportional to charge,
 // teal + bolt while charging, plug while plugged-and-holding. `xl` shrinks the vertical margin so
 // the body fills more of the canvas — since macOS scales the tray image to the menu-bar height,
@@ -520,13 +560,15 @@ fn b64(data: &[u8]) -> String {
     }
     s
 }
-fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
+fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool, sys_w: f64) -> (Vec<u8>, u32, u32) {
     match style {
         "icon_xl" => battery_icon(l, colorize, true, lpm),
         "combo" => combo_icon(l, colorize, lpm),
         "iconpct" => battery_pct_icon(l, colorize, lpm),
         "stack" => stack_icon(l, colorize, lpm, true),
         "stack_plain" => stack_icon(l, colorize, lpm, false),  // 민무늬 digits variant
+        "wstack" => wstack_icon(l, colorize, lpm, sys_w),          // widget 7 · system power
+        "wstack_bat" => wstack_icon(l, colorize, lpm, l.watts),    // widget 7 · battery power
         "bar" => bar_glyph(l, colorize, lpm),
         _ => battery_icon(l, colorize, false, lpm),
     }
@@ -547,9 +589,9 @@ pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
     let mut meta = serde_json::Map::new();
     for (name, l, is_lpm, sys_w) in &states {
         let mut styles = serde_json::Map::new();
-        for style in ["icon", "icon_xl", "combo", "iconpct", "stack", "stack_plain", "bar"] {
-            let (col, w, h) = render_style(style, l, true, *is_lpm);
-            let (mono, ..) = render_style(style, l, false, *is_lpm);
+        for style in ["icon", "icon_xl", "combo", "iconpct", "stack", "stack_plain", "wstack", "wstack_bat", "bar"] {
+            let (col, w, h) = render_style(style, l, true, *is_lpm, *sys_w);
+            let (mono, ..) = render_style(style, l, false, *is_lpm, *sys_w);
             styles.insert(style.into(), serde_json::json!({ "w": w, "h": h, "c": b64(&col), "m": b64(&mono) }));
         }
         glyphs.insert((*name).into(), styles.into());
@@ -590,12 +632,13 @@ pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64) -> String {
     if !l.ok {
         return String::new();
     }
-    let (pct_on, time_on, w_on, w_bat) = c.title_items();
+    let (pct_on, time_on, wsys_on, wbat_on) = c.title_items();
     let pct = l.pct.round() as i64;
     let mut parts: Vec<String> = Vec::new();
     if pct_on && !c.digits_in_icon() { parts.push(format!("{pct}%")); }
     if time_on && matches!(l.time_min, Some(m) if m > 0) { parts.push(time_str(l)); }
-    if w_on { parts.push(format!("{:.1}W", if w_bat { l.watts.abs() } else { sys_w })); }
+    if wsys_on { parts.push(format!("{sys_w:.1}W")); }        // system draw (SMC)
+    if wbat_on { parts.push(format!("{:.1}W", l.watts.abs())); }   // battery rail — both may show
     if c.widget == "text" && parts.is_empty() { parts.push(format!("{pct}%")); }   // no glyph to fall back on
     parts.join(" · ")
 }
@@ -616,11 +659,11 @@ mod tests {
             (0u8, (false, false, false, false)),
             (1, (true, false, false, false)),
             (2, (false, true, false, false)),
-            (3, (false, false, true, false)),
-            (4, (true, false, true, false)),
+            (3, (false, false, true, false)),   // sysW
+            (4, (true, false, true, false)),    // %+sysW
             (5, (true, true, false, false)),
-            (6, (false, false, true, true)),
-            (7, (true, false, true, true)),
+            (6, (false, false, false, true)),   // batW (independent from sys now)
+            (7, (true, false, false, true)),    // %+batW
             (99, (true, false, true, false)),   // out of range → default (4)
         ] {
             c.info = info;
@@ -630,6 +673,10 @@ mod tests {
         c.info = 0;
         c.text_time = Some(true);
         assert_eq!(c.title_items(), (false, true, false, false));
+        // system AND battery power can both be on (the new independent chips)
+        let both = Cfg { text_w_sys: Some(true), text_w_bat: Some(true), ..Cfg::default() };
+        assert_eq!(both.title_items(), (false, false, true, true));
+        assert_eq!(tray_title(&Live { ok: true, watts: 3.1, ..Default::default() }, &both, 7.4), "7.4W · 3.1W");
     }
 
     #[test]
@@ -674,7 +721,7 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("tray-preview.json")).unwrap()).unwrap();
         for s in ["cur", "chg", "low", "lpm"] {
             assert!(v["states"][s]["pct"].is_number(), "state {s}");
-            for g in ["icon", "icon_xl", "combo", "iconpct", "stack", "stack_plain", "bar"] {
+            for g in ["icon", "icon_xl", "combo", "iconpct", "stack", "stack_plain", "wstack", "wstack_bat", "bar"] {
                 let e = &v["glyphs"][s][g];
                 let n = (e["w"].as_u64().unwrap() * e["h"].as_u64().unwrap() * 4) as usize;
                 for k in ["c", "m"] {
