@@ -175,12 +175,20 @@ const DIGIT_SHADOW: (u8, u8, u8, u8) = (0, 0, 0, 140);  // soft backing for digi
 // they're vector shapes + real type. Here every glyph is rasterized at SS× the output buffer
 // with analytic rounded-rect/polygon inside-tests, digits are stamped from the SYSTEM FONT
 // (San Francisco via fontdue), and a box-downsample produces the anti-aliased result.
-const SS: i32 = 3;   // supersample factor (output buffers are already 2× logical)
+const SS: i32 = 3;   // supersample factor (AA quality)
+// Output DENSITY over the logical (18pt) layout. The menu-bar glyph is displayed at 22pt (we
+// enlarge it past tray-icon's 18pt cap), so a plain 18pt-dense image would upscale ~1.22× and
+// soften. Rendering 1.3× denser makes the image downscale at BOTH 18pt and 22pt → always crisp.
+// Layout coords stay in logical units; only the pixel buffer gets denser.
+const GLYPH_DENS: f32 = 1.30;
 
-struct Hi { w: i32, h: i32, buf: Vec<u8> }   // straight-alpha RGBA at output×SS
+struct Hi { w: i32, h: i32, buf: Vec<u8>, s: f32 }   // straight-alpha RGBA at (logical × s), s = SS·density
 impl Hi {
     fn new(w: u32, h: u32) -> Hi {
-        Hi { w: w as i32 * SS, h: h as i32 * SS, buf: vec![0; (w as usize * h as usize * (SS * SS) as usize) * 4] }
+        let s = SS as f32 * GLYPH_DENS;
+        let bw = (((w as f32 * s).round() as i32) / SS).max(1) * SS;   // divisible by SS
+        let bh = (((h as f32 * s).round() as i32) / SS).max(1) * SS;
+        Hi { w: bw, h: bh, buf: vec![0u8; (bw * bh * 4) as usize], s }
     }
     fn blend(&mut self, x: i32, y: i32, c: (u8, u8, u8, u8), cov: f32) {
         if x < 0 || y < 0 || x >= self.w || y >= self.h || cov <= 0.0 { return; }
@@ -198,7 +206,7 @@ impl Hi {
     }
     // coords below are in OUTPUT units (f32) — scaled to the supersample grid internally
     fn fill_rrect(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r: f32, c: (u8, u8, u8, u8)) {
-        let s = SS as f32;
+        let s = self.s;
         let (hx0, hy0, hx1, hy1) = (x0 * s, y0 * s, x1 * s, y1 * s);
         let r = (r * s).min((hx1 - hx0) / 2.0).min((hy1 - hy0) / 2.0).max(0.0);
         for y in (hy0.floor() as i32).max(0)..(hy1.ceil() as i32).min(self.h) {
@@ -208,7 +216,7 @@ impl Hi {
         }
     }
     fn stroke_rrect(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r: f32, sw: f32, c: (u8, u8, u8, u8)) {
-        let s = SS as f32;
+        let s = self.s;
         let (hx0, hy0, hx1, hy1) = (x0 * s, y0 * s, x1 * s, y1 * s);
         let r = (r * s).min((hx1 - hx0) / 2.0).min((hy1 - hy0) / 2.0).max(0.0);
         let sw = sw * s;
@@ -223,7 +231,7 @@ impl Hi {
         }
     }
     fn fill_poly(&mut self, pts: &[(f32, f32)], c: (u8, u8, u8, u8)) {
-        let s = SS as f32;
+        let s = self.s;
         let p: Vec<(f32, f32)> = pts.iter().map(|&(x, y)| (x * s, y * s)).collect();
         let (x0, x1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.0), a.1.max(q.0)));
         let (y0, y1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.1), a.1.max(q.1)));
@@ -290,12 +298,12 @@ fn sys_font() -> Option<&'static fontdue::Font> {
 }
 fn stamp_text(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8)) -> bool {
     let Some(f) = sys_font() else { return false };
-    let px = size * SS as f32;
+    let px = size * hi.s;
     let gs: Vec<(fontdue::Metrics, Vec<u8>)> = text.chars().map(|ch| f.rasterize(ch, px)).collect();
     let total: f32 = gs.iter().map(|(m, _)| m.advance_width).sum();
     let cap = gs.iter().map(|(m, _)| m.height).max().unwrap_or(0) as f32;
-    let left = cx * SS as f32 - total / 2.0;
-    let top = cy * SS as f32 - cap / 2.0;
+    let left = cx * hi.s - total / 2.0;
+    let top = cy * hi.s - cap / 2.0;
     let mut pen = left;
     for (m, bm) in &gs {
         let gx = (pen + m.xmin as f32).round() as i32;

@@ -318,6 +318,11 @@ fn main() {
                                 None => { let _ = tray.set_icon(None); }   // text-only widget
                             }
                         }
+                        // enlarge past tray-icon's 18pt cap on the main thread — runs after the
+                        // set_icon above re-applied the 18pt image (both marshal to the main thread,
+                        // FIFO). Idempotent (skips if already at target), so a plain title-only tick
+                        // keeps the size too. No-op/graceful if the status button can't be located.
+                        let _ = handle.run_on_main_thread(|| grow_menu_glyph(MENU_GLYPH_H));
                     }
                     // settings-panel preview bridge: dump the real glyph renders (all styles ×
                     // color/mono × normal/XL) when their inputs change (~every 1% of battery).
@@ -454,6 +459,38 @@ fn round_popover_window(w: &tauri::WebviewWindow) {
         let layer: *mut Object = msg_send![content_view, layer];
         let _: () = msg_send![layer, setCornerRadius: 34.0_f64];
         let _: () = msg_send![layer, setMasksToBounds: YES];
+    }
+}
+
+// Grow the menu-bar glyph beyond tray-icon's hardcoded 18pt. tray-icon sizes the NSImage to
+// 18pt on every set_icon, leaving the top ~4pt of the menu bar unused (Stats fills it). We can't
+// reach Tauri's NSStatusItem (it's private), so we find our status button in the app's own window
+// tree (NSStatusBarButton is a public class) and enlarge its image to `target_h` points, keeping
+// aspect. Fully isolated: if the button isn't found the glyph just stays 18pt — the tray's
+// click/menu behaviour is never touched. Must run on the main thread.
+const MENU_GLYPH_H: f64 = 22.0;   // menu-bar content height on modern macOS (~24pt bar − padding)
+fn grow_menu_glyph(target_h: f64) {
+    use objc2_app_kit::{NSApplication, NSStatusBarButton, NSView};
+    use objc2_foundation::{MainThreadMarker, NSSize};
+    let Some(mtm) = MainThreadMarker::new() else { return };   // no-op off the main thread
+    // resize in place when the status button is reached → no need to own (retain) it
+    fn resize(view: &NSView, target_h: f64) -> bool {
+        if let Some(btn) = view.downcast_ref::<NSStatusBarButton>() {
+            if let Some(img) = unsafe { btn.image() } {
+                let sz = img.size();
+                if sz.height > 1.0 && (sz.height - target_h).abs() > 0.5 {
+                    img.setSize(NSSize::new(sz.width * target_h / sz.height, target_h));
+                    unsafe { btn.setNeedsDisplay() };
+                }
+            }
+            return true;
+        }
+        for sub in view.subviews().iter() { if resize(&sub, target_h) { return true; } }
+        false
+    }
+    let app = NSApplication::sharedApplication(mtm);
+    for win in app.windows().iter() {
+        if let Some(cv) = win.contentView() { if resize(&cv, target_h) { return; } }
     }
 }
 
