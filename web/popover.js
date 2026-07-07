@@ -362,8 +362,8 @@ const widgetHasDigits = w => w === 'combo' || w === 'iconpct' || w === 'stack' |
 function menubarHTML() {
   const digitsIn = widgetHasDigits(cfg.widget);
   const pctForced = cfg.widget === 'text' && !cfg.text_time && !cfg.text_w_sys && !cfg.text_w_bat;   // text-only never goes blank
-  const chip = (key, label, on, locked, badge) =>
-    `<button class="chip${on ? ' on' : ''}${locked ? ' locked' : ''}"${locked ? '' : ` data-t="${key}"`} aria-pressed="${on}"><i class="cdot"></i>${label}${badge ? `<em>${badge}</em>` : ''}</button>`;
+  const chip = (key, label, on, locked, badge, tip) =>
+    `<button class="chip${on ? ' on' : ''}${locked ? ' locked' : ''}"${locked ? '' : ` data-t="${key}"`} aria-pressed="${on}"${tip ? ` title="${tip}"` : ''}><i class="cdot"></i>${label}${badge ? `<em>${badge}</em>` : ''}</button>`;
   return `
     <div class="sec">메뉴바</div>
     <div class="pvstrip" id="pvstrip"></div>
@@ -379,11 +379,12 @@ function menubarHTML() {
         : chip('pct', '잔량 %', !!cfg.text_pct, false)}
       ${chip('time', '남은/완충 시간', !!cfg.text_time, false)}
       ${chip('wsys', '시스템 전력', !!cfg.text_w_sys, false)}
-      ${chip('wbat', '배터리 전력', !!cfg.text_w_bat, false)}
+      ${chip('wbat', '배터리 전력', !!cfg.text_w_bat, false, null, '양수(+)는 충전, 음수(−)는 방전 — 배터리로 드나드는 전력')}
     </div>
     <div class="chiphint">${digitsIn ? '이 모양은 잔량 숫자를 아이콘 안에 그려요 — 옆 텍스트와 중복되지 않아요.'
       : pctForced ? '텍스트만 모양은 비워둘 수 없어 잔량을 기본 표시해요.'
       : '켠 항목이 · 로 이어져 아이콘 옆에 붙어요. 시스템·배터리 전력을 둘 다 켤 수도 있어요.'}</div>
+    ${(cfg.text_w_bat || (cfg.widget === 'wstack' && cfg.w7_src === 'bat')) ? '<div class="chiphint signhint">배터리 전력은 부호로 방향을 나타내요 — 양수(+)는 충전, 음수(−)는 방전. 시스템 전력은 항상 양수(소비)예요.</div>' : ''}
     <div class="srow"><span>상태별 색상</span>${tglEl('colorize', cfg.colorize)}</div>
     ${cfg.widget === 'icon' ? `<div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>` : ''}
     ${cfg.widget === 'stack' ? `<div class="srow"><span>숫자 색·테두리</span>${tglEl('digit_deco', cfg.digit_deco)}</div>` : ''}
@@ -420,14 +421,16 @@ function pvState() {
   // pct comes from the DUMP (the tray's own number) so the strip text can never disagree with
   // the glyph digits next to it; W/time are live (they move every tick, cosmetic for preview)
   const trayPct = pvData && pvData.states && pvData.states.cur ? pvData.states.cur.pct : null;
-  return { pct: trayPct ?? s.pct ?? 0, min: s.timeRemain ?? null, sysW: s.systemW ?? s.watts ?? 0, batW: Math.abs(s.powerW ?? 0) };
+  // batW is SIGNED (+charge/−discharge): powerW from /api/live is signed; dump meta is signed too
+  return { pct: trayPct ?? s.pct ?? 0, min: s.timeRemain ?? null, sysW: s.systemW ?? s.watts ?? 0, batW: +s.powerW || 0 };
 }
+const fmtSignedW = n => Math.abs(n) < 0.05 ? '0.0W' : `${n > 0 ? '+' : '−'}${Math.abs(n).toFixed(1)}W`;
 function composeTrayTitle(st) {
   const parts = [];
   if (cfg.text_pct && !widgetHasDigits(cfg.widget)) parts.push(`${Math.round(st.pct)}%`);
   if (cfg.text_time && st.min != null) parts.push(`${Math.floor(st.min / 60)}:${String(st.min % 60).padStart(2, '0')}`);
-  if (cfg.text_w_sys) parts.push(`${(+st.sysW || 0).toFixed(1)}W`);   // system & battery power are independent
-  if (cfg.text_w_bat) parts.push(`${(+st.batW || 0).toFixed(1)}W`);
+  if (cfg.text_w_sys) parts.push(`${(+st.sysW || 0).toFixed(1)}W`);   // system draw — always ≥0
+  if (cfg.text_w_bat) parts.push(fmtSignedW(+st.batW || 0));           // battery rail — signed
   if (cfg.widget === 'text' && !parts.length) parts.push(`${Math.round(st.pct)}%`);
   return parts.join(' · ');
 }

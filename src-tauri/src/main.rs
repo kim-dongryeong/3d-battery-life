@@ -309,15 +309,16 @@ fn main() {
                         // ALWAYS Some(…): set_title(None) leaves the previous text in place on
                         // macOS, so turning the last 텍스트 chip off left a zombie "9.8W" behind
                         let _ = tray.set_title(Some(title));
-                        // widget "wstack" draws a live power number → resolve it (sys or battery per
-                        // w7_src) and fold it (rounded) into the redraw key so the glyph updates as W moves
-                        let w7 = if c.w7_battery() { l.watts.abs() } else { sys_w.unwrap_or(l.watts) };
-                        let wkey = if c.widget == "wstack" { (w7.max(0.0)).round() as i64 } else { 0 };
+                        // widget "wstack" draws a live power number → resolve it (sys plain, battery
+                        // SIGNED +charge/−discharge per w7_src) and fold it (rounded) into the redraw key
+                        let w7_bat = c.w7_battery();
+                        let w7 = if w7_bat { live::signed_watts(&l) } else { sys_w.unwrap_or(l.watts) };
+                        let wkey = if c.widget == "wstack" { w7.round() as i64 } else { 0 };
                         // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/digit deco/wstack W)
                         let key = format!("{}-{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco, wkey);
                         if l.ok && key != last_key {
                             last_key = key;
-                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7) {
+                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat) {
                                 Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
                                 None => { let _ = tray.set_icon(None); }   // text-only widget
                             }
@@ -432,15 +433,25 @@ fn show_main(app: &AppHandle) {
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
-        // Promoting Accessory→Regular does NOT make the app frontmost by itself — the window would open
-        // BEHIND the current app and land last in ⌘Tab. Explicitly activate so it behaves like a normal
-        // app (comes to front, normal ⌘Tab order). Must run after the policy switch.
+        // Promoting Accessory→Regular does NOT make the app frontmost by itself, and activating in the
+        // SAME runloop turn as the policy switch is ignored by modern macOS → the app lands LAST in ⌘Tab.
+        // Defer the activation one turn (run_on_main_thread posts to the next loop iteration) and use
+        // NSRunningApplication.activateWithOptions (the non-deprecated path) so it registers as active.
         #[cfg(target_os = "macos")]
-        unsafe {
-            use objc::runtime::{Object, YES};
-            use objc::{class, msg_send, sel, sel_impl};
-            let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-            let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
+        {
+            let h = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Some(w) = h.get_webview_window("main") { let _ = w.set_focus(); }
+                unsafe {
+                    use objc::runtime::{Object, YES};
+                    use objc::{class, msg_send, sel, sel_impl};
+                    let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+                    let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
+                    // NSApplicationActivateAllWindows(1) | NSApplicationActivateIgnoringOtherApps(2)
+                    let cur: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
+                    let _: () = msg_send![cur, activateWithOptions: 3u64];
+                }
+            });
         }
     }
 }

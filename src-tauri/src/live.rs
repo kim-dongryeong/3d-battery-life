@@ -163,6 +163,17 @@ fn time_str(l: &Live) -> String {
     }
 }
 
+// SIGNED battery power for display — Live.watts is a magnitude, so the sign is reconstructed from
+// state: + while charging (into the battery), − while discharging (out), 0 when idle/full.
+pub fn signed_watts(l: &Live) -> f64 {
+    if l.charging { l.watts } else if l.discharging { -l.watts } else { 0.0 }
+}
+// "+3.1W" / "−2.4W" / "0.0W" — one decimal, explicit sign so charge vs discharge reads at a glance
+fn fmt_signed_w(w: f64) -> String {
+    if w.abs() < 0.05 { "0.0W".into() }
+    else { format!("{}{:.1}W", if w > 0.0 { "+" } else { "−" }, w.abs()) }
+}
+
 // macOS's DISPLAYED battery % (`pmset -g batt` → "… 67%; discharging …"). starship's energy-ratio
 // % can sit 1–2% off the number macOS itself shows — the tray digits must match the system's own
 // figure (and the popover's ioreg %), so when this parses the ticker overrides Live.pct with it.
@@ -398,14 +409,14 @@ fn fill_color(l: &Live, colorize: bool, lpm: bool) -> (u8, u8, u8, u8) {
 //   "combo"   → battery FILLED by % + number overlaid + charge status (max info, min width)
 //   "stack"   → % number stacked ABOVE a mini filled battery (narrowest footprint)
 //   _ (icon)  → filled battery + charge status
-pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool, deco: bool, w_val: f64) -> Option<(Vec<u8>, u32, u32)> {
+pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool, deco: bool, w_val: f64, w_signed: bool) -> Option<(Vec<u8>, u32, u32)> {
     match widget {
         "text" => None,
         "bar" => Some(bar_glyph(l, colorize, lpm)),
         "iconpct" => Some(battery_pct_icon(l, colorize, lpm)),
         "combo" => Some(combo_icon(l, colorize, lpm)),
         "stack" => Some(stack_icon(l, colorize, lpm, deco)),
-        "wstack" => Some(wstack_icon(l, colorize, lpm, w_val)),   // widget 7: power on top, level in battery
+        "wstack" => Some(wstack_icon(l, colorize, lpm, w_val, w_signed)),   // widget 7: power on top, level in battery
         _ => Some(battery_icon(l, colorize, xl, lpm)),
     }
 }
@@ -499,14 +510,17 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
 // below FILLED by level with the level % drawn inside it. Charging shows as the green fill (the
 // power number already conveys draw), so no bolt clutters the tight cell. `watt` = the resolved
 // power the ticker passes in (sys or battery per w7_src).
-pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64) -> (Vec<u8>, u32, u32) {
+pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (48u32, 36u32);   // a hair wider than stack so the level digits fit inside the battery
     let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-    // top: power as real type ("31W"), hugging the ceiling
-    let wtxt = format!("{}W", w_val.max(0.0).round() as u32);
-    stamp_digits(&mut hi, &wtxt, 13.0, 24.0, 7.0, INK, true);
+    // top: power as real type — battery source is SIGNED (+charge/−discharge), system source plain
+    let wtxt = if signed {
+        let n = w_val.round() as i64;
+        if n == 0 { "0W".into() } else { format!("{}{}W", if n > 0 { "+" } else { "−" }, n.abs()) }
+    } else { format!("{}W", w_val.max(0.0).round() as u32) };
+    stamp_digits(&mut hi, &wtxt, 15.5, 24.0, 6.6, INK, true);
     // bottom: mini rounded battery, fill by level, with the level % inside (combo-style)
     let body_sh = (0u8, 0u8, 0u8, 95u8);
     hi.stroke_rrect(1.0, 15.7, 45.0, 36.0, 5.0, 2.0, body_sh);
@@ -516,7 +530,7 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64) -> (Vec<u8>,
     let fw = (40.0 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
     let digits = format!("{}", pct.round() as u32);
-    stamp_digits(&mut hi, &digits, 14.5, 23.0, 25.2, INK, true);   // level % inside the battery
+    stamp_digits(&mut hi, &digits, 16.2, 23.0, 25.3, INK, true);   // level % inside the battery
     hi.down()
 }
 
@@ -567,15 +581,15 @@ fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool, sys_w: f64) ->
         "iconpct" => battery_pct_icon(l, colorize, lpm),
         "stack" => stack_icon(l, colorize, lpm, true),
         "stack_plain" => stack_icon(l, colorize, lpm, false),  // 민무늬 digits variant
-        "wstack" => wstack_icon(l, colorize, lpm, sys_w),          // widget 7 · system power
-        "wstack_bat" => wstack_icon(l, colorize, lpm, l.watts),    // widget 7 · battery power
+        "wstack" => wstack_icon(l, colorize, lpm, sys_w, false),            // widget 7 · system power (plain)
+        "wstack_bat" => wstack_icon(l, colorize, lpm, signed_watts(l), true), // widget 7 · battery power (signed)
         "bar" => bar_glyph(l, colorize, lpm),
         _ => battery_icon(l, colorize, false, lpm),
     }
 }
 pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
     let mk = |pct: f64, charging: bool, min: i64, w: f64| Live {
-        ok: true, pct, charging, time_min: Some(min), watts: w, ..Default::default()
+        ok: true, pct, charging, discharging: !charging, time_min: Some(min), watts: w, ..Default::default()
     };
     // fixed demo states so the panel can preview 충전/부족/저전력 without waiting for them; the
     // popover composes the "cur" state's text from /api/live, so no live numbers are needed here
@@ -597,7 +611,7 @@ pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
         glyphs.insert((*name).into(), styles.into());
         meta.insert((*name).into(), serde_json::json!({
             "pct": l.pct.round(), "charging": l.charging, "full": l.full, "lpm": is_lpm,
-            "min": l.time_min, "sysW": sys_w, "batW": l.watts,
+            "min": l.time_min, "sysW": sys_w, "batW": signed_watts(l),   // SIGNED (+charge/−discharge)
         }));
     }
     let out = serde_json::json!({ "states": meta, "glyphs": glyphs }).to_string();
@@ -637,8 +651,8 @@ pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64) -> String {
     let mut parts: Vec<String> = Vec::new();
     if pct_on && !c.digits_in_icon() { parts.push(format!("{pct}%")); }
     if time_on && matches!(l.time_min, Some(m) if m > 0) { parts.push(time_str(l)); }
-    if wsys_on { parts.push(format!("{sys_w:.1}W")); }        // system draw (SMC)
-    if wbat_on { parts.push(format!("{:.1}W", l.watts.abs())); }   // battery rail — both may show
+    if wsys_on { parts.push(format!("{sys_w:.1}W")); }        // system draw (SMC) — always ≥0
+    if wbat_on { parts.push(fmt_signed_w(signed_watts(l))); }   // battery rail — SIGNED (+charge/−discharge)
     if c.widget == "text" && parts.is_empty() { parts.push(format!("{pct}%")); }   // no glyph to fall back on
     parts.join(" · ")
 }
@@ -648,7 +662,7 @@ mod tests {
     use super::*;
 
     fn live(pct: f64, min: Option<i64>, watts: f64) -> Live {
-        Live { ok: true, pct, watts, time_min: min, ..Default::default() }
+        Live { ok: true, pct, watts, discharging: watts > 0.0, time_min: min, ..Default::default() }
     }
 
     // old tray.json (no text_* keys) must keep its legacy `info` meaning through title_items
@@ -673,10 +687,13 @@ mod tests {
         c.info = 0;
         c.text_time = Some(true);
         assert_eq!(c.title_items(), (false, true, false, false));
-        // system AND battery power can both be on (the new independent chips)
+        // system AND battery power can both be on (the new independent chips); battery is SIGNED
         let both = Cfg { text_w_sys: Some(true), text_w_bat: Some(true), ..Cfg::default() };
         assert_eq!(both.title_items(), (false, false, true, true));
-        assert_eq!(tray_title(&Live { ok: true, watts: 3.1, ..Default::default() }, &both, 7.4), "7.4W · 3.1W");
+        let dis = Live { ok: true, watts: 3.1, discharging: true, ..Default::default() };
+        assert_eq!(tray_title(&dis, &both, 7.4), "7.4W · −3.1W");   // discharging → negative
+        let chg = Live { ok: true, watts: 3.1, charging: true, ..Default::default() };
+        assert_eq!(tray_title(&chg, &both, 7.4), "7.4W · +3.1W");   // charging → positive
     }
 
     #[test]
@@ -685,11 +702,11 @@ mod tests {
         let mut c = Cfg { text_pct: Some(true), text_time: Some(true), text_w: Some(true), ..Cfg::default() };
         assert_eq!(tray_title(&l, &c, 9.96), "67% · 5:12 · 10.0W");
         c.w_src = Some("bat".into());
-        assert_eq!(tray_title(&l, &c, 9.96), "67% · 5:12 · 7.4W");
+        assert_eq!(tray_title(&l, &c, 9.96), "67% · 5:12 · −7.4W");   // battery discharging → negative
         c.widget = "combo".into();                                   // % drawn in the glyph → skipped in text
-        assert_eq!(tray_title(&l, &c, 9.96), "5:12 · 7.4W");
+        assert_eq!(tray_title(&l, &c, 9.96), "5:12 · −7.4W");
         let idle = live(67.4, None, 0.0);                            // unknown countdown → time part skipped
-        assert_eq!(tray_title(&idle, &c, 9.96), "0.0W");
+        assert_eq!(tray_title(&idle, &c, 9.96), "0.0W");             // no flow → unsigned zero
         let mut t = Cfg { text_pct: Some(false), text_time: Some(false), text_w: Some(false), ..Cfg::default() };
         t.widget = "text".into();                                    // text-only never goes blank
         assert_eq!(tray_title(&l, &t, 9.96), "67%");

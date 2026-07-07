@@ -192,6 +192,8 @@
   "넓음": "Wide", "최다 정보": "Most info", "macOS풍": "macOS-style", "전력+잔량": "Power + level",
   "좁음": "Narrow", "가장 좁음": "Narrowest", "아이콘 없음": "No icon",
   "시스템 전력": "System power", "배터리 전력": "Battery power", "위 숫자 전력": "Top number power",
+  "양수(+)는 충전, 음수(−)는 방전 — 배터리로 드나드는 전력": "Positive (+) = charging, negative (−) = discharging — power in/out of the battery",
+  "배터리 전력은 부호로 방향을 나타내요 — 양수(+)는 충전, 음수(−)는 방전. 시스템 전력은 항상 양수(소비)예요.": "Battery power is signed — positive (+) charging, negative (−) discharging. System power is always positive (consumption).",
   "잔량 %": "Level %", "남은/완충 시간": "Time to empty/full", "숫자 색·테두리": "Number color & outline",
   "아이콘에 포함": "in the icon", "기본 표시": "always on", "부족": "Low",
   "점유 폭": "Width", "미리보기 준비 중…": "Preparing preview…",
