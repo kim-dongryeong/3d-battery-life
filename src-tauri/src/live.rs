@@ -1,5 +1,5 @@
 // Native live battery read for the menu-bar tray title (Stats-parity live glance).
-// Uses `starship-battery` (IOKit under the hood, ~0.4ms) so the 1s ticker never spawns a subprocess.
+// Uses `starship-battery` (IOKit under the hood, ~0.4ms) so the 2s ticker never spawns a subprocess.
 // The rich popover reads the node server's /api/live (fresh ioreg sample) instead — this module only
 // needs enough for the tray title: level %, power (W), and charge state.
 use starship_battery::units::{
@@ -103,7 +103,7 @@ pub struct Cfg {
     #[serde(default)] pub w_src: Option<String>,    // LEGACY: which W the single chip meant ("sys" | "bat")
     #[serde(default)] pub text_w_sys: Option<bool>, // append system power "7.4W"
     #[serde(default)] pub text_w_bat: Option<bool>, // append battery-rail power "3.1W" (both may be on)
-    #[serde(default)] pub w7_src: Option<String>,   // legacy widget-7 source; kept so old tray.json files deserialize
+    #[serde(default)] pub w7_src: Option<String>,   // widget "wstack" power source: "sys" | "bat"
     #[serde(default = "d_true")] pub digit_deco: bool, // stack digits: state color + outline (false = plain white)
 }
 
@@ -130,6 +130,8 @@ impl Cfg {
     // styles that draw the % digits inside the glyph — the % title item is redundant there
     // (the settings UI shows this as a locked "아이콘에 포함" chip, so the rule is visible)
     pub fn digits_in_icon(&self) -> bool { matches!(self.widget.as_str(), "combo" | "iconpct" | "stack" | "wstack") }
+    // widget "wstack": which power feeds the top number
+    pub fn w7_battery(&self) -> bool { self.w7_src.as_deref() == Some("bat") }
 }
 fn d_info() -> u8 { 4 }
 fn d_true() -> bool { true }
@@ -166,31 +168,10 @@ fn time_str(l: &Live) -> String {
 pub fn signed_watts(l: &Live) -> f64 {
     if l.charging { l.watts } else if l.discharging { -l.watts } else { 0.0 }
 }
-// Menu-bar battery power display source:
-// charging = adapter input (PDTR) − system draw (PSTR), discharging = −PPBR.
-// Falls back to starship's battery energy_rate when the SMC bridge is unavailable.
-pub fn smc_display_battery_watts(l: &Live, sys_w: Option<f64>, adapter_w: Option<f64>, ppbr_w: Option<f64>) -> f64 {
-    if l.charging {
-        if let (Some(adp), Some(sys)) = (adapter_w, sys_w) { return adp - sys; }
-    } else if l.discharging {
-        if let Some(ppbr) = ppbr_w { return -ppbr.abs(); }
-    } else {
-        return 0.0;
-    }
-    signed_watts(l)
-}
 // "+3.1W" / "−2.4W" / "0.0W" — one decimal, explicit sign so charge vs discharge reads at a glance
 fn fmt_signed_w(w: f64) -> String {
     if w.abs() < 0.05 { "0.0W".into() }
     else { format!("{}{:.1}W", if w > 0.0 { "+" } else { "−" }, w.abs()) }
-}
-fn fmt_wstack_watts(w: f64, signed: bool) -> String {
-    let tenth = (w.abs() * 10.0 + 1e-9).trunc() / 10.0;
-    if signed {
-        if tenth < 0.1 { "0.0W".into() } else { format!("{}{tenth:.1}W", if w > 0.0 { "+" } else { "−" }) }
-    } else {
-        format!("{tenth:.1}W")
-    }
 }
 
 // macOS's DISPLAYED battery % (`pmset -g batt` → "… 67%; discharging …"). starship's energy-ratio
@@ -248,18 +229,6 @@ impl Hi {
         }
         self.buf[i + 3] = (oa * 255.0).round() as u8;
     }
-    fn clear(&mut self, x: i32, y: i32, cov: f32) {
-        if x < 0 || y < 0 || x >= self.w || y >= self.h || cov <= 0.0 { return; }
-        let i = ((y * self.w + x) * 4) as usize;
-        let keep = 1.0 - cov.min(1.0);
-        let a = (self.buf[i + 3] as f32 * keep).round().clamp(0.0, 255.0) as u8;
-        if a == 0 {
-            self.buf[i] = 0;
-            self.buf[i + 1] = 0;
-            self.buf[i + 2] = 0;
-        }
-        self.buf[i + 3] = a;
-    }
     // coords below are in OUTPUT units (f32) — scaled to the supersample grid internally
     fn fill_rrect(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r: f32, c: (u8, u8, u8, u8)) {
         let s = self.s;
@@ -268,16 +237,6 @@ impl Hi {
         for y in (hy0.floor() as i32).max(0)..(hy1.ceil() as i32).min(self.h) {
             for x in (hx0.floor() as i32).max(0)..(hx1.ceil() as i32).min(self.w) {
                 if in_rr(x as f32 + 0.5, y as f32 + 0.5, hx0, hy0, hx1, hy1, r) { self.blend(x, y, c, 1.0); }
-            }
-        }
-    }
-    fn clear_rrect(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r: f32) {
-        let s = self.s;
-        let (hx0, hy0, hx1, hy1) = (x0 * s, y0 * s, x1 * s, y1 * s);
-        let r = (r * s).min((hx1 - hx0) / 2.0).min((hy1 - hy0) / 2.0).max(0.0);
-        for y in (hy0.floor() as i32).max(0)..(hy1.ceil() as i32).min(self.h) {
-            for x in (hx0.floor() as i32).max(0)..(hx1.ceil() as i32).min(self.w) {
-                if in_rr(x as f32 + 0.5, y as f32 + 0.5, hx0, hy0, hx1, hy1, r) { self.clear(x, y, 1.0); }
             }
         }
     }
@@ -313,26 +272,6 @@ impl Hi {
                     j = i;
                 }
                 if inside { self.blend(x, y, c, 1.0); }
-            }
-        }
-    }
-    fn clear_poly(&mut self, pts: &[(f32, f32)]) {
-        let s = self.s;
-        let p: Vec<(f32, f32)> = pts.iter().map(|&(x, y)| (x * s, y * s)).collect();
-        let (x0, x1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.0), a.1.max(q.0)));
-        let (y0, y1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.1), a.1.max(q.1)));
-        for y in (y0.floor() as i32).max(0)..(y1.ceil() as i32).min(self.h) {
-            for x in (x0.floor() as i32).max(0)..(x1.ceil() as i32).min(self.w) {
-                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-                let mut inside = false;
-                let mut j = p.len() - 1;
-                for i in 0..p.len() {
-                    let (xi, yi) = p[i];
-                    let (xj, yj) = p[j];
-                    if (yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi { inside = !inside; }
-                    j = i;
-                }
-                if inside { self.clear(x, y, 1.0); }
             }
         }
     }
@@ -382,7 +321,7 @@ fn sys_font() -> Option<&'static fontdue::Font> {
         None
     }).as_ref()
 }
-fn raster_text<F: FnMut(&mut Hi, i32, i32, f32)>(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, mut paint: F) -> bool {
+fn stamp_text(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8)) -> bool {
     let Some(f) = sys_font() else { return false };
     let px = size * hi.s;
     let gs: Vec<(fontdue::Metrics, Vec<u8>)> = text.chars().map(|ch| f.rasterize(ch, px)).collect();
@@ -396,26 +335,12 @@ fn raster_text<F: FnMut(&mut Hi, i32, i32, f32)>(hi: &mut Hi, text: &str, size: 
         let gy = (top + cap - m.height as f32 - m.ymin as f32).round() as i32;
         for row in 0..m.height {
             for col in 0..m.width {
-                paint(hi, gx + col as i32, gy + row as i32, bm[row * m.width + col] as f32 / 255.0);
+                hi.blend(gx + col as i32, gy + row as i32, c, bm[row * m.width + col] as f32 / 255.0);
             }
         }
         pen += m.advance_width;
     }
     true
-}
-fn stamp_text(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8)) -> bool {
-    raster_text(hi, text, size, cx, cy, |hi, x, y, cov| hi.blend(x, y, c, cov))
-}
-fn clear_text(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32) -> bool {
-    raster_text(hi, text, size, cx, cy, |hi, x, y, cov| hi.clear(x, y, cov))
-}
-const CUTOUT_OFFSETS: [(f32, f32); 12] = [
-    (1.35, 0.0), (-1.35, 0.0), (0.0, 1.35), (0.0, -1.35),
-    (0.95, 0.95), (-0.95, 0.95), (0.95, -0.95), (-0.95, -0.95),
-    (0.68, 0.0), (-0.68, 0.0), (0.0, 0.68), (0.0, -0.68),
-];
-fn clear_text_outline(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32) {
-    for (dx, dy) in CUTOUT_OFFSETS { let _ = clear_text(hi, text, size, cx + dx, cy + dy); }
 }
 // digits with the tray's soft shadow; pixel-font fallback keeps the tray alive without a font
 fn stamp_digits(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8), shadow: bool) {
@@ -441,43 +366,11 @@ fn stamp_digits(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8
         x += dw;
     }
 }
-fn stamp_digits_cutout(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8)) {
-    if sys_font().is_some() {
-        clear_text_outline(hi, text, size, cx, cy);
-        let _ = stamp_text(hi, text, size, cx, cy, c);
-        return;
-    }
-    let b = size / 7.0;
-    let dw = 6.0 * b;
-    let total = text.len() as f32 * dw - b;
-    let mut x = cx - total / 2.0;
-    let y0 = cy - 3.5 * b;
-    for ch in text.chars() {
-        let g = DIGITS57[(ch as u8).wrapping_sub(b'0') as usize % 10];
-        for (row, bits) in g.iter().enumerate() {
-            for col in 0..5 {
-                if bits & (1 << (4 - col)) != 0 {
-                    let px = x + col as f32 * b;
-                    let py = y0 + row as f32 * b;
-                    hi.clear_rrect(px - 1.0, py - 1.0, px + b + 1.0, py + b + 1.0, 0.0);
-                    hi.fill_rrect(px, py, px + b, py + b, 0.0, c);
-                }
-            }
-        }
-        x += dw;
-    }
-}
 // charge-state overlays: the SF-style bolt + plug, white over a soft dark backing
-fn bolt_pts(cx: f32, cy: f32, w: f32, h: f32) -> Vec<(f32, f32)> {
-    const P: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.60), (0.45, 0.60), (0.36, 1.0), (0.92, 0.38), (0.50, 0.38)];
-    P.iter().map(|&(u, v)| (cx - w / 2.0 + u * w, cy - h / 2.0 + v * h)).collect()
-}
 fn bolt(hi: &mut Hi, cx: f32, cy: f32, w: f32, h: f32, c: (u8, u8, u8, u8)) {
-    hi.fill_poly(&bolt_pts(cx, cy, w, h), c);
-}
-fn bolt_cutout(hi: &mut Hi, cx: f32, cy: f32, w: f32, h: f32, c: (u8, u8, u8, u8)) {
-    for (dx, dy) in CUTOUT_OFFSETS { hi.clear_poly(&bolt_pts(cx + dx, cy + dy, w, h)); }
-    hi.fill_poly(&bolt_pts(cx, cy, w, h), c);
+    const P: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.60), (0.45, 0.60), (0.36, 1.0), (0.92, 0.38), (0.50, 0.38)];
+    let pts: Vec<(f32, f32)> = P.iter().map(|&(u, v)| (cx - w / 2.0 + u * w, cy - h / 2.0 + v * h)).collect();
+    hi.fill_poly(&pts, c);
 }
 fn plug(hi: &mut Hi, cx: f32, top: f32, s: f32, c: (u8, u8, u8, u8)) {
     let pw = s * 0.09;
@@ -489,14 +382,6 @@ fn charge_overlay(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32) {
     if l.charging {
         bolt(hi, cx + 0.4, cy + 0.7, w, h, DIGIT_SHADOW);
         bolt(hi, cx, cy, w, h, INK);
-    } else if l.full {
-        plug(hi, cx + 0.4, cy - h / 2.0 + 0.7, h, DIGIT_SHADOW);
-        plug(hi, cx, cy - h / 2.0, h, INK);
-    }
-}
-fn charge_overlay_cutout(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32) {
-    if l.charging {
-        bolt_cutout(hi, cx, cy, w, h, INK);
     } else if l.full {
         plug(hi, cx + 0.4, cy - h / 2.0 + 0.7, h, DIGIT_SHADOW);
         plug(hi, cx, cy - h / 2.0, h, INK);
@@ -588,9 +473,9 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     hi.fill_rrect(6.0, 8.0, 6.0 + fw, 32.0, 3.0, fill);
     // charge status at the left + the % as real type over the fill
     let ind = if l.charging || l.full { 12.0f32 } else { 0.0 };
-    charge_overlay_cutout(&mut hi, l, 12.0, 20.0, 12.0, 26.0);   // combo: fill과 번개 사이에 1px 투명선을 둠
+    charge_overlay(&mut hi, l, 12.0, 20.0, 12.0, 26.0);   // combo: 큼지막한 번개
     let digits = format!("{}", pct.round() as u32);
-    stamp_digits_cutout(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, INK);
+    stamp_digits(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, INK, true);
     hi.down()
 }
 
@@ -617,23 +502,25 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
     // slim air gap (1px) so the visible fill mass carries the body's height
     let fw = (34.0 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
-    charge_overlay_cutout(&mut hi, l, 21.0, 26.0, 13.0, 18.0);   // stack: 미니 배터리를 꽉 채우는 번개
+    charge_overlay(&mut hi, l, 21.0, 26.0, 13.0, 18.0);   // stack: 미니 배터리를 꽉 채우는 번개
     hi.down()
 }
 
-// Widget 7 ("wstack"): POWER on top (battery W: charge balance / PPBR), a mini battery
+// Widget 7 ("wstack"): POWER on top (system or battery W, chosen in settings), a mini battery
 // below FILLED by level with the level % drawn inside it. Charging shows as the green fill (the
 // power number already conveys draw), so no bolt clutters the tight cell. `watt` = the resolved
-// power the ticker passes in.
+// power the ticker passes in (sys or battery per w7_src).
 pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (48u32, 36u32);   // a hair wider than stack so the level digits fit inside the battery
     let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-    // top: battery power as real type — SIGNED (+charge/−discharge), kept to two truncated decimals
-    let wtxt = fmt_wstack_watts(w_val, signed);
-    let wsize = if wtxt.chars().count() >= 8 { 11.5 } else if wtxt.chars().count() >= 7 { 12.8 } else if wtxt.chars().count() >= 6 { 14.2 } else if wtxt.chars().count() >= 5 { 15.6 } else { 17.5 };
-    stamp_digits(&mut hi, &wtxt, wsize, 24.0, 6.6, INK, true);
+    // top: power as real type — battery source is SIGNED (+charge/−discharge), system source plain
+    let wtxt = if signed {
+        let n = w_val.round() as i64;
+        if n == 0 { "0W".into() } else { format!("{}{}W", if n > 0 { "+" } else { "−" }, n.abs()) }
+    } else { format!("{}W", w_val.max(0.0).round() as u32) };
+    stamp_digits(&mut hi, &wtxt, 15.5, 24.0, 6.6, INK, true);
     // bottom: mini rounded battery, fill by level, with the level % inside (combo-style)
     let body_sh = (0u8, 0u8, 0u8, 95u8);
     hi.stroke_rrect(1.0, 15.7, 45.0, 36.0, 5.0, 2.0, body_sh);
@@ -643,7 +530,7 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
     let fw = (40.0 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
     let digits = format!("{}", pct.round() as u32);
-    stamp_digits_cutout(&mut hi, &digits, 16.2, 23.0, 25.3, INK);   // level % inside the battery
+    stamp_digits(&mut hi, &digits, 16.2, 23.0, 25.3, INK, true);   // level % inside the battery
     hi.down()
 }
 
@@ -665,7 +552,7 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool) -> (Vec<u8>, 
     // fill with an air gap to the outline (macOS's own battery-icon grammar)
     let fw = (56.0 * pct as f32 / 100.0).max(3.0);
     hi.fill_rrect(6.0, m + 4.0, 6.0 + fw, 36.0 - m, 3.0, fill);
-    charge_overlay_cutout(&mut hi, l, 34.0, 20.0, 17.0, 27.0);   // icon: 몸통 중앙의 큼지막한 번개
+    charge_overlay(&mut hi, l, 34.0, 20.0, 17.0, 27.0);   // icon: 몸통 중앙의 큼지막한 번개
     hi.down()
 }
 
@@ -687,46 +574,44 @@ fn b64(data: &[u8]) -> String {
     }
     s
 }
-fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool, _sys_w: f64, bat_w: f64) -> (Vec<u8>, u32, u32) {
+fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool, sys_w: f64) -> (Vec<u8>, u32, u32) {
     match style {
         "icon_xl" => battery_icon(l, colorize, true, lpm),
         "combo" => combo_icon(l, colorize, lpm),
         "iconpct" => battery_pct_icon(l, colorize, lpm),
         "stack" => stack_icon(l, colorize, lpm, true),
         "stack_plain" => stack_icon(l, colorize, lpm, false),  // 민무늬 digits variant
-        "wstack" => wstack_icon(l, colorize, lpm, bat_w, true),
-        "wstack_bat" => wstack_icon(l, colorize, lpm, bat_w, true),
+        "wstack" => wstack_icon(l, colorize, lpm, sys_w, false),            // widget 7 · system power (plain)
+        "wstack_bat" => wstack_icon(l, colorize, lpm, signed_watts(l), true), // widget 7 · battery power (signed)
         "bar" => bar_glyph(l, colorize, lpm),
         _ => battery_icon(l, colorize, false, lpm),
     }
 }
-pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool, sys_w: Option<f64>, adapter_w: Option<f64>, ppbr_w: Option<f64>) {
+pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
     let mk = |pct: f64, charging: bool, min: i64, w: f64| Live {
         ok: true, pct, charging, discharging: !charging, time_min: Some(min), watts: w, ..Default::default()
     };
     // fixed demo states so the panel can preview 충전/부족/저전력 without waiting for them; the
     // popover composes the "cur" state's text from /api/live, so no live numbers are needed here
-    let cur_sys = sys_w.unwrap_or(cur.watts);
-    let cur_bat = smc_display_battery_watts(cur, sys_w, adapter_w, ppbr_w);
     let states = [
-        ("cur", cur.clone(), lpm, cur_sys, cur_bat),
-        ("chg", mk(45.0, true, 78, 28.5), false, 31.2, 28.5),
-        ("low", mk(12.0, false, 54, 5.8), false, 6.1, -5.8),
-        ("lpm", mk(33.0, false, 190, 4.6), true, 4.8, -4.6),
+        ("cur", cur.clone(), lpm, 0.0),
+        ("chg", mk(45.0, true, 78, 28.5), false, 31.2),
+        ("low", mk(12.0, false, 54, 5.8), false, 6.1),
+        ("lpm", mk(33.0, false, 190, 4.6), true, 4.8),
     ];
     let mut glyphs = serde_json::Map::new();
     let mut meta = serde_json::Map::new();
-    for (name, l, is_lpm, sys_w, bat_w) in &states {
+    for (name, l, is_lpm, sys_w) in &states {
         let mut styles = serde_json::Map::new();
         for style in ["icon", "icon_xl", "combo", "iconpct", "stack", "stack_plain", "wstack", "wstack_bat", "bar"] {
-            let (col, w, h) = render_style(style, l, true, *is_lpm, *sys_w, *bat_w);
-            let (mono, ..) = render_style(style, l, false, *is_lpm, *sys_w, *bat_w);
+            let (col, w, h) = render_style(style, l, true, *is_lpm, *sys_w);
+            let (mono, ..) = render_style(style, l, false, *is_lpm, *sys_w);
             styles.insert(style.into(), serde_json::json!({ "w": w, "h": h, "c": b64(&col), "m": b64(&mono) }));
         }
         glyphs.insert((*name).into(), styles.into());
         meta.insert((*name).into(), serde_json::json!({
             "pct": l.pct.round(), "charging": l.charging, "full": l.full, "lpm": is_lpm,
-            "min": l.time_min, "sysW": sys_w, "batW": bat_w,   // SIGNED (+charge/−discharge)
+            "min": l.time_min, "sysW": sys_w, "batW": signed_watts(l),   // SIGNED (+charge/−discharge)
         }));
     }
     let out = serde_json::json!({ "states": meta, "glyphs": glyphs }).to_string();
@@ -757,7 +642,7 @@ pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
 // available, falling back to the battery-rail watts (0 while plugged/holding).
 // Rules the settings UI mirrors 1:1 (nothing hidden): % is skipped when the glyph already draws
 // it; time is skipped while unknown (no countdown); a text-only widget never goes blank.
-pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64, bat_w: f64) -> String {
+pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64) -> String {
     if !l.ok {
         return String::new();
     }
@@ -766,14 +651,8 @@ pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64, bat_w: f64) -> String {
     let mut parts: Vec<String> = Vec::new();
     if pct_on && !c.digits_in_icon() { parts.push(format!("{pct}%")); }
     if time_on && matches!(l.time_min, Some(m) if m > 0) { parts.push(time_str(l)); }
-    
-    let mut w_parts = Vec::new();
-    if wsys_on { w_parts.push(format!("{sys_w:.1}W")); }        // system draw (SMC) — always ≥0
-    if wbat_on { w_parts.push(fmt_signed_w(bat_w)); }             // battery rail — SIGNED (+charge/−discharge)
-    if !w_parts.is_empty() {
-        parts.push(w_parts.join(" "));
-    }
-    
+    if wsys_on { parts.push(format!("{sys_w:.1}W")); }        // system draw (SMC) — always ≥0
+    if wbat_on { parts.push(fmt_signed_w(signed_watts(l))); }   // battery rail — SIGNED (+charge/−discharge)
     if c.widget == "text" && parts.is_empty() { parts.push(format!("{pct}%")); }   // no glyph to fall back on
     parts.join(" · ")
 }
@@ -812,27 +691,27 @@ mod tests {
         let both = Cfg { text_w_sys: Some(true), text_w_bat: Some(true), ..Cfg::default() };
         assert_eq!(both.title_items(), (false, false, true, true));
         let dis = Live { ok: true, watts: 3.1, discharging: true, ..Default::default() };
-        assert_eq!(tray_title(&dis, &both, 7.4, smc_display_battery_watts(&dis, Some(7.4), None, Some(2.8))), "7.4W −2.8W");   // discharging → PPBR
+        assert_eq!(tray_title(&dis, &both, 7.4), "7.4W · −3.1W");   // discharging → negative
         let chg = Live { ok: true, watts: 3.1, charging: true, ..Default::default() };
-        assert_eq!(tray_title(&chg, &both, 7.4, smc_display_battery_watts(&chg, Some(7.4), Some(12.2), Some(0.3))), "7.4W +4.8W");   // charging → adapter−system
+        assert_eq!(tray_title(&chg, &both, 7.4), "7.4W · +3.1W");   // charging → positive
     }
 
     #[test]
     fn title_composition_rules() {
         let l = live(67.4, Some(312), 7.44);
         let mut c = Cfg { text_pct: Some(true), text_time: Some(true), text_w: Some(true), ..Cfg::default() };
-        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l)), "67% · 5:12 · 10.0W");
+        assert_eq!(tray_title(&l, &c, 9.96), "67% · 5:12 · 10.0W");
         c.w_src = Some("bat".into());
-        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l)), "67% · 5:12 · −7.4W");   // battery discharging → negative
+        assert_eq!(tray_title(&l, &c, 9.96), "67% · 5:12 · −7.4W");   // battery discharging → negative
         c.widget = "combo".into();                                   // % drawn in the glyph → skipped in text
-        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l)), "5:12 · −7.4W");
+        assert_eq!(tray_title(&l, &c, 9.96), "5:12 · −7.4W");
         let idle = live(67.4, None, 0.0);                            // unknown countdown → time part skipped
-        assert_eq!(tray_title(&idle, &c, 9.96, signed_watts(&idle)), "0.0W");             // no flow → unsigned zero
+        assert_eq!(tray_title(&idle, &c, 9.96), "0.0W");             // no flow → unsigned zero
         let mut t = Cfg { text_pct: Some(false), text_time: Some(false), text_w: Some(false), ..Cfg::default() };
         t.widget = "text".into();                                    // text-only never goes blank
-        assert_eq!(tray_title(&l, &t, 9.96, signed_watts(&l)), "67%");
+        assert_eq!(tray_title(&l, &t, 9.96), "67%");
         t.widget = "icon".into();
-        assert_eq!(tray_title(&l, &t, 9.96, signed_watts(&l)), "");                    // icon-only: no title at all
+        assert_eq!(tray_title(&l, &t, 9.96), "");                    // icon-only: no title at all
     }
 
     // the digits should be REAL type — a system font must parse on any macOS (else the 5×7
@@ -840,85 +719,6 @@ mod tests {
     #[test]
     fn system_font_loads() {
         assert!(sys_font().is_some(), "no system font parsed — digits will fall back to the pixel font");
-    }
-
-    #[test]
-    fn battery_power_source_rules_are_explicit() {
-        let chg = Live { ok: true, charging: true, watts: 2.0, ..Default::default() };
-        assert_eq!(smc_display_battery_watts(&chg, Some(8.00), Some(12.25), Some(0.80)), 4.25);
-        assert_eq!(smc_display_battery_watts(&chg, Some(12.25), Some(8.00), Some(0.80)), -4.25);
-
-        let dis = Live { ok: true, discharging: true, watts: 9.0, ..Default::default() };
-        assert_eq!(smc_display_battery_watts(&dis, Some(8.00), Some(0.00), Some(5.75)), -5.75);
-
-        let idle = Live { ok: true, full: true, watts: 1.0, ..Default::default() };
-        assert_eq!(smc_display_battery_watts(&idle, Some(8.00), Some(12.25), Some(5.75)), 0.0);
-    }
-
-    #[test]
-    fn wstack_power_text_truncates_instead_of_rounding() {
-        assert_eq!(fmt_wstack_watts(12.999, true), "+12.9W");
-        assert_eq!(fmt_wstack_watts(-3.999, true), "−3.9W");
-        assert_eq!(fmt_wstack_watts(0.009, true), "0.0W");
-        assert_eq!(fmt_wstack_watts(4.199, false), "4.1W");
-    }
-
-    fn alpha_counts_in_box(
-        rgba: &[u8],
-        ow: u32,
-        oh: u32,
-        logical_w: f32,
-        logical_h: f32,
-        b: (f32, f32, f32, f32),
-    ) -> (usize, usize, usize) {
-        let sx = ow as f32 / logical_w;
-        let sy = oh as f32 / logical_h;
-        let x0 = (b.0 * sx).floor().clamp(0.0, ow as f32) as u32;
-        let y0 = (b.1 * sy).floor().clamp(0.0, oh as f32) as u32;
-        let x1 = (b.2 * sx).ceil().clamp(0.0, ow as f32) as u32;
-        let y1 = (b.3 * sy).ceil().clamp(0.0, oh as f32) as u32;
-        let (mut low, mut high, mut total) = (0usize, 0usize, 0usize);
-        for y in y0..y1 {
-            for x in x0..x1 {
-                total += 1;
-                let a = rgba[((y * ow + x) * 4 + 3) as usize];
-                if a < 80 { low += 1; }
-                if a > 180 { high += 1; }
-            }
-        }
-        (low, high, total)
-    }
-
-    fn assert_cutout_hole(
-        label: &str,
-        rgba: &[u8],
-        ow: u32,
-        oh: u32,
-        logical_w: f32,
-        logical_h: f32,
-        b: (f32, f32, f32, f32),
-    ) {
-        let (low, high, total) = alpha_counts_in_box(rgba, ow, oh, logical_w, logical_h, b);
-        assert!(low >= 10, "{label}: expected transparent cutout pixels in {b:?}, got low={low}, high={high}, total={total}");
-        assert!(high > 10, "{label}: sampled box missed the painted glyph/fill, got low={low}, high={high}, total={total}");
-    }
-
-    #[test]
-    fn filled_widget_overlays_have_transparent_cutouts() {
-        let chg = Live { ok: true, pct: 82.0, charging: true, ..Default::default() };
-        let dis = Live { ok: true, pct: 88.0, discharging: true, ..Default::default() };
-
-        let (rgba, w, h) = battery_icon(&chg, true, false, false);
-        assert_cutout_hole("채움 bolt", &rgba, w, h, 80.0, 40.0, (25.5, 11.0, 43.5, 29.0));
-
-        let (rgba, w, h) = combo_icon(&dis, true, false);
-        assert_cutout_hole("채움+숫자 digits", &rgba, w, h, 80.0, 40.0, (20.5, 11.0, 47.5, 29.0));
-
-        let (rgba, w, h) = stack_icon(&chg, true, false, true);
-        assert_cutout_hole("숫자↑아이콘 bolt", &rgba, w, h, 44.0, 36.0, (15.5, 19.5, 27.5, 31.0));
-
-        let (rgba, w, h) = wstack_icon(&dis, true, false, -12.99, true);
-        assert_cutout_hole("전력↑잔량 level digits", &rgba, w, h, 48.0, 36.0, (13.0, 19.5, 33.0, 31.0));
     }
 
     #[test]
@@ -934,7 +734,7 @@ mod tests {
     fn preview_dump_shape() {
         let dir = std::env::temp_dir().join("bl-preview-test");
         let _ = std::fs::create_dir_all(&dir);
-        write_preview(&dir, &live(67.0, Some(312), 7.4), false, None, None, None);
+        write_preview(&dir, &live(67.0, Some(312), 7.4), false);
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("tray-preview.json")).unwrap()).unwrap();
         for s in ["cur", "chg", "low", "lpm"] {
             assert!(v["states"][s]["pct"].is_number(), "state {s}");

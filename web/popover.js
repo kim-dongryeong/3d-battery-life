@@ -9,7 +9,7 @@ const ls = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { retu
 const save = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 // display prefs (popover-only) live in localStorage; menu-bar/alert prefs (cfg) live server-side (/api/config)
 let pv = qs('pv') || ls('battPV', 'list');
-let theme = qs('theme') || ls('battThemeV2', 'light');   // light(기본) | dark | system
+let theme = qs('theme') || ls('battTheme', 'light');   // light(기본) | dark | system
 let unit = ls('battUnit', 'system');                  // system | c | f
 let timeFmt = ls('battTimeFmt', 'long');              // short(1:20) | long(1시간 20분)
 let procN = +ls('battProcN', '6');                    // top-processes count · 0 = hide
@@ -384,11 +384,11 @@ function menubarHTML() {
     <div class="chiphint">${digitsIn ? '이 모양은 잔량 숫자를 아이콘 안에 그려요 — 옆 텍스트와 중복되지 않아요.'
       : pctForced ? '텍스트만 모양은 비워둘 수 없어 잔량을 기본 표시해요.'
       : '켠 항목이 · 로 이어져 아이콘 옆에 붙어요. 시스템·배터리 전력을 둘 다 켤 수도 있어요.'}</div>
-    ${(cfg.text_w_bat || cfg.widget === 'wstack') ? '<div class="chiphint signhint">배터리 전력은 충전 중 어댑터−시스템 수지, 방전 중 PPBR로 표시해요.</div>' : ''}
+    ${(cfg.text_w_bat || (cfg.widget === 'wstack' && cfg.w7_src === 'bat')) ? '<div class="chiphint signhint">배터리 전력은 부호로 방향을 나타내요 — 양수(+)는 충전, 음수(−)는 방전. 시스템 전력은 항상 양수(소비)예요.</div>' : ''}
     <div class="srow"><span>상태별 색상</span>${tglEl('colorize', cfg.colorize)}</div>
     ${cfg.widget === 'icon' ? `<div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>` : ''}
     ${cfg.widget === 'stack' ? `<div class="srow"><span>숫자 색·테두리</span>${tglEl('digit_deco', cfg.digit_deco)}</div>` : ''}
-    ${cfg.widget === 'wstack' ? `<div class="srow"><span>위 숫자 전력</span><b>충전=수지 · 방전=PPBR</b></div>` : ''}
+    ${cfg.widget === 'wstack' ? `<div class="srow"><span>위 숫자 전력</span><span class="subseg"><button data-w7="sys" class="${cfg.w7_src !== 'bat' ? 'on' : ''}">시스템</button><button data-w7="bat" class="${cfg.w7_src === 'bat' ? 'on' : ''}">배터리</button></span></div>` : ''}
     <div class="srow"><span>열기 단축키 <kbd>⌥⌃B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>`;
 }
 
@@ -421,9 +421,8 @@ function pvState() {
   // pct comes from the DUMP (the tray's own number) so the strip text can never disagree with
   // the glyph digits next to it; W/time are live (they move every tick, cosmetic for preview)
   const trayPct = pvData && pvData.states && pvData.states.cur ? pvData.states.cur.pct : null;
-  // batW is SIGNED (+charge/−discharge): charging uses adapter−system balance; discharging prefers PPBR.
-  const batW = s.charging ? (+s.powerW || 0) : s.discharging && s.ppbrW != null ? -Math.abs(+s.ppbrW) : (+s.powerW || 0);
-  return { pct: trayPct ?? s.pct ?? 0, min: s.timeRemain ?? null, sysW: s.systemW ?? s.watts ?? 0, batW };
+  // batW is SIGNED (+charge/−discharge): powerW from /api/live is signed; dump meta is signed too
+  return { pct: trayPct ?? s.pct ?? 0, min: s.timeRemain ?? null, sysW: s.systemW ?? s.watts ?? 0, batW: +s.powerW || 0 };
 }
 const fmtSignedW = n => Math.abs(n) < 0.05 ? '0.0W' : `${n > 0 ? '+' : '−'}${Math.abs(n).toFixed(1)}W`;
 function composeTrayTitle(st) {
@@ -439,7 +438,7 @@ function glyphCanvas(styleKey, dispH, pixelated) {
   const set = pvData && pvData.glyphs && pvData.glyphs[pvSim];
   const variant = styleKey === 'icon' && cfg.glyph_xl ? 'icon_xl'
     : styleKey === 'stack' && !cfg.digit_deco ? 'stack_plain'
-    : styleKey === 'wstack' ? 'wstack_bat' : styleKey;
+    : styleKey === 'wstack' && cfg.w7_src === 'bat' ? 'wstack_bat' : styleKey;
   const g = set && set[variant];
   if (!g) return null;
   try {
@@ -603,7 +602,7 @@ $('foot').addEventListener('click', e => {
 const coerce = (k, v) => (k === 'low_pct' || k === 'high_pct') ? +v : v;
 function applyDisplay(k, v) {
   if (k === 'pv') { pv = v; save('battPV', v); }
-  else if (k === 'theme') { theme = v; save('battThemeV2', v); }
+  else if (k === 'theme') { theme = v; save('battTheme', v); }
   else if (k === 'unit') { unit = v; save('battUnit', v); }
   else if (k === 'timeFmt') { timeFmt = v; save('battTimeFmt', v); }
   else if (k === 'procN') { procN = +v; save('battProcN', v); pullProcs(); }

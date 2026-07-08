@@ -227,7 +227,7 @@ fn main() {
                 });
             }
 
-            // 4) live tray title — a 1s ticker reads the battery natively and shows "87% · 5.2W" (or ⚡)
+            // 4) live tray title — a 2s ticker reads the battery natively and shows "87% · 5.2W" (or ⚡)
             //    next to the menu-bar icon, so the app earns its always-resident spot (Stats-parity).
             let handle = app.handle().clone();
             let rec_ticker = rec_item.clone();      // keep the tray recording label in sync from the ticker
@@ -237,13 +237,13 @@ fn main() {
                 let mut reader = live::Reader::new();
                 let smc = smc::Smc::open();   // live temp/system-power (real-time; ioreg is 60s-quantized)
                 if smc.is_some() { let _ = std::fs::create_dir_all(data_dir()); }   // so the bridge write can't silently fail
-                power::start_notifier();      // wake instantly on AC plug/unplug (else just the 1s poll)
+                power::start_notifier();      // wake instantly on AC plug/unplug (else just the 2s poll)
                 let mut last_key = String::new();
                 let mut last_pv_key = String::new();   // settings-panel preview dump key
                 let (mut low, mut crit, mut high) = (false, false, false);
                 let mut sc_on = false;   // whether the global ⌥⌃B is currently registered
                 let (mut lpm, mut tick) = (low_power_mode(), 0u32);
-                // slow-cadence system fact refreshed with lpm (~3s): macOS's displayed battery %
+                // slow-cadence system fact refreshed with lpm (~6s): macOS's displayed battery %
                 // (the tray digits must match the system's own figure)
                 let mut disp_pct = live::displayed_pct();
                 let mut rec_state = rec0;
@@ -253,7 +253,7 @@ fn main() {
                 loop {
                     let mut l = reader.read();
                     let c = live::load_cfg();   // re-read each tick so menu AND popover-settings changes apply live
-                    if tick % 3 == 0 { lpm = low_power_mode(); disp_pct = live::displayed_pct(); }   // refresh every ~3s
+                    if tick % 3 == 0 { lpm = low_power_mode(); disp_pct = live::displayed_pct(); }   // refresh every ~6s
                     if l.ok { if let Some(p) = disp_pct { l.pct = p; } }   // starship's ratio % can sit 1–2% off macOS's shown %
                     tick = tick.wrapping_add(1);
                     // keep the tray recording label synced to the real launchd state (menu/popover/external)
@@ -284,72 +284,69 @@ fn main() {
                     }
                     // read SMC once per tick: feeds both the live-smc.json bridge and the menu-bar W.
                     let mut sys_w = None;
-                    let mut adp_w = None;
-                    let mut ppbr_w = None;
                     if let Some(ref s) = smc {
                         sys_w = s.system_watts();
-                        adp_w = s.adapter_watts();
-                        ppbr_w = s.battery_watts();
+                        let (adp_w, bat_w) = (s.adapter_watts(), s.battery_watts());
                         let f = |o: Option<f64>| o.map(|v| format!("{:.3}", v)).unwrap_or_else(|| "null".into());
                         let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
                         // accumulate a rolling 60s window so the recorder can log the minute's AVERAGE power
                         // (∫W dt / 60s) instead of a single instant — a 0.1s spike no longer skews a whole minute.
-                        if let (Some(sw), Some(aw), Some(bw)) = (sys_w, adp_w, ppbr_w) { pwin.push((now, sw, aw, bw)); }
+                        if let (Some(sw), Some(aw), Some(bw)) = (sys_w, adp_w, bat_w) { pwin.push((now, sw, aw, bw)); }
                         pwin.retain(|(t, ..)| now.saturating_sub(*t) <= 60);
                         let (mut ss, mut sa, mut sb) = (0.0, 0.0, 0.0);
                         for (_, sw, aw, bw) in &pwin { ss += sw; sa += aw; sb += bw; }
                         let n = pwin.len() as f64;
                         let av = |sum: f64| if n > 0.0 { Some(sum / n) } else { None };
                         let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"batteryW\":{},\"systemWAvg\":{},\"adapterWAvg\":{},\"batteryWAvg\":{},\"dcInV\":{},\"dcInA\":{},\"at\":{}}}",
-                            f(s.battery_temp_c()), f(sys_w), f(adp_w), f(ppbr_w), f(av(ss)), f(av(sa)), f(av(sb)), f(s.dc_in_volts()), f(s.dc_in_amps()), now);
+                            f(s.battery_temp_c()), f(sys_w), f(adp_w), f(bat_w), f(av(ss)), f(av(sa)), f(av(sb)), f(s.dc_in_volts()), f(s.dc_in_amps()), now);
                         let _ = std::fs::write(data_dir().join("live-smc.json"), j);
                     }
                     if let Some(tray) = handle.tray_by_id("tray") {
-                        let menu_bat_w = live::smc_display_battery_watts(&l, sys_w, adp_w, ppbr_w);
-                        let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts), menu_bat_w);
-                        let w7 = menu_bat_w;
-                        let wkey = if c.widget == "wstack" { (w7 * 10.0).trunc() as i64 } else { 0 };
+                        // menu-bar "W" = live system draw (SMC) when we have it, else battery-rail watts.
+                        // tray_title composes the enabled 텍스트 chips itself (incl. skipping % when the
+                        // glyph draws it) — the rules live in ONE place and the settings UI mirrors them.
+                        let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts));
+                        // ALWAYS Some(…): set_title(None) leaves the previous text in place on
+                        // macOS, so turning the last 텍스트 chip off left a zombie "9.8W" behind
+                        let _ = tray.set_title(Some(title));
+                        // widget "wstack" draws a live power number → resolve it (sys plain, battery
+                        // SIGNED +charge/−discharge per w7_src) and fold it (rounded) into the redraw key
+                        let w7_bat = c.w7_battery();
+                        let w7 = if w7_bat { live::signed_watts(&l) } else { sys_w.unwrap_or(l.watts) };
+                        let wkey = if c.widget == "wstack" { w7.round() as i64 } else { 0 };
+                        // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/digit deco/wstack W)
                         let key = format!("{}-{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco, wkey);
-                        
-                        let changed = l.ok && key != last_key;
-                        let icon_data = if changed {
+                        if l.ok && key != last_key {
                             last_key = key;
-                            live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, true)
-                        } else {
-                            None
-                        };
-
-                        let tray_clone = tray.clone();
-                        let _ = handle.run_on_main_thread(move || {
-                            let _ = tray_clone.set_title(Some(title));
-                            if changed {
-                                match icon_data {
-                                    Some((rgba, w, h)) => { let _ = tray_clone.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
-                                    None => { let _ = tray_clone.set_icon(None); }
-                                }
+                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat) {
+                                Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
+                                None => { let _ = tray.set_icon(None); }   // text-only widget
                             }
-                            grow_menu_glyph();
-                        });
+                        }
+                        // enlarge past tray-icon's 18pt cap on the main thread — runs after the
+                        // set_icon above re-applied the 18pt image (both marshal to the main thread,
+                        // FIFO). Idempotent (skips if already at target), so a plain title-only tick
+                        // keeps the size too. No-op/graceful if the status button can't be located.
+                        let _ = handle.run_on_main_thread(grow_menu_glyph);
                     }
                     // settings-panel preview bridge: dump the real glyph renders (all styles ×
-                    // color/mono × normal/XL) when their visible inputs change.
+                    // color/mono × normal/XL) when their inputs change (~every 1% of battery).
                     // cfg toggles need no re-dump — the popover picks the matching variant itself.
-                    let pv_bat_w = live::smc_display_battery_watts(&l, sys_w, adp_w, ppbr_w);
-                    let pv_key = format!("{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, lpm, (pv_bat_w * 100.0).trunc() as i64);
+                    let pv_key = format!("{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, lpm);
                     if l.ok && pv_key != last_pv_key {
                         last_pv_key = pv_key;
-                        live::write_preview(&data_dir(), &l, lpm, sys_w, adp_w, ppbr_w);
+                        live::write_preview(&data_dir(), &l, lpm);
                     }
-                    // ~1s cadence for the continuously-changing values (W/temp), but break early
+                    // ~2s cadence for the continuously-changing values (W/temp), but break early
                     // when IOKit signals a power-source change so plug/unplug reflects near-instantly.
                     // Also poll for popover overflow actions here so they respond within ~250ms.
-                    for _ in 0..4 {
+                    for _ in 0..8 {
                         std::thread::sleep(std::time::Duration::from_millis(250));
                         let af = data_dir().join("action");
                         if let Ok(a) = std::fs::read_to_string(&af) {
                             let _ = std::fs::remove_file(&af);
                             match a.trim() {
-                                "report" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } show_main(&h); }); }
+                                "report" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { show_main(&h); if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } }); }
                                 "quit" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || h.exit(0)); }
                                 "record" => { let on = !plist_path().exists(); std::thread::spawn(move || run_record(if on { "on" } else { "off" })); }
                                 "hide" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } }); }
@@ -430,84 +427,33 @@ fn main() {
 
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        // viewer visible → become a Regular app so it shows in ⌘Tab / can be focused normally
+        #[cfg(target_os = "macos")]
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        // Promoting Accessory→Regular does NOT make the app frontmost by itself, and activating in the
+        // SAME runloop turn as the policy switch is ignored by modern macOS → the app lands LAST in ⌘Tab.
+        // Defer the activation one turn (run_on_main_thread posts to the next loop iteration) and use
+        // NSRunningApplication.activateWithOptions (the non-deprecated path) so it registers as active.
         #[cfg(target_os = "macos")]
         {
-            let h_for_policy = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                let _ = h_for_policy.set_activation_policy(tauri::ActivationPolicy::Regular);
-            });
             let h = app.clone();
-            let w_clone = w.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(250));
-                let h_inner = h.clone();
-                let _ = h.run_on_main_thread(move || {
-                    let _ = w_clone.unminimize();
-                    let _ = w_clone.show();
-                    let _ = w_clone.set_focus();
-                    activate_main_window(&h_inner);
-                });
+            let _ = app.run_on_main_thread(move || {
+                if let Some(w) = h.get_webview_window("main") { let _ = w.set_focus(); }
+                unsafe {
+                    use objc::runtime::{Object, YES};
+                    use objc::{class, msg_send, sel, sel_impl};
+                    let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+                    let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
+                    // NSApplicationActivateAllWindows(1) | NSApplicationActivateIgnoringOtherApps(2)
+                    let cur: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
+                    let _: () = msg_send![cur, activateWithOptions: 3u64];
+                }
             });
         }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = w.unminimize();
-            let _ = w.show();
-            let _ = w.set_focus();
-        }
     }
-}
-
-// Promoting Accessory→Regular does not reliably make macOS treat the viewer as the most recently
-// used app. If activation happens before Dock/WindowServer registers the policy change, the icon
-// appears at the far end of ⌘Tab. Order the native NSWindow front, activate now, and activate once
-// more shortly after the policy flip has settled.
-#[cfg(target_os = "macos")]
-fn activate_main_window(app: &AppHandle) {
-    fn activate_once(app: &AppHandle) {
-        if let Some(w) = app.get_webview_window("main") {
-            let _ = w.unminimize();
-            let _ = w.show();
-            let _ = w.set_focus();
-            if let Ok(ns_window) = w.ns_window() {
-                let ns_window = ns_window as *mut objc::runtime::Object;
-                unsafe {
-                    use objc::runtime::Object;
-                    use objc::{msg_send, sel, sel_impl};
-                    let nil: *mut Object = std::ptr::null_mut();
-                    let _: () = msg_send![ns_window, makeKeyAndOrderFront: nil];
-                    let _: () = msg_send![ns_window, orderFrontRegardless];
-                }
-            }
-        }
-        unsafe {
-            use objc::runtime::{Object, YES};
-            use objc::{class, msg_send, sel, sel_impl};
-            let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-            let nil: *mut Object = std::ptr::null_mut();
-            let _: () = msg_send![ns_app, unhide: nil];
-            let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
-            // NSApplicationActivateAllWindows(1) | NSApplicationActivateIgnoringOtherApps(2)
-            let cur: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
-            let _: () = msg_send![cur, activateWithOptions: 3u64];
-        }
-    }
-
-    activate_once(app);
-    let h = app.clone();
-    let _ = app.run_on_main_thread(move || activate_once(&h));
-    let h = app.clone();
-    std::thread::spawn(move || {
-        // First delay (200ms)
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        let h2 = h.clone();
-        let _ = h.run_on_main_thread(move || activate_once(&h2));
-
-        // Second delay (250ms more = 450ms total)
-        std::thread::sleep(std::time::Duration::from_millis(250));
-        let h3 = h.clone();
-        let _ = h.run_on_main_thread(move || activate_once(&h3));
-    });
 }
 
 // Round the popover's NATIVE window: making the webview background transparent (CSS) alone leaves a
@@ -549,18 +495,9 @@ fn grow_menu_glyph() {
         if let Some(btn) = view.downcast_ref::<NSStatusBarButton>() {
             if let Some(img) = unsafe { btn.image() } {
                 let sz = img.size();
-                // We no longer manually resize the image to prevent layout thrashing and horizontal shaking.
-                // Tauri's set_icon will handle the 18pt sizing smoothly.
-            }
-            // Use monospaced font for the tray text to prevent shifting/shaking
-            unsafe {
-                use objc::runtime::Object;
-                use objc::{class, msg_send, sel, sel_impl};
-                let font_cls = class!(NSFont);
-                let font: *mut Object = msg_send![font_cls, monospacedDigitSystemFontOfSize: 13.0f64 weight: 0.0f64];
-                if !font.is_null() {
-                    let btn_ptr = btn as *const NSStatusBarButton as *mut Object;
-                    let _: () = msg_send![btn_ptr, setFont: font];
+                if sz.height > 1.0 && (sz.height - target_h).abs() > 0.5 {
+                    img.setSize(NSSize::new(sz.width * target_h / sz.height, target_h));
+                    unsafe { btn.setNeedsDisplay() };
                 }
             }
             return true;
