@@ -251,135 +251,148 @@ fn main() {
                 let mut last_title = String::new();   // last native window title the viewer requested (i18n)
                 let mut pwin: Vec<(u64, f64, f64, f64)> = Vec::new();   // rolling 60s (t, sysW, adpW, batW) → 1-min avg for the recorder
                 loop {
-                    let mut l = reader.read();
-                    let c = live::load_cfg();   // re-read each tick so menu AND popover-settings changes apply live
-                    if tick % 3 == 0 { lpm = low_power_mode(); disp_pct = live::displayed_pct(); }   // refresh every ~6s
-                    if l.ok { if let Some(p) = disp_pct { l.pct = p; } }   // starship's ratio % can sit 1–2% off macOS's shown %
-                    tick = tick.wrapping_add(1);
-                    // keep the tray recording label synced to the real launchd state (menu/popover/external)
-                    let now_rec = plist_path().exists();
-                    if now_rec != rec_state {
-                        rec_state = now_rec;
-                        let (r, st) = (rec_ticker.clone(), status_ticker.clone());
-                        let _ = handle.run_on_main_thread(move || {
-                            let _ = r.set_text(if now_rec { "배터리 기록 중지" } else { "배터리 기록 시작" });
-                            let _ = st.set_text(status_text(now_rec));
-                        });
-                    }
-                    if l.ok { notify_check(&l, &c, &mut low, &mut crit, &mut high); }
-                    // register/unregister the global open-popover hotkey to match the setting (live)
-                    if c.shortcut != sc_on {
-                        use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
-                        let gs = handle.global_shortcut();
-                        let hk = Shortcut::new(Some(Modifiers::ALT | Modifiers::CONTROL), Code::KeyB); // ⌥⌃B
-                        if c.shortcut {
-                            let _ = gs.on_shortcut(hk, |app, _s, ev| {
-                                // toggle: pressing it again (or ESC) closes the popover
-                                if ev.state() == ShortcutState::Pressed { toggle_popover(app, None); }
+                    // A panic ANYWHERE in one tick must not kill this thread — a dead ticker freezes
+                    // the tray at a stale % and stops the SMC bridge (popover loses PPBR/system power)
+                    // until the app restarts. Catch per-tick, breadcrumb the payload, keep looping.
+                    let tick_ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let mut l = reader.read();
+                        let c = live::load_cfg();   // re-read each tick so menu AND popover-settings changes apply live
+                        if tick % 3 == 0 { lpm = low_power_mode(); disp_pct = live::displayed_pct(); }   // refresh every ~6s
+                        if l.ok { if let Some(p) = disp_pct { l.pct = p; } }   // starship's ratio % can sit 1–2% off macOS's shown %
+                        tick = tick.wrapping_add(1);
+                        // keep the tray recording label synced to the real launchd state (menu/popover/external)
+                        let now_rec = plist_path().exists();
+                        if now_rec != rec_state {
+                            rec_state = now_rec;
+                            let (r, st) = (rec_ticker.clone(), status_ticker.clone());
+                            let _ = handle.run_on_main_thread(move || {
+                                let _ = r.set_text(if now_rec { "배터리 기록 중지" } else { "배터리 기록 시작" });
+                                let _ = st.set_text(status_text(now_rec));
                             });
-                        } else {
-                            let _ = gs.unregister(hk);
                         }
-                        sc_on = c.shortcut;
-                    }
-                    // read SMC once per tick: feeds both the live-smc.json bridge and the menu-bar W.
-                    let mut sys_w = None;
-                    if let Some(ref s) = smc {
-                        sys_w = s.system_watts();
-                        let (adp_w, bat_w) = (s.adapter_watts(), s.battery_watts());
-                        let f = |o: Option<f64>| o.map(|v| format!("{:.3}", v)).unwrap_or_else(|| "null".into());
-                        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-                        // accumulate a rolling 60s window so the recorder can log the minute's AVERAGE power
-                        // (∫W dt / 60s) instead of a single instant — a 0.1s spike no longer skews a whole minute.
-                        if let (Some(sw), Some(aw), Some(bw)) = (sys_w, adp_w, bat_w) { pwin.push((now, sw, aw, bw)); }
-                        pwin.retain(|(t, ..)| now.saturating_sub(*t) <= 60);
-                        let (mut ss, mut sa, mut sb) = (0.0, 0.0, 0.0);
-                        for (_, sw, aw, bw) in &pwin { ss += sw; sa += aw; sb += bw; }
-                        let n = pwin.len() as f64;
-                        let av = |sum: f64| if n > 0.0 { Some(sum / n) } else { None };
-                        let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"batteryW\":{},\"systemWAvg\":{},\"adapterWAvg\":{},\"batteryWAvg\":{},\"dcInV\":{},\"dcInA\":{},\"at\":{}}}",
-                            f(s.battery_temp_c()), f(sys_w), f(adp_w), f(bat_w), f(av(ss)), f(av(sa)), f(av(sb)), f(s.dc_in_volts()), f(s.dc_in_amps()), now);
-                        let _ = std::fs::write(data_dir().join("live-smc.json"), j);
-                    }
-                    if let Some(tray) = handle.tray_by_id("tray") {
-                        // menu-bar "W" = live system draw (SMC) when we have it, else battery-rail watts.
-                        // tray_title composes the enabled 텍스트 chips itself (incl. skipping % when the
-                        // glyph draws it) — the rules live in ONE place and the settings UI mirrors them.
-                        let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts));
-                        // ALWAYS Some(…): set_title(None) leaves the previous text in place on
-                        // macOS, so turning the last 텍스트 chip off left a zombie "9.8W" behind
-                        let _ = tray.set_title(Some(title));
-                        // widget "wstack" draws a live power number → resolve it (sys plain, battery
-                        // SIGNED +charge/−discharge per w7_src) and fold it (rounded) into the redraw key
-                        let w7_bat = c.w7_battery();
-                        let w7 = if w7_bat { live::signed_watts(&l) } else { sys_w.unwrap_or(l.watts) };
-                        let wkey = if c.widget == "wstack" { w7.round() as i64 } else { 0 };
-                        // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/digit deco/wstack W)
-                        let key = format!("{}-{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco, wkey);
-                        if l.ok && key != last_key {
-                            last_key = key;
-                            match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat) {
-                                Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
-                                None => { let _ = tray.set_icon(None); }   // text-only widget
-                            }
-                        }
-                        // enlarge past tray-icon's 18pt cap on the main thread — runs after the
-                        // set_icon above re-applied the 18pt image (both marshal to the main thread,
-                        // FIFO). Idempotent (skips if already at target), so a plain title-only tick
-                        // keeps the size too. No-op/graceful if the status button can't be located.
-                        let _ = handle.run_on_main_thread(grow_menu_glyph);
-                    }
-                    // settings-panel preview bridge: dump the real glyph renders (all styles ×
-                    // color/mono × normal/XL) when their inputs change (~every 1% of battery).
-                    // cfg toggles need no re-dump — the popover picks the matching variant itself.
-                    let pv_key = format!("{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, lpm);
-                    if l.ok && pv_key != last_pv_key {
-                        last_pv_key = pv_key;
-                        live::write_preview(&data_dir(), &l, lpm);
-                    }
-                    // ~2s cadence for the continuously-changing values (W/temp), but break early
-                    // when IOKit signals a power-source change so plug/unplug reflects near-instantly.
-                    // Also poll for popover overflow actions here so they respond within ~250ms.
-                    for _ in 0..8 {
-                        std::thread::sleep(std::time::Duration::from_millis(250));
-                        let af = data_dir().join("action");
-                        if let Ok(a) = std::fs::read_to_string(&af) {
-                            let _ = std::fs::remove_file(&af);
-                            match a.trim() {
-                                "report" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { show_main(&h); if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } }); }
-                                "quit" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || h.exit(0)); }
-                                "record" => { let on = !plist_path().exists(); std::thread::spawn(move || run_record(if on { "on" } else { "off" })); }
-                                "hide" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } }); }
-                                _ => {}
-                            }
-                            break;   // re-read state promptly after acting
-                        }
-                        // viewer reported its native window title (localized) → set it. Tauri doesn't
-                        // mirror document.title, and Tauri IPC is unreliable for this external-URL window,
-                        // so it comes through the same file bridge as the height/actions.
-                        if let Ok(tt) = std::fs::read_to_string(data_dir().join("main-title")) {
-                            let tt = tt.trim().to_string();
-                            if !tt.is_empty() && tt != last_title {
-                                last_title = tt.clone();
-                                let ht = handle.clone();
-                                let _ = handle.run_on_main_thread(move || {
-                                    if let Some(w) = ht.get_webview_window("main") { let _ = w.set_title(&tt); }
+                        if l.ok { notify_check(&l, &c, &mut low, &mut crit, &mut high); }
+                        // register/unregister the global open-popover hotkey to match the setting (live)
+                        if c.shortcut != sc_on {
+                            use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+                            let gs = handle.global_shortcut();
+                            let hk = Shortcut::new(Some(Modifiers::ALT | Modifiers::CONTROL), Code::KeyB); // ⌥⌃B
+                            if c.shortcut {
+                                let _ = gs.on_shortcut(hk, |app, _s, ev| {
+                                    // toggle: pressing it again (or ESC) closes the popover
+                                    if ev.state() == ShortcutState::Pressed { toggle_popover(app, None); }
                                 });
+                            } else {
+                                let _ = gs.unregister(hk);
                             }
+                            sc_on = c.shortcut;
                         }
-                        // popover reported its content height → size its window to fit exactly (no scrollbar)
-                        if let Ok(h) = std::fs::read_to_string(data_dir().join("popover-h")).map(|s| s.trim().parse::<f64>()) {
-                            if let Ok(h) = h {
-                                if (h - last_pop_h).abs() > 1.0 {
-                                    last_pop_h = h;
-                                    let hh = handle.clone();
+                        // read SMC once per tick: feeds both the live-smc.json bridge and the menu-bar W.
+                        let mut sys_w = None;
+                        if let Some(ref s) = smc {
+                            sys_w = s.system_watts();
+                            let (adp_w, bat_w) = (s.adapter_watts(), s.battery_watts());
+                            let f = |o: Option<f64>| o.map(|v| format!("{:.3}", v)).unwrap_or_else(|| "null".into());
+                            let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                            // accumulate a rolling 60s window so the recorder can log the minute's AVERAGE power
+                            // (∫W dt / 60s) instead of a single instant — a 0.1s spike no longer skews a whole minute.
+                            if let (Some(sw), Some(aw), Some(bw)) = (sys_w, adp_w, bat_w) { pwin.push((now, sw, aw, bw)); }
+                            pwin.retain(|(t, ..)| now.saturating_sub(*t) <= 60);
+                            let (mut ss, mut sa, mut sb) = (0.0, 0.0, 0.0);
+                            for (_, sw, aw, bw) in &pwin { ss += sw; sa += aw; sb += bw; }
+                            let n = pwin.len() as f64;
+                            let av = |sum: f64| if n > 0.0 { Some(sum / n) } else { None };
+                            let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"batteryW\":{},\"systemWAvg\":{},\"adapterWAvg\":{},\"batteryWAvg\":{},\"dcInV\":{},\"dcInA\":{},\"at\":{}}}",
+                                f(s.battery_temp_c()), f(sys_w), f(adp_w), f(bat_w), f(av(ss)), f(av(sa)), f(av(sb)), f(s.dc_in_volts()), f(s.dc_in_amps()), now);
+                            let _ = std::fs::write(data_dir().join("live-smc.json"), j);
+                        }
+                        if let Some(tray) = handle.tray_by_id("tray") {
+                            // menu-bar "W" = live system draw (SMC) when we have it, else battery-rail watts.
+                            // tray_title composes the enabled 텍스트 chips itself (incl. skipping % when the
+                            // glyph draws it) — the rules live in ONE place and the settings UI mirrors them.
+                            let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts));
+                            // ALWAYS Some(…): set_title(None) leaves the previous text in place on
+                            // macOS, so turning the last 텍스트 chip off left a zombie "9.8W" behind
+                            let _ = tray.set_title(Some(title));
+                            // widget "wstack" draws a live power number → resolve it (sys plain, battery
+                            // SIGNED +charge/−discharge per w7_src) and fold it (rounded) into the redraw key
+                            let w7_bat = c.w7_battery();
+                            let w7 = if w7_bat { live::signed_watts(&l) } else { sys_w.unwrap_or(l.watts) };
+                            let wkey = if c.widget == "wstack" { w7.round() as i64 } else { 0 };
+                            // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/digit deco/wstack W)
+                            let key = format!("{}-{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco, wkey);
+                            if l.ok && key != last_key {
+                                last_key = key;
+                                match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat) {
+                                    Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
+                                    None => { let _ = tray.set_icon(None); }   // text-only widget
+                                }
+                            }
+                            // enlarge past tray-icon's 18pt cap on the main thread — runs after the
+                            // set_icon above re-applied the 18pt image (both marshal to the main thread,
+                            // FIFO). Idempotent (skips if already at target), so a plain title-only tick
+                            // keeps the size too. No-op/graceful if the status button can't be located.
+                            let _ = handle.run_on_main_thread(grow_menu_glyph);
+                        }
+                        // settings-panel preview bridge: dump the real glyph renders (all styles ×
+                        // color/mono × normal/XL) when their inputs change (~every 1% of battery).
+                        // cfg toggles need no re-dump — the popover picks the matching variant itself.
+                        let pv_key = format!("{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, lpm);
+                        if l.ok && pv_key != last_pv_key {
+                            last_pv_key = pv_key;
+                            live::write_preview(&data_dir(), &l, lpm);
+                        }
+                        // ~2s cadence for the continuously-changing values (W/temp), but break early
+                        // when IOKit signals a power-source change so plug/unplug reflects near-instantly.
+                        // Also poll for popover overflow actions here so they respond within ~250ms.
+                        for _ in 0..8 {
+                            std::thread::sleep(std::time::Duration::from_millis(250));
+                            let af = data_dir().join("action");
+                            if let Ok(a) = std::fs::read_to_string(&af) {
+                                let _ = std::fs::remove_file(&af);
+                                match a.trim() {
+                                    "report" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { show_main(&h); if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } }); }
+                                    "quit" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || h.exit(0)); }
+                                    "record" => { let on = !plist_path().exists(); std::thread::spawn(move || run_record(if on { "on" } else { "off" })); }
+                                    "hide" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } }); }
+                                    _ => {}
+                                }
+                                break;   // re-read state promptly after acting
+                            }
+                            // viewer reported its native window title (localized) → set it. Tauri doesn't
+                            // mirror document.title, and Tauri IPC is unreliable for this external-URL window,
+                            // so it comes through the same file bridge as the height/actions.
+                            if let Ok(tt) = std::fs::read_to_string(data_dir().join("main-title")) {
+                                let tt = tt.trim().to_string();
+                                if !tt.is_empty() && tt != last_title {
+                                    last_title = tt.clone();
+                                    let ht = handle.clone();
                                     let _ = handle.run_on_main_thread(move || {
-                                        if let Some(w) = hh.get_webview_window("popover") { let _ = w.set_size(tauri::LogicalSize::new(320.0, h)); }
+                                        if let Some(w) = ht.get_webview_window("main") { let _ = w.set_title(&tt); }
                                     });
                                 }
                             }
+                            // popover reported its content height → size its window to fit exactly (no scrollbar)
+                            if let Ok(h) = std::fs::read_to_string(data_dir().join("popover-h")).map(|s| s.trim().parse::<f64>()) {
+                                if let Ok(h) = h {
+                                    if (h - last_pop_h).abs() > 1.0 {
+                                        last_pop_h = h;
+                                        let hh = handle.clone();
+                                        let _ = handle.run_on_main_thread(move || {
+                                            if let Some(w) = hh.get_webview_window("popover") { let _ = w.set_size(tauri::LogicalSize::new(320.0, h)); }
+                                        });
+                                    }
+                                }
+                            }
+                            if power::take_dirty() { break; }
                         }
-                        if power::take_dirty() { break; }
+                    }));
+                    if let Err(e) = tick_ok {
+                        let msg = e.downcast_ref::<&str>().map(|s| s.to_string())
+                            .or_else(|| e.downcast_ref::<String>().cloned())
+                            .unwrap_or_else(|| "non-string panic payload".into());
+                        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                        let _ = std::fs::write(data_dir().join("ticker-panic.log"), format!("t={now} panic: {msg}\n"));
+                        std::thread::sleep(std::time::Duration::from_secs(2));   // no hot spin if every tick panics
                     }
                 }
             });
