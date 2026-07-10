@@ -117,7 +117,7 @@ document.addEventListener('visibilitychange', () => {
   requestAnimationFrame(fitWindow);
 });
 const hideWindow = () => { fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ do: 'hide' }) }).catch(() => {}); };
-const stateOf = s => s.charging ? '충전 중' : s.full ? '완충' : s.ac ? 'AC 연결(유휴)' : '배터리 사용';
+const stateOf = s => s.charging ? '충전 중' : s.full ? '완충' : s.ac ? '외부 전원(유휴)' : '배터리 사용';   // "AC" 금지 — 파워뱅크도 외부 전원
 const stateIcon = s => s.charging ? '⚡' : s.ac ? '🔌' : '🔋';
 const ago = ms => { const t = (Date.now() - ms) / 1000; return t < 3 ? '방금' : `${Math.round(t)}초 전`; };
 const barColor = pct => pct <= 20 ? '#e5484d' : pct <= 40 ? '#e8850c' : 'var(--accent)';
@@ -383,7 +383,7 @@ function menubarHTML() {
       ${chip('time', '남은/완충 시간', !!cfg.text_time, false)}
       ${chip('wsys', '시스템 전력', !!cfg.text_w_sys, false)}
       ${chip('wbat', '배터리 전력', !!cfg.text_w_bat, false, null, '양수(+)는 충전, 음수(−)는 방전 — 배터리로 드나드는 전력')}
-      ${chip('adp', '어댑터 전력', !!cfg.text_adp, false, null, '어댑터가 공급 중인 실측 전력 — AC 연결 중에만 보여요')}
+      ${chip('adp', '어댑터 전력', !!cfg.text_adp, false, null, '충전기가 공급 중인 실측 전력 — 외부 전원 연결 중에만 보여요')}
       ${chip('temp', '온도', !!cfg.text_temp, false, null, '배터리 온도(°C) — 센서가 읽힐 때만 보여요')}
     </div>
     <div class="chiphint">${digitsIn ? '이 모양은 잔량 숫자를 아이콘 안에 그려요 — 옆 텍스트와 중복되지 않아요.'

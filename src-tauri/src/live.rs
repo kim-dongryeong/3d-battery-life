@@ -77,7 +77,7 @@ impl Reader {
             cycles: b.cycle_count(),
             health_pct: health,
             time_min: secs.map(|s| (s / 60.0).round() as i64).filter(|&m| m > 0),
-            state: if charging { "충전".into() } else if full { "완충".into() } else if discharging { "방전".into() } else { "AC".into() },
+            state: if charging { "충전".into() } else if full { "완충".into() } else if discharging { "방전".into() } else { "외부 전원".into() },   // 파워뱅크도 포함 — "AC"라 부르지 않는다
         }
     }
 }
