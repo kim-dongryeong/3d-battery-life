@@ -290,10 +290,11 @@ fn main() {
                             sc_on = c.shortcut;
                         }
                         // read SMC once per tick: feeds both the live-smc.json bridge and the menu-bar W.
-                        let mut sys_w = None;
+                        let (mut sys_w, mut adp_smc, mut ppbr_smc) = (None, None, None);
                         if let Some(ref s) = smc {
                             sys_w = s.system_watts();
                             let (adp_w, bat_w) = (s.adapter_watts(), s.battery_watts());
+                            adp_smc = adp_w; ppbr_smc = bat_w;
                             let f = |o: Option<f64>| o.map(|v| format!("{:.3}", v)).unwrap_or_else(|| "null".into());
                             let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
                             // accumulate a rolling 60s window so the recorder can log the minute's AVERAGE power
@@ -308,18 +309,26 @@ fn main() {
                                 f(s.battery_temp_c()), f(sys_w), f(adp_w), f(bat_w), f(av(ss)), f(av(sa)), f(av(sb)), f(s.dc_in_volts()), f(s.dc_in_amps()), now);
                             let _ = std::fs::write(data_dir().join("live-smc.json"), j);
                         }
+                        // battery W for the WIDGET/title — 혼합 method (viewer의 '혼합'): 방전 → SMC PPBR
+                        // 실측(매 틱 갱신, 음수), 그 외 → 수지(어댑터−시스템, 충전 시 양수). ioreg 셀 실측
+                        // (l.watts)은 ~60초 양자화라 SMC가 없을 때의 폴백으로만 쓴다.
+                        let bat_disp: f64 = if l.discharging {
+                            ppbr_smc.map(|w| -w.abs()).unwrap_or_else(|| live::signed_watts(&l))
+                        } else {
+                            match (adp_smc, sys_w) { (Some(a), Some(s)) => a - s, _ => live::signed_watts(&l) }
+                        };
                         if let Some(tray) = handle.tray_by_id("tray") {
                             // menu-bar "W" = live system draw (SMC) when we have it, else battery-rail watts.
                             // tray_title composes the enabled 텍스트 chips itself (incl. skipping % when the
                             // glyph draws it) — the rules live in ONE place and the settings UI mirrors them.
-                            let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts));
+                            let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts), bat_disp);
                             // ALWAYS Some(…): set_title(None) leaves the previous text in place on
                             // macOS, so turning the last 텍스트 chip off left a zombie "9.8W" behind
                             let _ = tray.set_title(Some(title));
                             // widget "wstack" draws a live power number → resolve it (sys plain, battery
                             // SIGNED +charge/−discharge per w7_src) and fold it (rounded) into the redraw key
                             let w7_bat = c.w7_battery();
-                            let w7 = if w7_bat { live::signed_watts(&l) } else { sys_w.unwrap_or(l.watts) };
+                            let w7 = if w7_bat { bat_disp } else { sys_w.unwrap_or(l.watts) };
                             let wkey = if c.widget == "wstack" { w7.round() as i64 } else { 0 };
                             // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/digit deco/wstack W)
                             let key = format!("{}-{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco, wkey);

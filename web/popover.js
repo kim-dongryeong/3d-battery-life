@@ -424,8 +424,9 @@ function pvState() {
   // pct comes from the DUMP (the tray's own number) so the strip text can never disagree with
   // the glyph digits next to it; W/time are live (they move every tick, cosmetic for preview)
   const trayPct = pvData && pvData.states && pvData.states.cur ? pvData.states.cur.pct : null;
-  // batW is SIGNED (+charge/−discharge): powerW from /api/live is signed; dump meta is signed too
-  return { pct: trayPct ?? s.pct ?? 0, min: s.timeRemain ?? null, sysW: s.systemW ?? s.watts ?? 0, batW: +s.powerW || 0 };
+  // batW mirrors the widget's 혼합 method: 방전 → SMC PPBR(음수), 그 외 → 수지(powerW, signed)
+  const batW = (!s.charging && s.ppbrW != null) ? -Math.abs(s.ppbrW) : (+s.powerW || 0);
+  return { pct: trayPct ?? s.pct ?? 0, min: s.timeRemain ?? null, sysW: s.systemW ?? s.watts ?? 0, batW };
 }
 const fmtSignedW = n => Math.abs(n) < 0.05 ? '0.0W' : `${n > 0 ? '+' : '−'}${Math.abs(n).toFixed(1)}W`;
 function composeTrayTitle(st) {

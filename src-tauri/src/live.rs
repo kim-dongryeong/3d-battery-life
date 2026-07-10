@@ -664,7 +664,7 @@ pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
 // available, falling back to the battery-rail watts (0 while plugged/holding).
 // Rules the settings UI mirrors 1:1 (nothing hidden): % is skipped when the glyph already draws
 // it; time is skipped while unknown (no countdown); a text-only widget never goes blank.
-pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64) -> String {
+pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64, bat_w: f64) -> String {
     if !l.ok {
         return String::new();
     }
@@ -673,8 +673,8 @@ pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64) -> String {
     let mut parts: Vec<String> = Vec::new();
     if pct_on && !c.digits_in_icon() { parts.push(format!("{pct}%")); }
     if time_on && matches!(l.time_min, Some(m) if m > 0) { parts.push(time_str(l)); }
-    if wsys_on { parts.push(format!("{sys_w:.1}W")); }        // system draw (SMC) — always ≥0
-    if wbat_on { parts.push(fmt_signed_w(signed_watts(l))); }   // battery rail — SIGNED (+charge/−discharge)
+    if wsys_on { parts.push(format!("{sys_w:.1}W")); }   // system draw (SMC) — always ≥0
+    if wbat_on { parts.push(fmt_signed_w(bat_w)); }      // battery — SIGNED, 혼합(방전 PPBR·충전 수지) from the ticker
     if c.widget == "text" && parts.is_empty() { parts.push(format!("{pct}%")); }   // no glyph to fall back on
     parts.join(" · ")
 }
@@ -713,27 +713,27 @@ mod tests {
         let both = Cfg { text_w_sys: Some(true), text_w_bat: Some(true), ..Cfg::default() };
         assert_eq!(both.title_items(), (false, false, true, true));
         let dis = Live { ok: true, watts: 3.1, discharging: true, ..Default::default() };
-        assert_eq!(tray_title(&dis, &both, 7.4), "7.4W · −3.1W");   // discharging → negative
+        assert_eq!(tray_title(&dis, &both, 7.4, signed_watts(&dis)), "7.4W · −3.1W");   // discharging → negative
         let chg = Live { ok: true, watts: 3.1, charging: true, ..Default::default() };
-        assert_eq!(tray_title(&chg, &both, 7.4), "7.4W · +3.1W");   // charging → positive
+        assert_eq!(tray_title(&chg, &both, 7.4, signed_watts(&chg)), "7.4W · +3.1W");   // charging → positive
     }
 
     #[test]
     fn title_composition_rules() {
         let l = live(67.4, Some(312), 7.44);
         let mut c = Cfg { text_pct: Some(true), text_time: Some(true), text_w: Some(true), ..Cfg::default() };
-        assert_eq!(tray_title(&l, &c, 9.96), "67% · 5:12 · 10.0W");
+        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l)), "67% · 5:12 · 10.0W");
         c.w_src = Some("bat".into());
-        assert_eq!(tray_title(&l, &c, 9.96), "67% · 5:12 · −7.4W");   // battery discharging → negative
+        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l)), "67% · 5:12 · −7.4W");   // battery discharging → negative
         c.widget = "combo".into();                                   // % drawn in the glyph → skipped in text
-        assert_eq!(tray_title(&l, &c, 9.96), "5:12 · −7.4W");
+        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l)), "5:12 · −7.4W");
         let idle = live(67.4, None, 0.0);                            // unknown countdown → time part skipped
-        assert_eq!(tray_title(&idle, &c, 9.96), "0.0W");             // no flow → unsigned zero
+        assert_eq!(tray_title(&idle, &c, 9.96, signed_watts(&idle)), "0.0W");             // no flow → unsigned zero
         let mut t = Cfg { text_pct: Some(false), text_time: Some(false), text_w: Some(false), ..Cfg::default() };
         t.widget = "text".into();                                    // text-only never goes blank
-        assert_eq!(tray_title(&l, &t, 9.96), "67%");
+        assert_eq!(tray_title(&l, &t, 9.96, signed_watts(&l)), "67%");
         t.widget = "icon".into();
-        assert_eq!(tray_title(&l, &t, 9.96), "");                    // icon-only: no title at all
+        assert_eq!(tray_title(&l, &t, 9.96, signed_watts(&l)), "");                    // icon-only: no title at all
     }
 
     // the digits should be REAL type — a system font must parse on any macOS (else the 5×7
