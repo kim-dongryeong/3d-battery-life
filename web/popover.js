@@ -239,6 +239,18 @@ function detailHTML(s) {
   const rows = [];
   if (detail.manufactureDate) rows.push(['제조일', `${esc(detail.manufactureDate)}${detail.ageDays ? ` · ${Math.floor(detail.ageDays / 365)}년 ${Math.round((detail.ageDays % 365) / 30)}개월` : ''}`]);
   if (s.ac && detail.adapterWatts) rows.push(['전원 어댑터', `${+detail.adapterWatts} W${detail.adapterName ? ' · ' + esc(detail.adapterName) : ''}`]);
+  // 충전 기술 식별 (ioreg AdapterDetails.FamilyCode) — PD인지, 5V 저속인지, 계약과 제공 프로필까지
+  const a = detail.adapter;
+  if (s.ac && a) {
+    const TECH = { 'usbc-pd': 'USB-C PD', 'usbc-5v': 'USB-C 5V', usb: 'USB(구형)', dedicated: '전용 어댑터', unknown: '미상' };
+    const bits = [TECH[a.tech] || '미상'];
+    if (a.voltage && a.current) bits.push(`계약 ${a.voltage}V×${a.current}A`);
+    if (a.manufacturer) bits.push(esc(a.manufacturer));
+    rows.push(['충전 기술', bits.join(' · ')]);
+    if (a.hvcMenu && a.hvcMenu.length) {   // 충전기가 제공하는 PD 프로필 목록 (PD 충전기만 노출)
+      rows.push(['제공 프로필', a.hvcMenu.map(p => `${p.v}V/${p.a}A`).join(' · ')]);
+    }
+  }
   if (detail.onHold) rows.push(['충전 상태', '🔵 최적화 충전(대기 중)']);
   return rows.length ? `<div class="sec">상세</div>${kvHTML(rows)}` : '';
 }

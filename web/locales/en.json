@@ -180,6 +180,13 @@
   "예상 시각": "ETA", "지금부터": "From now",
   "완충(100%)까지": "To full (100%)", "0%까지": "To 0%",
   "구간별(곡선)": "Per-band (curve)", "지금": "now",
+  "구간별 통계": "Per-band stats", "에너지 수지": "Energy balance", "이 부하로는 완충 불가": "Can't reach full at this load",
+  "다른 충전기라면…": "With another charger…", "↳ 그 충전기라면": "↳ with that charger",
+  "그 충전기의 충전 이력이 아직 부족해요": "Not enough charge history for that charger yet",
+  "충전기 미상": "Unknown charger", "(비교 모드)": "(compare mode)",
+  "이 충전기 이력 기준": "from this charger's history", "비슷한 급 충전기 기준": "from similar-class chargers", "전체 충전 이력 평균": "from all charge history",
+  "충전 기술": "Charge tech", "제공 프로필": "Offered profiles",
+  "USB-C 5V": "USB-C 5V", "USB(구형)": "USB (legacy)", "전용 어댑터": "Dedicated adapter", "미상": "Unknown",
 
   "불러오는 중…": "Loading…", "라이브": "Live", "최근 추세": "Recent trend",
   "표시": "Display", "언어 / Language": "Language", "레이아웃": "Layout", "테마": "Theme",

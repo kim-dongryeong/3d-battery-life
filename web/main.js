@@ -10,7 +10,7 @@ let X = X_BASE;                                          // effective time-axis 
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, detail: null, rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', projDis: 'on', projChg: 'on', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, detail: null, chargeRates: null, chargeCompare: '', rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', projDis: 'on', projChg: 'on', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
 state.theme = (() => { try { return localStorage.getItem('battTheme') || 'light'; } catch { return 'light'; } })();   // 라이트가 기본
 state.ui = '1';       // 테마 스킨 셀렉터 제거 — 기본 고정 (프리셋 코드는 유지)
 state.layout = 'a';   // 대시보드 고정 — 대체 레이아웃 셀렉터 제거 (코드는 유지)
@@ -456,19 +456,44 @@ function chargeRatesByBand() {
   for (const band in acc) if (acc[band].time > 0 && acc[band].rise > 0) m[band] = acc[band].rise / acc[band].time * 60;
   return m;
 }
+// 충전 구간별 %/min의 소스 결정 — 내 데이터면 서버의 충전기 프로필 통계(계층 폴백 적용,
+// /api/charge-rates)를 쓰고, 데모/미로드면 종전처럼 리포트 run에서 직접 뽑는다.
+function chargeBands() {
+  const cr = state.source === 'real' ? state.chargeRates : null;
+  if (cr && cr.resolved && Object.keys(cr.resolved.byBand || {}).length) {
+    return { rates: cr.resolved.byBand, tier: cr.resolved.tier, tierByBand: cr.resolved.tierByBand, totalMin: cr.resolved.totalMin };
+  }
+  return { rates: chargeRatesByBand(), tier: null, tierByBand: null, totalMin: null };
+}
+// 비교용: 특정 충전기 프로필의 밴드 속도 (표본 부족 밴드는 전체 pooled로 메움) — 8분(480s) 기준
+function bandsForProfile(key) {
+  const cr = state.chargeRates; if (!cr) return null;
+  const prof = cr.profiles && cr.profiles[key];
+  const out = {};
+  for (let b = 10; b <= 100; b += 10) {
+    const own = prof && prof.byBand[b] != null && (prof.secByBand[b] || 0) >= 480;
+    const v = own ? prof.byBand[b] : (cr.global && cr.global.byBand[b] != null ? cr.global.byBand[b] : null);
+    if (v != null) out[b] = v;
+  }
+  return Object.keys(out).length ? out : null;
+}
 // 충전 예상: 현재 잔량 → 100% (구간별 곡선 + 현재구간 등속 직선). 완충/충전이력없음 → null.
-function computeCharge() {
+// `ratesOverride` = 비교 셀렉터가 고른 다른 충전기 프로필의 밴드 속도.
+function computeCharge(ratesOverride = null) {
   const r = state.report, L = r && r.latest;
   const L0 = state.rateLevel === 'pct' ? (L && L.pct != null ? L.pct : null)
     : (L && L.rawCap > 0 && L.rawMax > 0) ? +(L.rawCap / L.rawMax * 100).toFixed(1) : (L && L.pct != null ? L.pct : null);
   if (L0 == null || L0 >= 99.5) return null;                 // 완충/거의 완충 → 충전 예상선 없음
-  const rates = chargeRatesByBand(); if (!Object.keys(rates).length) return null;   // 충전 이력 없음
+  const src = ratesOverride ? { rates: ratesOverride, tier: 'compare', totalMin: null } : chargeBands();
+  const rates = src.rates; if (!rates || !Object.keys(rates).length) return null;   // 충전 이력 없음
   const sorted = Object.values(rates).sort((a, b) => a - b), fallback = sorted[sorted.length >> 1];
   const rateAt = lvl => rates[Math.min(100, Math.max(10, Math.ceil(lvl / 10) * 10))] ?? fallback;
   const rLin = rateAt(Math.min(100, Math.ceil((L0 + 1e-6) / 10) * 10)), linMin = (100 - L0) / rLin;
   const pts = [{ t: 0, lvl: L0 }]; let t = 0, lvl = L0, guard = 0;
-  while (lvl < 99.99 && guard++ < 40) { const hi = Math.min(100, Math.ceil((lvl + 1e-6) / 10) * 10); t += (hi - lvl) / rateAt(hi); lvl = hi; pts.push({ t, lvl }); }
-  return { L0, target: 100, rLin, linMin, curveMin: t, pts, baseT: (L && L.t) ? L.t : Date.now() / 1000 };
+  const mins = { }; // 구간 경계 도달 시각 (에너지 수지 스플라이스용: 80% 등)
+  while (lvl < 99.99 && guard++ < 40) { const hi = Math.min(100, Math.ceil((lvl + 1e-6) / 10) * 10); t += (hi - lvl) / rateAt(hi); lvl = hi; mins[hi] = t; pts.push({ t, lvl }); }
+  return { L0, target: 100, rLin, linMin, curveMin: t, pts, minsAt: mins,
+    tier: src.tier, tierMin: src.totalMin, baseT: (L && L.t) ? L.t : Date.now() / 1000 };
 }
 function renderProjection() {
   const box = document.getElementById('projChart'); if (!box) return;
@@ -500,6 +525,78 @@ function renderProjection() {
       <div class="prjEq">곡선 = Σ (각 10% 구간 ÷ 그 구간 방전율) — 구간마다 속도가 달라 휨</div>
       ${macos != null ? `<div class="prjEq">macOS 추정(ioreg): <b>${dur(macos)}</b> · ${eta(macos)} <span class="prjMuted">— 참고(공식 비공개)</span></div>` : ''}
     </div>`;
+}
+
+// ── 충전 예상 카드: 충전기 프로필별 통계 + 에너지 수지 + macOS 추정 3종 병기 ─────────────────
+// 충전 중(또는 비교 셀렉터 사용 중)에만 보인다. 속도의 출처(이 충전기 이력/비슷한 급/전체 평균)를
+// 배지로 정직하게 표기 — docs/plans/charger-aware-charge-projection.md.
+const TECH_KO = { 'usbc-pd': 'USB-C PD', 'usbc-5v': 'USB-C 5V', usb: 'USB(구형)', dedicated: '전용 어댑터', unknown: '미상' };
+const TIER_KO = { profile: '이 충전기 이력 기준', class: '비슷한 급 충전기 기준', global: '전체 충전 이력 평균' };
+function chargerLabel(key, meta) {
+  if (meta && meta.name) return meta.name;
+  if (key === 'unknown') return '미상(과거 기록)';   // 어댑터 필드가 없던 시기의 충전 이력
+  const m = /^(\d+)W@(\S+?)V\//.exec(key || '');
+  const tech = meta && meta.tech ? `${TECH_KO[meta.tech] || ''} ` : '';
+  return m ? `${tech}${m[1]}W (${m[2]}V)`.trim() : (key || '충전기');
+}
+function renderChargeCard() {
+  const box = document.getElementById('chgChart'); if (!box) return;
+  const cr = state.source === 'real' ? state.chargeRates : null;
+  const L = state.report && state.report.latest;
+  const charging = !!(L && L.charging);
+  if (!cr) { box.innerHTML = ''; return; }
+  const P = computeCharge();
+  if (!P) { box.innerHTML = ''; return; }   // 완충/이력 없음 — 카드 숨김 (방전 카드처럼 비충전 중에도 '지금 충전한다면'으로 표시)
+  const dur = min => fmtDur(min * 60), eta = min => fmtWhen(((P ? P.baseT : Date.now() / 1000) + min * 60) * 1000);
+  const rows = [];
+  // ① 구간별 통계 (현재 충전기 프로필, 계층 폴백)
+  if (P) {
+    const tierNote = P.tier && TIER_KO[P.tier] ? `${TIER_KO[P.tier]}${P.tier === 'profile' && P.tierMin ? ` · ${dur(P.tierMin)} 분량` : ''}` : '';
+    rows.push(`<div class="prjR"><span class="prjK"><i class="prjL solid"></i>구간별 통계</span><b>${dur(P.curveMin)}</b> · ${eta(P.curveMin)}</div>`);
+    if (tierNote) rows.push(`<div class="prjEq">속도 출처: ${tierNote}</div>`);
+  }
+  // ② 에너지 수지 (kdr 방식): →80%는 수지, 80→100%는 구간별 통계로 스플라이스
+  const eb = cr.energyBalance;
+  if (charging && eb) {
+    if (!eb.feasible) {
+      rows.push(`<div class="prjR"><span class="prjK"><i class="prjL dash"></i>에너지 수지</span><b>이 부하로는 완충 불가</b></div>`);
+      rows.push(`<div class="prjEq">공급 여유 ${eb.pBat != null ? eb.pBat.toFixed(1) : '?'}W ≤ 0 — 소비가 충전을 앞서고 있어요</div>`);
+    } else {
+      const tail = P && P.L0 < 80 && P.minsAt && P.minsAt[80] != null ? P.curveMin - P.minsAt[80] : 0;   // 80→100% 밴드 통계
+      const total = (eb.minutes || 0) + Math.max(0, tail);
+      rows.push(`<div class="prjR"><span class="prjK"><i class="prjL dash"></i>에너지 수지</span><b>${dur(total)}</b> · ${eta(total)}</div>`);
+      rows.push(`<div class="prjEq">→80% 수지 ${dur(eb.minutes)} (${eb.regime === 'adapter-limited'
+        ? `어댑터 포화 · 지난 ${eb.window}h 시스템 평균 ${eb.avgSysW != null ? eb.avgSysW.toFixed(1) : '?'}W 차감`
+        : '배터리 제한 · 현재 수지'} · 충전 여유 ${eb.pBat}W)${tail > 0 ? ` + 80→100% 통계 ${dur(tail)}` : ''}</div>`);
+    }
+  }
+  // ③ macOS 자체 추정 (참고)
+  if (charging && L.timeRemain != null) rows.push(`<div class="prjEq">macOS 추정(ioreg): <b>${dur(L.timeRemain)}</b> · ${eta(L.timeRemain)} <span class="prjMuted">— 참고(공식 비공개)</span></div>`);
+  // ④ 다른 충전기와 비교 — 사전(adapters.json) ∪ 통계 이력이 있는 프로필(10분 이상)
+  const keys = [...new Set([...Object.keys(cr.adapters || {}), ...Object.keys(cr.profiles || {})])]
+    .filter(k => (!cr.current || k !== cr.current.key) && (!cr.profiles[k] || cr.profiles[k].totalMin >= 10));
+  let cmpHTML = '';
+  if (keys.length) {
+    const opts = ['<option value="">다른 충전기라면…</option>']
+      .concat(keys.map(k => `<option value="${k}"${state.chargeCompare === k ? ' selected' : ''}>${chargerLabel(k, cr.adapters[k])}</option>`));
+    let cmpRow = '';
+    if (state.chargeCompare) {
+      const CB = bandsForProfile(state.chargeCompare);
+      const CP = CB ? computeCharge(CB) : null;
+      cmpRow = CP ? `<div class="prjR"><span class="prjK">↳ 그 충전기라면</span><b>${dur(CP.curveMin)}</b> · ${eta(CP.curveMin)}</div>`
+        : '<div class="prjEq prjMuted">그 충전기의 충전 이력이 아직 부족해요</div>';
+    }
+    cmpHTML = `<div class="prjR"><select id="chgCmp">${opts.join('')}</select></div>${cmpRow}`;
+  }
+  const cur = cr.current;
+  const badge = cur
+    ? `${chargerLabel(cur.key, cur.meta)}${cur.meta && cur.meta.tech ? ` · ${TECH_KO[cur.meta.tech]}` : ''}${cur.meta && cur.meta.voltage && cur.meta.current ? ` · 계약 ${cur.meta.voltage}V×${cur.meta.current}A` : ''}`
+    : '충전기 미상';
+  box.innerHTML = `
+    <div class="hcHdr">⚡ 충전 예상 <small>현재 ${P.L0.toFixed(1)}% → 100%${charging ? '' : ' (지금 충전한다면)'}${charging ? ` · 🔌 ${badge}` : ''}</small></div>
+    <div class="prjF">${rows.join('')}${cmpHTML}</div>`;
+  const sel = document.getElementById('chgCmp');
+  if (sel) sel.onchange = () => { state.chargeCompare = sel.value; renderChargeCard(); };
 }
 
 // 3D 방전 예상선: 현재 지점에서 앞으로 시간을 진행시키며 %가 0으로 떨어지는 곡선/직선을 3D 그래프에 겹쳐
@@ -658,6 +755,7 @@ function updateHud(r) {
   stats.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd${k === '기준 시각' ? ' id="asof"' : ''}>${v}</dd>`).join('');
   document.getElementById('healthChart').innerHTML = healthChartHTML(r.health);
   renderProjection();   // 방전 예상(직선+구간별 곡선) — 과거 방전 속도로 현재%→0% 투영
+  renderChargeCard();   // 충전 예상(충전기 프로필·에너지 수지·macOS 3종) — 충전 중에만 표시
 
   renderRates();  // rigorous per-band discharge-rate panel (lib/bucketRates.js, /api/rates)
   if (typeof renderInsight === 'function') renderInsight();   // E 카드 레이아웃 값 갱신
@@ -1070,6 +1168,7 @@ async function loadRates() {
   }
   renderRates();
   renderProjection();   // rates 로드 후 방전 예상 갱신(구간별 곡선은 byBand 필요)
+  renderChargeCard();
   drawProjection3D();   // 3D 예상선도 rates 로드 후 갱신
 }
 
@@ -1287,7 +1386,10 @@ async function load() {
   // 배터리 상세(시리얼·설계 사이클 한도) — 내 데이터에서만, 팝오버에서 뷰어로 이관
   if (state.source === 'real') {
     fetch('/api/detail').then(res => res.ok ? res.json() : null).then(d => { state.detail = d; if (state.report) updateHud(state.report); }).catch(() => {});
-  } else if (state.detail) { state.detail = null; if (state.report) updateHud(state.report); }
+    // 충전기 프로필별 충전 통계 + 에너지 수지 — 충전 예상 카드/3D 충전선의 소스 (내 데이터 전용)
+    fetch(`/api/charge-rates?level=${state.rateLevel}`).then(res => res.ok ? res.json() : null)
+      .then(cr => { state.chargeRates = cr; renderChargeCard(); drawProjection3D(); }).catch(() => {});
+  } else { state.chargeRates = null; renderChargeCard(); if (state.detail) { state.detail = null; if (state.report) updateHud(state.report); } }
   scheduleLive();              // (re)arm the 60s live refresh for '내 데이터'
 }
 

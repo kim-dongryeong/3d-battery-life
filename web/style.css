@@ -45,8 +45,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .hcHdr small { font-weight: 400; opacity: .85; }
 .hcSvg { display: block; width: 100%; height: auto; }
 /* 방전 예상(projection) */
-#projChart { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
-#projChart:empty { display: none; }
+#projChart, #chgChart { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+#projChart:empty, #chgChart:empty { display: none; }
+/* 충전 예상 카드의 '다른 충전기라면…' 비교 셀렉터 */
+#chgCmp { width: 100%; margin-top: 4px; padding: 2px 4px; font-size: 10.5px;
+  background: transparent; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
 .prjF { margin-top: 4px; font-size: 10.5px; line-height: 1.5; }
 .prjR { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
 .prjR b { font-variant-numeric: tabular-nums; }

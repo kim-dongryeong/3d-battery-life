@@ -9,6 +9,8 @@ import { execFile } from 'node:child_process';
 import { readSamples, buildReport } from './lib/report.js';
 import { analyzeRates } from './lib/bucketRates.js';
 import { sample, detail } from './lib/battery.js';
+import { chargerKey, readAdapters, upsertAdapter } from './lib/adapters.js';
+import { chargeStats, ratesWithFallback, classKey, energyBalanceETA } from './lib/chargeRates.js';
 import { userDataDir, cacheDir } from './lib/paths.js';
 import { generateDemoLines } from './scripts/gen-demo.js';
 import { generateDemo2Lines } from './scripts/gen-demo2.js';
@@ -197,10 +199,41 @@ export function startServer({ root, port } = {}) {
       return;
     }
 
+    // 충전기 프로필별 충전 통계 + 계층 폴백 + 에너지 수지 ETA — 뷰어 충전 예상 카드/3D 충전선의 소스.
+    // 내 데이터 전용(데모엔 충전기 정보가 없음). 계산은 lib/chargeRates.js(테스트됨), 여기선 조립만.
+    if (url.pathname === '/api/charge-rates') {
+      try {
+        const level = url.searchParams.get('level') === 'pct' ? 'pct' : 'rawcap';
+        let samples = readSource('real', assetDir);
+        let live = null;
+        try { live = sample(); if (live && live.t && samples.length && live.t > samples[samples.length - 1].t) samples = samples.concat(live); } catch { /* ioreg 실패 → 저장 샘플만 */ }
+        const stats = chargeStats(samples, level);
+        const cur = live && live.ac ? live : null;
+        const key = cur ? chargerKey(cur) : null;
+        const cls = cur ? classKey(cur) : null;
+        const adapters = readAdapters();
+        const resolved = ratesWithFallback(stats, key, cls);
+        // 에너지 수지: 벌크(→80%) + 참고용 전체(→100%, CV 꼬리는 낙관적이라 뷰어가 밴드 통계로 스플라이스)
+        const eb = live ? energyBalanceETA({ samples, live, targetPct: 80 }) : null;
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify({ current: key ? { key, cls, meta: adapters[key] || null } : null,
+          resolved, profiles: stats.profiles, classes: stats.classes, global: stats.global, adapters, energyBalance: eb }));
+      } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+
     // slow-changing extras (condition, serial, design cycles, adapter, on-hold) — cached ~10s
     if (url.pathname === '/api/detail') {
       try {
-        if (Date.now() - detailCache.at > 10000) detailCache = { at: Date.now(), data: detail() };
+        if (Date.now() - detailCache.at > 10000) {
+          detailCache = { at: Date.now(), data: detail() };
+          // 충전기 사전 보강: 이름·제조사·제공 프로필(UsbHvcMenu)은 detail에만 있음 — 팝오버가
+          // 열릴 때 채워 넣는다 (charging:false → chargeMin은 sampler만 집계, 이중 계상 없음)
+          const a = detailCache.data.adapter;
+          if (a && a.watts) upsertAdapter({ t: Math.round(Date.now() / 1000), adapterWnom: a.watts,
+            adapterVnom: a.voltage, adapterAnom: a.current, adapterId: a.adapterId,
+            familyCode: a.familyCode, charging: false }, a);
+        }
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(JSON.stringify(detailCache.data));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }

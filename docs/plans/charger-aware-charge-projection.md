@@ -1,6 +1,11 @@
 # 충전기 프로필별 충전 예상(완충까지) — 상세 설계 계획
 
-> 상태: **계획 확정 대기** (kdr 승인 후 빌드 시작) · 작성 2026-07-10
+> 상태: **P1–P4 구현 완료** (2026-07-11) · P5 실측 검증은 다음 충전 세션들에서 진행
+> 구현: `lib/battery.js parseAdapter` · `lib/adapters.js` · `lib/chargeRates.js`(+`tests/`, 10 pass) ·
+> `/api/charge-rates` · 뷰어 `renderChargeCard`(#chgChart) · 팝오버 '충전 기술/제공 프로필' 행.
+> 검증된 사실: FamilyCode 매핑은 IOPM.h+IOReturn.h로 확정(0xE0004009=USBCTypeC, 0xE000400A=USBCPD,
+> 전용 어댑터 = 0xE0024000대). 과거 데이터도 adapterWnom·Vnom 부분 키로 4개 충전기(30W@20V·15W@5V·
+> 27W@20V·35W@20V)가 이미 분리됨을 확인.
 > 배경 요청: "충전기 종류·충전 테크놀로지(PD, PPS, …)·파워에 따라 충전 속도가 아주 많이 달라진다.
 > 구간별 충전 통계에 충전기 프로필을 넣어서 시뮬레이션하자."
 

@@ -123,6 +123,7 @@ switch (cmd) {
     const s = sample();
     applyLiveSMC(s, true);   // record the 1-minute AVERAGE power (energy-correct), like the launchd sampler
     const wrote = appendSample(s);   // recency-guarded + locked (no double-write with launchd / resident app)
+    if (wrote && s.ac) (await import('../lib/adapters.js')).upsertAdapter(s);   // 충전기 사전 누적
     console.log(`${s.iso}  ${s.pct}%  ${s.watts}W  health ${s.healthPct}%  ${s.ac ? 'AC' : 'BATT'}${wrote ? '' : '  (skipped: 최근 기록 있음)'}`);
     break;
   }

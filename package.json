@@ -15,6 +15,7 @@
     "demo2": "node scripts/gen-demo2.js",
     "build:binary": "bash scripts/build-binary.sh",
     "build:app": "bash scripts/build-app.sh",
+    "test": "node --test tests/*.test.js",
     "report": "node -e \"import('./lib/report.js').then(m=>console.log(JSON.stringify(m.buildReport(m.readSamples('data/samples.jsonl')),null,2)))\""
   },
   "engines": { "node": ">=18" }
