@@ -16,7 +16,7 @@ let procN = +ls('battProcN', '6');                    // top-processes count · 
 let sparkMode = qs('sm') || ls('battSparkMode', 'pct');   // mini-chart metric: pct | w | 3d
 let sparkH = +(qs('sh') ?? ls('battSparkH', '6'));        // mini-chart window hours: 6 | 24 | 0(all)
 let three = null, t3d = null, t3dLoading = false;     // lazy Three.js + persistent live-3D scene (survives DOM rebuilds)
-let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w_sys: true, text_w_bat: false, w7_src: 'sys', digit_deco: true };
+let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w_sys: true, text_w_bat: false, w7_src: 'sys', digit_deco: true, text_temp: false, text_adp: false };
 let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
 // menu-bar preview (settings panel): glyph dumps from the Rust tray renderer via /api/tray-preview
 let pvSim = 'cur', pvData = null, pvTimer = 0, pvMeasure = null;
@@ -364,7 +364,7 @@ const widgetHasDigits = w => w === 'combo' || w === 'iconpct' || w === 'stack' |
 
 function menubarHTML() {
   const digitsIn = widgetHasDigits(cfg.widget);
-  const pctForced = cfg.widget === 'text' && !cfg.text_time && !cfg.text_w_sys && !cfg.text_w_bat;   // text-only never goes blank
+  const pctForced = cfg.widget === 'text' && !cfg.text_time && !cfg.text_w_sys && !cfg.text_w_bat && !cfg.text_temp && !cfg.text_adp;   // text-only never goes blank
   const chip = (key, label, on, locked, badge, tip) =>
     `<button class="chip${on ? ' on' : ''}${locked ? ' locked' : ''}"${locked ? '' : ` data-t="${key}"`} aria-pressed="${on}"${tip ? ` title="${tip}"` : ''}><i class="cdot"></i>${label}${badge ? `<em>${badge}</em>` : ''}</button>`;
   return `
@@ -383,10 +383,12 @@ function menubarHTML() {
       ${chip('time', '남은/완충 시간', !!cfg.text_time, false)}
       ${chip('wsys', '시스템 전력', !!cfg.text_w_sys, false)}
       ${chip('wbat', '배터리 전력', !!cfg.text_w_bat, false, null, '양수(+)는 충전, 음수(−)는 방전 — 배터리로 드나드는 전력')}
+      ${chip('adp', '어댑터 전력', !!cfg.text_adp, false, null, '어댑터가 공급 중인 실측 전력 — AC 연결 중에만 보여요')}
+      ${chip('temp', '온도', !!cfg.text_temp, false, null, '배터리 온도(°C) — 센서가 읽힐 때만 보여요')}
     </div>
     <div class="chiphint">${digitsIn ? '이 모양은 잔량 숫자를 아이콘 안에 그려요 — 옆 텍스트와 중복되지 않아요.'
       : pctForced ? '텍스트만 모양은 비워둘 수 없어 잔량을 기본 표시해요.'
-      : '켠 항목이 · 로 이어져 아이콘 옆에 붙어요. 시스템·배터리 전력을 둘 다 켤 수도 있어요.'}</div>
+      : '켠 항목이 공백으로 이어져 아이콘 옆에 붙어요. 시스템·배터리 전력을 둘 다 켤 수도 있어요.'}</div>
     ${(cfg.text_w_bat || (cfg.widget === 'wstack' && cfg.w7_src === 'bat')) ? '<div class="chiphint signhint">배터리 전력은 부호로 방향을 나타내요 — 양수(+)는 충전, 음수(−)는 방전. 시스템 전력은 항상 양수(소비)예요.</div>' : ''}
     <div class="srow"><span>상태별 색상</span>${tglEl('colorize', cfg.colorize)}</div>
     ${cfg.widget === 'icon' ? `<div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>` : ''}
@@ -426,7 +428,8 @@ function pvState() {
   const trayPct = pvData && pvData.states && pvData.states.cur ? pvData.states.cur.pct : null;
   // batW mirrors the widget's 혼합 method: 방전 → SMC PPBR(음수), 그 외 → 수지(powerW, signed)
   const batW = (!s.charging && s.ppbrW != null) ? -Math.abs(s.ppbrW) : (+s.powerW || 0);
-  return { pct: trayPct ?? s.pct ?? 0, min: s.timeRemain ?? null, sysW: s.systemW ?? s.watts ?? 0, batW };
+  return { pct: trayPct ?? s.pct ?? 0, min: s.timeRemain ?? null, sysW: s.systemW ?? s.watts ?? 0, batW,
+    tempC: s.tempC ?? null, adpW: s.adapterW ?? null };
 }
 const fmtSignedW = n => Math.abs(n) < 0.05 ? '0.0W' : `${n > 0 ? '+' : '−'}${Math.abs(n).toFixed(1)}W`;
 function composeTrayTitle(st) {
@@ -435,8 +438,10 @@ function composeTrayTitle(st) {
   if (cfg.text_time && st.min != null) parts.push(`${Math.floor(st.min / 60)}:${String(st.min % 60).padStart(2, '0')}`);
   if (cfg.text_w_sys) parts.push(`${(+st.sysW || 0).toFixed(1)}W`);   // system draw — always ≥0
   if (cfg.text_w_bat) parts.push(fmtSignedW(+st.batW || 0));           // battery rail — signed
+  if (cfg.text_adp && st.adpW != null) parts.push(`${(+st.adpW).toFixed(1)}W`);   // adapter measured — AC only
+  if (cfg.text_temp && st.tempC != null) parts.push(`${Math.round(st.tempC)}°`);  // battery temp (°C)
   if (cfg.widget === 'text' && !parts.length) parts.push(`${Math.round(st.pct)}%`);
-  return parts.join(' · ');
+  return parts.join(' ');   // 공백 구분 — " · "를 빼서 메뉴바 폭 절약 (tray_title과 동일)
 }
 function glyphCanvas(styleKey, dispH, pixelated) {
   const set = pvData && pvData.glyphs && pvData.glyphs[pvSim];
@@ -486,11 +491,13 @@ async function pullPreview() {
 // chips save as ONE patch (all text keys) so tray.json gains the full set at once — after the
 // first save neither side needs the legacy `info`/`text_w` fallback again.
 function applyTextChip(k) {
-  const patch = { text_pct: !!cfg.text_pct, text_time: !!cfg.text_time, text_w_sys: !!cfg.text_w_sys, text_w_bat: !!cfg.text_w_bat };
+  const patch = { text_pct: !!cfg.text_pct, text_time: !!cfg.text_time, text_w_sys: !!cfg.text_w_sys, text_w_bat: !!cfg.text_w_bat, text_temp: !!cfg.text_temp, text_adp: !!cfg.text_adp };
   if (k === 'pct') patch.text_pct = !patch.text_pct;
   else if (k === 'time') patch.text_time = !patch.text_time;
   else if (k === 'wsys') patch.text_w_sys = !patch.text_w_sys;   // system & battery power independent
   else if (k === 'wbat') patch.text_w_bat = !patch.text_w_bat;
+  else if (k === 'adp') patch.text_adp = !patch.text_adp;
+  else if (k === 'temp') patch.text_temp = !patch.text_temp;
   cfg = { ...cfg, ...patch };
   render();
   fetch('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) }).catch(() => {});

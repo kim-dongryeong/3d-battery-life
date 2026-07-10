@@ -290,9 +290,10 @@ fn main() {
                             sc_on = c.shortcut;
                         }
                         // read SMC once per tick: feeds both the live-smc.json bridge and the menu-bar W.
-                        let (mut sys_w, mut adp_smc, mut ppbr_smc) = (None, None, None);
+                        let (mut sys_w, mut adp_smc, mut ppbr_smc, mut temp_smc) = (None, None, None, None);
                         if let Some(ref s) = smc {
                             sys_w = s.system_watts();
+                            temp_smc = s.battery_temp_c();
                             let (adp_w, bat_w) = (s.adapter_watts(), s.battery_watts());
                             adp_smc = adp_w; ppbr_smc = bat_w;
                             let f = |o: Option<f64>| o.map(|v| format!("{:.3}", v)).unwrap_or_else(|| "null".into());
@@ -321,7 +322,7 @@ fn main() {
                             // menu-bar "W" = live system draw (SMC) when we have it, else battery-rail watts.
                             // tray_title composes the enabled 텍스트 chips itself (incl. skipping % when the
                             // glyph draws it) — the rules live in ONE place and the settings UI mirrors them.
-                            let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts), bat_disp);
+                            let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts), bat_disp, adp_smc, temp_smc);
                             // ALWAYS Some(…): set_title(None) leaves the previous text in place on
                             // macOS, so turning the last 텍스트 chip off left a zombie "9.8W" behind
                             let _ = tray.set_title(Some(title));
@@ -329,9 +330,8 @@ fn main() {
                             // SIGNED +charge/−discharge per w7_src) and fold it (rounded) into the redraw key
                             let w7_bat = c.w7_battery();
                             let w7 = if w7_bat { bat_disp } else { sys_w.unwrap_or(l.watts) };
-                            // battery source shows one decimal → key at 0.1W so the glyph tracks it
-                            let wkey = if c.widget != "wstack" { 0 }
-                                else if w7_bat { (w7 * 10.0).round() as i64 } else { w7.round() as i64 };
+                            // both sources show one decimal → key at 0.1W so the glyph tracks it
+                            let wkey = if c.widget != "wstack" { 0 } else { (w7 * 10.0).round() as i64 };
                             // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/digit deco/wstack W)
                             let key = format!("{}-{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco, wkey);
                             if l.ok && key != last_key {

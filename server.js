@@ -72,6 +72,8 @@ function readTray() {
     }
   }
   if (t.w7_src == null) t.w7_src = 'sys';
+  if (t.text_temp == null) t.text_temp = false;   // post-chips additions: absent = off
+  if (t.text_adp == null) t.text_adp = false;
   return t;
 }
 // only accept known keys with valid types/ranges — tray.json is deserialized by Rust (serde),
@@ -93,6 +95,8 @@ function sanitizeCfg(p) {
   if (typeof p.text_w_bat === 'boolean') o.text_w_bat = p.text_w_bat;
   if (['sys', 'bat'].includes(p.w7_src)) o.w7_src = p.w7_src;
   if (typeof p.digit_deco === 'boolean') o.digit_deco = p.digit_deco;
+  if (typeof p.text_temp === 'boolean') o.text_temp = p.text_temp;
+  if (typeof p.text_adp === 'boolean') o.text_adp = p.text_adp;
   return o;
 }
 

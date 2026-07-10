@@ -200,7 +200,10 @@
   "이 모양은 잔량 숫자를 아이콘 안에 그려요 — 옆 텍스트와 중복되지 않아요.": "This shape draws the % inside the icon — it won't repeat in the text.",
   "텍스트만 모양은 비워둘 수 없어 잔량을 기본 표시해요.": "Text-only can't be empty, so the level is always shown.",
   "켠 항목이 · 로 이어져 아이콘 옆에 붙어요. 시간은 계산될 때만 보여요.": "Enabled items join with · beside the icon. Time shows only when known.",
-  "켠 항목이 · 로 이어져 아이콘 옆에 붙어요. 시스템·배터리 전력을 둘 다 켤 수도 있어요.": "Enabled items join with · beside the icon. System & battery power can both be on.",
+  "켠 항목이 공백으로 이어져 아이콘 옆에 붙어요. 시스템·배터리 전력을 둘 다 켤 수도 있어요.": "Enabled items line up beside the icon. System & battery power can both be on.",
+  "어댑터 전력": "Adapter power",
+  "어댑터가 공급 중인 실측 전력 — AC 연결 중에만 보여요": "Measured power the adapter is supplying — shown only on AC",
+  "배터리 온도(°C) — 센서가 읽힐 때만 보여요": "Battery temperature (°C) — shown when the sensor reads",
   "배터리 부족": "Low battery", "충전 완료": "Charge complete",
   "설정": "Settings", "배터리 기록 시작": "Start battery logging", "배터리 기록 중지": "Stop battery logging",
 

@@ -105,18 +105,23 @@ pub struct Cfg {
     #[serde(default)] pub text_w_bat: Option<bool>, // append battery-rail power "3.1W" (both may be on)
     #[serde(default)] pub w7_src: Option<String>,   // widget "wstack" power source: "sys" | "bat"
     #[serde(default = "d_true")] pub digit_deco: bool, // stack digits: state color + outline (false = plain white)
+    #[serde(default)] pub text_temp: Option<bool>,  // append battery temperature "31°" (SMC, when known)
+    #[serde(default)] pub text_adp: Option<bool>,   // append adapter measured power "60.2W" (AC only)
 }
 
 impl Cfg {
-    // Effective side-text items as (pct, time, w_sys, w_bat) — system & battery power are now
-    // INDEPENDENT (both can show). Precedence: explicit text_w_sys/bat > the old single text_w+w_src
-    // > the original 표시 텍스트 enum (0 none·1 %·2 time·3 sysW·4 %+sysW·5 %+time·6 batW·7 %+batW).
-    pub fn title_items(&self) -> (bool, bool, bool, bool) {
+    // Effective side-text items as (pct, time, w_sys, w_bat, adp, temp) — system & battery power
+    // are INDEPENDENT (both can show). Precedence: explicit text_w_sys/bat > the old single
+    // text_w+w_src > the original 표시 텍스트 enum (0 none·1 %·2 time·3 sysW·4 %+sysW·5 %+time·
+    // 6 batW·7 %+batW). temp/adp are post-chips additions: absent = off, no legacy meaning.
+    pub fn title_items(&self) -> (bool, bool, bool, bool, bool, bool) {
+        let temp = self.text_temp.unwrap_or(false);
+        let adp = self.text_adp.unwrap_or(false);
         // no chip keys at all → file predates the chips UI → map the legacy enum
         if self.text_pct.is_none() && self.text_time.is_none() && self.text_w.is_none()
             && self.text_w_sys.is_none() && self.text_w_bat.is_none() {
             let i = if self.info > 7 { 4 } else { self.info };
-            return (matches!(i, 1 | 4 | 5 | 7), matches!(i, 2 | 5), matches!(i, 3 | 4), matches!(i, 6 | 7));
+            return (matches!(i, 1 | 4 | 5 | 7), matches!(i, 2 | 5), matches!(i, 3 | 4), matches!(i, 6 | 7), adp, temp);
         }
         let (w_sys, w_bat) = if self.text_w_sys.is_some() || self.text_w_bat.is_some() {
             (self.text_w_sys.unwrap_or(false), self.text_w_bat.unwrap_or(false))
@@ -125,7 +130,7 @@ impl Cfg {
             let bat = self.w_src.as_deref() == Some("bat");
             (tw && !bat, tw && bat)
         };
-        (self.text_pct.unwrap_or(false), self.text_time.unwrap_or(false), w_sys, w_bat)
+        (self.text_pct.unwrap_or(false), self.text_time.unwrap_or(false), w_sys, w_bat, adp, temp)
     }
     // styles that draw the % digits inside the glyph — the % title item is redundant there
     // (the settings UI shows this as a locked "아이콘에 포함" chip, so the rule is visible)
@@ -142,7 +147,8 @@ impl Default for Cfg {
     fn default() -> Self {
         Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: "icon".into(), glyph_xl: false, shortcut: true,
               text_pct: None, text_time: None, text_w: None, w_src: None,   // None → title_items falls back to `info`
-              text_w_sys: None, text_w_bat: None, w7_src: None, digit_deco: true }
+              text_w_sys: None, text_w_bat: None, w7_src: None, digit_deco: true,
+              text_temp: None, text_adp: None }
     }
 }
 pub fn cfg_path() -> std::path::PathBuf {
@@ -236,6 +242,13 @@ impl Hi {
         let bw = (((w as f32 * s).round() as i32) / SS).max(1) * SS;   // divisible by SS
         let bh = (((h as f32 * s).round() as i32) / SS).max(1) * SS;
         Hi { w: bw, h: bh, buf: vec![0u8; (bw * bh * 4) as usize], s }
+    }
+    // knock a shape OUT of what's already drawn (alpha → 0 by coverage) — used for the 1px
+    // transparent rim around digits/bolt over the battery fill (macOS's own cutout grammar)
+    fn erase(&mut self, x: i32, y: i32, cov: f32) {
+        if x < 0 || y < 0 || x >= self.w || y >= self.h || cov <= 0.0 { return; }
+        let i = ((y * self.w + x) * 4 + 3) as usize;
+        self.buf[i] = (self.buf[i] as f32 * (1.0 - cov.min(1.0))).round() as u8;
     }
     fn blend(&mut self, x: i32, y: i32, c: (u8, u8, u8, u8), cov: f32) {
         if x < 0 || y < 0 || x >= self.w || y >= self.h || cov <= 0.0 { return; }
@@ -347,26 +360,48 @@ fn sys_font() -> Option<&'static fontdue::Font> {
         None
     }).as_ref()
 }
-fn stamp_text(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8)) -> bool {
-    let Some(f) = sys_font() else { return false };
-    let px = size * hi.s;
-    let gs: Vec<(fontdue::Metrics, Vec<u8>)> = text.chars().map(|ch| f.rasterize(ch, px)).collect();
+// rasterize `text` centered at (cx, cy) and feed every glyph pixel (x, y, coverage) to `f` —
+// the shared layout core under stamp_text (ink) and stamp_digits_cut (halo erase)
+fn glyph_px(s: f32, text: &str, size: f32, cx: f32, cy: f32, mut f: impl FnMut(i32, i32, f32)) -> bool {
+    let Some(font) = sys_font() else { return false };
+    let px = size * s;
+    let gs: Vec<(fontdue::Metrics, Vec<u8>)> = text.chars().map(|ch| font.rasterize(ch, px)).collect();
     let total: f32 = gs.iter().map(|(m, _)| m.advance_width).sum();
     let cap = gs.iter().map(|(m, _)| m.height).max().unwrap_or(0) as f32;
-    let left = cx * hi.s - total / 2.0;
-    let top = cy * hi.s - cap / 2.0;
+    let left = cx * s - total / 2.0;
+    let top = cy * s - cap / 2.0;
     let mut pen = left;
     for (m, bm) in &gs {
         let gx = (pen + m.xmin as f32).round() as i32;
         let gy = (top + cap - m.height as f32 - m.ymin as f32).round() as i32;
         for row in 0..m.height {
             for col in 0..m.width {
-                hi.blend(gx + col as i32, gy + row as i32, c, bm[row * m.width + col] as f32 / 255.0);
+                f(gx + col as i32, gy + row as i32, bm[row * m.width + col] as f32 / 255.0);
             }
         }
         pen += m.advance_width;
     }
     true
+}
+fn stamp_text(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8)) -> bool {
+    let s = hi.s;
+    glyph_px(s, text, size, cx, cy, |x, y, cov| hi.blend(x, y, c, cov))
+}
+// clip rect in OUTPUT units → an (x0, y0, x1, y1) test in hi-buffer pixels. The cutout stamps
+// clip to the battery's INNER zone so the halo can knock out the fill but never the body outline.
+fn clip_test(s: f32, clip: (f32, f32, f32, f32)) -> impl Fn(i32, i32) -> bool {
+    let (x0, y0, x1, y1) = (clip.0 * s, clip.1 * s, clip.2 * s, clip.3 * s);
+    move |x, y| { let (px, py) = (x as f32 + 0.5, y as f32 + 0.5); px >= x0 && px <= x1 && py >= y0 && py <= y1 }
+}
+// erase the text's shape dilated by `r` output px (9 offset stamps ≈ a round dilation) — punch
+// the transparent rim BEFORE stamp_digits draws the shadow+ink into the hole
+fn stamp_digits_cut(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, r: f32, clip: (f32, f32, f32, f32)) {
+    let s = hi.s;
+    let inside = clip_test(s, clip);
+    let d = r * 0.7071;
+    for (ox, oy) in [(0.0f32, 0.0f32), (r, 0.0), (-r, 0.0), (0.0, r), (0.0, -r), (d, d), (d, -d), (-d, d), (-d, -d)] {
+        let _ = glyph_px(s, text, size, cx + ox, cy + oy, |x, y, cov| if inside(x, y) { hi.erase(x, y, cov) });
+    }
 }
 // digits with the tray's soft shadow; pixel-font fallback keeps the tray alive without a font
 // stamp_digits, but shrink the font to keep the text within `max_w` output units (e.g. a longer
@@ -423,6 +458,61 @@ fn charge_overlay(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32) {
         plug(hi, cx + 0.4, cy - h / 2.0 + 0.7, h, DIGIT_SHADOW);
         plug(hi, cx, cy - h / 2.0, h, INK);
     }
+}
+// erase variants of the overlay shapes — the same geometry enlarged by ~`r` and knocked out of
+// the canvas (clipped to the battery's inner zone) so the ink lands inside a transparent rim
+fn erase_poly(hi: &mut Hi, pts: &[(f32, f32)], clip: (f32, f32, f32, f32)) {
+    let s = hi.s;
+    let inside = clip_test(s, clip);
+    let p: Vec<(f32, f32)> = pts.iter().map(|&(x, y)| (x * s, y * s)).collect();
+    let (x0, x1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.0), a.1.max(q.0)));
+    let (y0, y1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.1), a.1.max(q.1)));
+    for y in (y0.floor() as i32).max(0)..(y1.ceil() as i32).min(hi.h) {
+        for x in (x0.floor() as i32).max(0)..(x1.ceil() as i32).min(hi.w) {
+            if !inside(x, y) { continue; }
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let mut hit = false;
+            let mut j = p.len() - 1;
+            for i in 0..p.len() {
+                let (xi, yi) = p[i];
+                let (xj, yj) = p[j];
+                if (yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi { hit = !hit; }
+                j = i;
+            }
+            if hit { hi.erase(x, y, 1.0); }
+        }
+    }
+}
+fn erase_rrect(hi: &mut Hi, x0: f32, y0: f32, x1: f32, y1: f32, r: f32, clip: (f32, f32, f32, f32)) {
+    let s = hi.s;
+    let inside = clip_test(s, clip);
+    let (hx0, hy0, hx1, hy1) = (x0 * s, y0 * s, x1 * s, y1 * s);
+    let r = (r * s).min((hx1 - hx0) / 2.0).min((hy1 - hy0) / 2.0).max(0.0);
+    for y in (hy0.floor() as i32).max(0)..(hy1.ceil() as i32).min(hi.h) {
+        for x in (hx0.floor() as i32).max(0)..(hx1.ceil() as i32).min(hi.w) {
+            if inside(x, y) && in_rr(x as f32 + 0.5, y as f32 + 0.5, hx0, hy0, hx1, hy1, r) { hi.erase(x, y, 1.0); }
+        }
+    }
+}
+fn plug_erase(hi: &mut Hi, cx: f32, top: f32, s: f32, r: f32, clip: (f32, f32, f32, f32)) {
+    let pw = s * 0.09 + r;
+    for dx in [-s * 0.17, s * 0.17] { erase_rrect(hi, cx + dx - pw, top - r, cx + dx + pw, top + s * 0.30 + r, pw, clip); }
+    erase_rrect(hi, cx - s * 0.32 - r, top + s * 0.22 - r, cx + s * 0.32 + r, top + s * 0.62 + r, s * 0.10, clip);
+    erase_rrect(hi, cx - s * 0.05 - r, top + s * 0.60 - r, cx + s * 0.05 + r, top + s + r, s * 0.05, clip);
+}
+// 1px transparent rim under the bolt/plug: knock the enlarged shape out of the fill first, then
+// draw the normal shadow+ink into the hole. `clip` = the battery's inner zone (outline stays intact).
+fn charge_overlay_cut(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, clip: (f32, f32, f32, f32)) {
+    const R: f32 = 1.0;
+    if l.charging {
+        const P: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.60), (0.45, 0.60), (0.36, 1.0), (0.92, 0.38), (0.50, 0.38)];
+        let (ew, eh) = (w + 2.0 * R, h + 2.0 * R);   // proportional enlarge ≈ the dilation for this convex-ish shape
+        let pts: Vec<(f32, f32)> = P.iter().map(|&(u, v)| (cx - ew / 2.0 + u * ew, cy - eh / 2.0 + v * eh)).collect();
+        erase_poly(hi, &pts, clip);
+    } else if l.full {
+        plug_erase(hi, cx, cy - h / 2.0, h, R, clip);
+    }
+    charge_overlay(hi, l, cx, cy, w, h);
 }
 
 // Level → fill color (shared by the icon + bar glyphs). Low Power Mode → yellow, like macOS' own
@@ -508,10 +598,13 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     hi.fill_rrect(66.5, 16.0, 70.5, 24.0, 2.0, INK);
     let fw = (56.0 * pct as f32 / 100.0).max(3.0);
     hi.fill_rrect(6.0, 8.0, 6.0 + fw, 32.0, 3.0, fill);
-    // charge status at the left + the % as real type over the fill
+    // charge status at the left + the % as real type over the fill — both punch a 1px
+    // transparent rim out of the fill first so they stay crisp on the colored bar
+    const CLIP: (f32, f32, f32, f32) = (4.0, 6.0, 64.0, 34.0);   // inner zone (outline untouched)
     let ind = if l.charging || l.full { 12.0f32 } else { 0.0 };
-    charge_overlay(&mut hi, l, 12.0, 20.0, 12.0, 26.0);   // combo: 큼지막한 번개
+    charge_overlay_cut(&mut hi, l, 12.0, 20.0, 12.0, 26.0, CLIP);   // combo: 큼지막한 번개
     let digits = format!("{}", pct.round() as u32);
+    stamp_digits_cut(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, 1.0, CLIP);
     stamp_digits(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, INK, true);
     hi.down()
 }
@@ -539,7 +632,7 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
     // slim air gap (1px) so the visible fill mass carries the body's height
     let fw = (34.0 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
-    charge_overlay(&mut hi, l, 21.0, 26.0, 13.0, 18.0);   // stack: 미니 배터리를 꽉 채우는 번개
+    charge_overlay_cut(&mut hi, l, 21.0, 26.0, 13.0, 18.0, (3.0, 17.0, 39.0, 33.3));   // stack: 미니 배터리를 꽉 채우는 번개
     hi.down()
 }
 
@@ -552,12 +645,12 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
     let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-    // top: power as real type — battery source is SIGNED with one decimal ("−4.3W"), system
-    // source plain integer. Longer strings auto-shrink to fit the canvas width.
+    // top: power as real type, ONE DECIMAL for both sources ("3.5W" / "−4.3W") — battery adds
+    // the sign (+charge/−discharge). Longer strings auto-shrink to fit the canvas width.
     let wtxt = if signed {
         if w_val.abs() < 0.05 { "0W".into() }
         else { format!("{}{:.1}W", if w_val > 0.0 { "+" } else { "−" }, w_val.abs()) }
-    } else { format!("{}W", w_val.max(0.0).round() as u32) };
+    } else { format!("{:.1}W", w_val.max(0.0)) };
     stamp_digits_fit(&mut hi, &wtxt, 15.5, 46.0, 24.0, 6.6, INK, true);
     // bottom: mini rounded battery, fill by level, with the level % inside (combo-style)
     let body_sh = (0u8, 0u8, 0u8, 95u8);
@@ -568,6 +661,7 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
     let fw = (40.0 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
     let digits = format!("{}", pct.round() as u32);
+    stamp_digits_cut(&mut hi, &digits, 16.2, 23.0, 25.3, 1.0, (3.0, 17.0, 43.0, 33.3));   // 1px rim in the fill
     stamp_digits(&mut hi, &digits, 16.2, 23.0, 25.3, INK, true);   // level % inside the battery
     hi.down()
 }
@@ -590,7 +684,7 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool) -> (Vec<u8>, 
     // fill with an air gap to the outline (macOS's own battery-icon grammar)
     let fw = (56.0 * pct as f32 / 100.0).max(3.0);
     hi.fill_rrect(6.0, m + 4.0, 6.0 + fw, 36.0 - m, 3.0, fill);
-    charge_overlay(&mut hi, l, 34.0, 20.0, 17.0, 27.0);   // icon: 몸통 중앙의 큼지막한 번개
+    charge_overlay_cut(&mut hi, l, 34.0, 20.0, 17.0, 27.0, (4.0, m + 2.0, 64.0, 38.0 - m));   // icon: 몸통 중앙의 큼지막한 번개
     hi.down()
 }
 
@@ -647,9 +741,17 @@ pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
             styles.insert(style.into(), serde_json::json!({ "w": w, "h": h, "c": b64(&col), "m": b64(&mono) }));
         }
         glyphs.insert((*name).into(), styles.into());
+        // demo temp/adapter for the 온도·어댑터 chips' preview text (adapter only while charging;
+        // the popover uses live values for "cur" so these fixed ones never show there)
+        let (temp_c, adp_w) = match *name {
+            "chg" => (serde_json::json!(32.0), serde_json::json!(60.2)),
+            "low" => (serde_json::json!(33.5), serde_json::Value::Null),
+            _ => (serde_json::json!(30.5), serde_json::Value::Null),
+        };
         meta.insert((*name).into(), serde_json::json!({
             "pct": l.pct.round(), "charging": l.charging, "full": l.full, "lpm": is_lpm,
             "min": l.time_min, "sysW": sys_w, "batW": signed_watts(l),   // SIGNED (+charge/−discharge)
+            "tempC": temp_c, "adpW": adp_w,
         }));
     }
     let out = serde_json::json!({ "states": meta, "glyphs": glyphs }).to_string();
@@ -671,28 +773,32 @@ pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     hi.fill_rrect(10.0, 0.0, 18.0, 2.5, 1.2, INK);
     let fh = (27.5f32 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(10.0, 34.0 - fh, 18.0, 34.0, 2.0, fill);
-    charge_overlay(&mut hi, l, 14.0, 20.0, 11.0, 27.0);   // bar: 셀을 세로로 채우는 큰 번개
+    charge_overlay_cut(&mut hi, l, 14.0, 20.0, 11.0, 27.0, (8.0, 4.5, 20.0, 36.0));   // bar: 셀을 세로로 채우는 큰 번개
     hi.down()
 }
 
 // The compact tray-title text macOS shows next to the icon, composed from the independent
-// title items (잔량/시간/전력 chips) joined with " · ". `sys_w` is the live SMC system draw when
+// title items (잔량/시간/전력/어댑터/온도 chips) joined with a plain space — kdr dropped the
+// old " · " separators to save menu-bar width. `sys_w` is the live SMC system draw when
 // available, falling back to the battery-rail watts (0 while plugged/holding).
 // Rules the settings UI mirrors 1:1 (nothing hidden): % is skipped when the glyph already draws
-// it; time is skipped while unknown (no countdown); a text-only widget never goes blank.
-pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64, bat_w: f64) -> String {
+// it; time is skipped while unknown (no countdown); adapter power only while it reads (AC);
+// temperature only when the SMC sensor reads; a text-only widget never goes blank.
+pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64, bat_w: f64, adp_w: Option<f64>, temp_c: Option<f64>) -> String {
     if !l.ok {
         return String::new();
     }
-    let (pct_on, time_on, wsys_on, wbat_on) = c.title_items();
+    let (pct_on, time_on, wsys_on, wbat_on, adp_on, temp_on) = c.title_items();
     let pct = l.pct.round() as i64;
     let mut parts: Vec<String> = Vec::new();
     if pct_on && !c.digits_in_icon() { parts.push(format!("{pct}%")); }
     if time_on && matches!(l.time_min, Some(m) if m > 0) { parts.push(time_str(l)); }
     if wsys_on { parts.push(format!("{sys_w:.1}W")); }   // system draw (SMC) — always ≥0
     if wbat_on { parts.push(fmt_signed_w(bat_w)); }      // battery — SIGNED, 혼합(방전 PPBR·충전 수지) from the ticker
+    if adp_on { if let Some(a) = adp_w { parts.push(format!("{a:.1}W")); } }   // adapter measured (PDTR) — AC only
+    if temp_on { if let Some(t) = temp_c { parts.push(format!("{}°", t.round() as i64)); } }   // battery temp (SMC, °C)
     if c.widget == "text" && parts.is_empty() { parts.push(format!("{pct}%")); }   // no glyph to fall back on
-    parts.join(" · ")
+    parts.join(" ")
 }
 
 #[cfg(test)]
@@ -708,15 +814,15 @@ mod tests {
     fn legacy_info_maps_to_chips() {
         let mut c = Cfg::default();
         for (info, want) in [
-            (0u8, (false, false, false, false)),
-            (1, (true, false, false, false)),
-            (2, (false, true, false, false)),
-            (3, (false, false, true, false)),   // sysW
-            (4, (true, false, true, false)),    // %+sysW
-            (5, (true, true, false, false)),
-            (6, (false, false, false, true)),   // batW (independent from sys now)
-            (7, (true, false, false, true)),    // %+batW
-            (99, (true, false, true, false)),   // out of range → default (4)
+            (0u8, (false, false, false, false, false, false)),
+            (1, (true, false, false, false, false, false)),
+            (2, (false, true, false, false, false, false)),
+            (3, (false, false, true, false, false, false)),   // sysW
+            (4, (true, false, true, false, false, false)),    // %+sysW
+            (5, (true, true, false, false, false, false)),
+            (6, (false, false, false, true, false, false)),   // batW (independent from sys now)
+            (7, (true, false, false, true, false, false)),    // %+batW
+            (99, (true, false, true, false, false, false)),   // out of range → default (4)
         ] {
             c.info = info;
             assert_eq!(c.title_items(), want, "info={info}");
@@ -724,32 +830,36 @@ mod tests {
         // explicit chips win over the legacy enum
         c.info = 0;
         c.text_time = Some(true);
-        assert_eq!(c.title_items(), (false, true, false, false));
+        assert_eq!(c.title_items(), (false, true, false, false, false, false));
         // system AND battery power can both be on (the new independent chips); battery is SIGNED
         let both = Cfg { text_w_sys: Some(true), text_w_bat: Some(true), ..Cfg::default() };
-        assert_eq!(both.title_items(), (false, false, true, true));
+        assert_eq!(both.title_items(), (false, false, true, true, false, false));
         let dis = Live { ok: true, watts: 3.1, discharging: true, ..Default::default() };
-        assert_eq!(tray_title(&dis, &both, 7.4, signed_watts(&dis)), "7.4W · −3.1W");   // discharging → negative
+        assert_eq!(tray_title(&dis, &both, 7.4, signed_watts(&dis), None, None), "7.4W −3.1W");   // discharging → negative
         let chg = Live { ok: true, watts: 3.1, charging: true, ..Default::default() };
-        assert_eq!(tray_title(&chg, &both, 7.4, signed_watts(&chg)), "7.4W · +3.1W");   // charging → positive
+        assert_eq!(tray_title(&chg, &both, 7.4, signed_watts(&chg), None, None), "7.4W +3.1W");   // charging → positive
     }
 
     #[test]
     fn title_composition_rules() {
         let l = live(67.4, Some(312), 7.44);
         let mut c = Cfg { text_pct: Some(true), text_time: Some(true), text_w: Some(true), ..Cfg::default() };
-        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l)), "67% · 5:12 · 10.0W");
+        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l), None, None), "67% 5:12 10.0W");
         c.w_src = Some("bat".into());
-        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l)), "67% · 5:12 · −7.4W");   // battery discharging → negative
+        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l), None, None), "67% 5:12 −7.4W");   // battery discharging → negative
         c.widget = "combo".into();                                   // % drawn in the glyph → skipped in text
-        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l)), "5:12 · −7.4W");
+        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l), None, None), "5:12 −7.4W");
         let idle = live(67.4, None, 0.0);                            // unknown countdown → time part skipped
-        assert_eq!(tray_title(&idle, &c, 9.96, signed_watts(&idle)), "0.0W");             // no flow → unsigned zero
+        assert_eq!(tray_title(&idle, &c, 9.96, signed_watts(&idle), None, None), "0.0W");             // no flow → unsigned zero
+        // 온도·어댑터 chips: appended when the value reads, silently skipped when it doesn't
+        c.text_temp = Some(true); c.text_adp = Some(true);
+        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l), Some(60.24), Some(31.6)), "5:12 −7.4W 60.2W 32°");
+        assert_eq!(tray_title(&l, &c, 9.96, signed_watts(&l), None, None), "5:12 −7.4W");   // no AC/no sensor → skipped
         let mut t = Cfg { text_pct: Some(false), text_time: Some(false), text_w: Some(false), ..Cfg::default() };
         t.widget = "text".into();                                    // text-only never goes blank
-        assert_eq!(tray_title(&l, &t, 9.96, signed_watts(&l)), "67%");
+        assert_eq!(tray_title(&l, &t, 9.96, signed_watts(&l), None, None), "67%");
         t.widget = "icon".into();
-        assert_eq!(tray_title(&l, &t, 9.96, signed_watts(&l)), "");                    // icon-only: no title at all
+        assert_eq!(tray_title(&l, &t, 9.96, signed_watts(&l), None, None), "");                    // icon-only: no title at all
     }
 
     // the digits should be REAL type — a system font must parse on any macOS (else the 5×7
@@ -764,8 +874,8 @@ mod tests {
     #[test]
     fn glyphs_render_all_levels() {
         for pct in 0..=100 {
-            for chg in [false, true] {
-                let l = Live { ok: true, pct: pct as f64, charging: chg, discharging: !chg, watts: 4.3, ..Default::default() };
+            for (chg, full) in [(false, false), (true, false), (false, true)] {   // 방전·충전·완충(플러그 컷아웃)
+                let l = Live { ok: true, pct: pct as f64, charging: chg, full, discharging: !chg && !full, watts: 4.3, ..Default::default() };
                 for style in ["icon", "icon_xl", "combo", "iconpct", "stack", "stack_plain", "wstack", "wstack_bat", "bar"] {
                     let _ = render_style(style, &l, true, false, 6.2);
                 }
