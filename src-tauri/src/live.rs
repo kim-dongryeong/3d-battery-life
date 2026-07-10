@@ -178,8 +178,30 @@ fn fmt_signed_w(w: f64) -> String {
 // % can sit 1–2% off the number macOS itself shows — the tray digits must match the system's own
 // figure (and the popover's ioreg %), so when this parses the ticker overrides Live.pct with it.
 pub fn displayed_pct() -> Option<f64> {
-    let out = std::process::Command::new("pmset").args(["-g", "batt"]).output().ok()?;
-    parse_pmset_pct(&String::from_utf8_lossy(&out.stdout))
+    parse_pmset_pct(&cmd_timeout("pmset", &["-g", "batt"], 1500)?)
+}
+
+// Command::output() has NO timeout — a hung child would block the caller (the tray ticker!)
+// forever. Spawn with a piped stdout, poll try_wait against a deadline, kill on timeout.
+// (Output is read after exit; fine for small outputs like pmset's, well under the pipe buffer.)
+pub fn cmd_timeout(bin: &str, args: &[&str], ms: u64) -> Option<String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(bin).args(args).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline { let _ = child.kill(); let _ = child.wait(); return None; }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Err(_) => { let _ = child.kill(); let _ = child.wait(); return None; }
+        }
+    }
+    let mut s = String::new();
+    child.stdout.take()?.read_to_string(&mut s).ok()?;
+    Some(s)
 }
 fn parse_pmset_pct(s: &str) -> Option<f64> {
     let head = &s[..s.find('%')?];

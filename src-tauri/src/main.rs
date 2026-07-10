@@ -62,23 +62,26 @@ fn ask_consent() -> bool {
     }
 }
 
-// Low Power Mode state (`pmset -g` → "lowpowermode  1"). Read on a slow cadence from the ticker.
+// Low Power Mode state (`pmset -g` → "lowpowermode  1"). Read on a slow cadence from the ticker —
+// through the timeout runner, so a hung pmset can't block the ticker.
 fn low_power_mode() -> bool {
-    std::process::Command::new("pmset").arg("-g").output().ok().is_some_and(|o| {
-        String::from_utf8_lossy(&o.stdout)
-            .lines()
-            .any(|l| l.contains("lowpowermode") && l.split_whitespace().last() == Some("1"))
+    live::cmd_timeout("pmset", &["-g"], 1500).is_some_and(|out| {
+        out.lines().any(|l| l.contains("lowpowermode") && l.split_whitespace().last() == Some("1"))
     })
 }
 
 // macOS notification via osascript (no plugin / entitlement). Quotes sanitized.
+// FIRE-AND-FORGET on a detached thread: osascript can hang (TCC prompt / Notification Center,
+// especially after the app moves to a new path), and it used to run synchronously ON THE TICKER
+// THREAD — both observed tray freezes happened right at the ≤20% alert crossing. A hung notifier
+// must never stall the tray.
 fn notify(title: &str, body: &str) {
     let clean = |s: &str| s.replace('\\', "").replace('"', "'").replace(['\n', '\r'], " ");
     let script = format!(
         "display notification \"{}\" with title \"{}\" sound name \"Ping\"",
         clean(body), clean(title)
     );
-    let _ = Sh::new("osascript").args(["-e", &script]).status();
+    std::thread::spawn(move || { let _ = Sh::new("osascript").args(["-e", &script]).status(); });
 }
 // Low/high battery alerts (like Stats/iStat), with hysteresis so each crossing fires once.
 // Long-form ETA for notification bodies, e.g. "1시간 20분" / "45분"; "" when unknown.
