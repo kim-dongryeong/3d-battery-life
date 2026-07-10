@@ -329,7 +329,9 @@ fn main() {
                             // SIGNED +charge/−discharge per w7_src) and fold it (rounded) into the redraw key
                             let w7_bat = c.w7_battery();
                             let w7 = if w7_bat { bat_disp } else { sys_w.unwrap_or(l.watts) };
-                            let wkey = if c.widget == "wstack" { w7.round() as i64 } else { 0 };
+                            // battery source shows one decimal → key at 0.1W so the glyph tracks it
+                            let wkey = if c.widget != "wstack" { 0 }
+                                else if w7_bat { (w7 * 10.0).round() as i64 } else { w7.round() as i64 };
                             // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/digit deco/wstack W)
                             let key = format!("{}-{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco, wkey);
                             if l.ok && key != last_key {

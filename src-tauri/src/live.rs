@@ -324,8 +324,12 @@ impl Hi {
 }
 fn in_rr(px: f32, py: f32, x0: f32, y0: f32, x1: f32, y1: f32, r: f32) -> bool {
     if px < x0 || px > x1 || py < y0 || py > y1 { return false; }
-    let dx = px - px.clamp(x0 + r, x1 - r);
-    let dy = py - py.clamp(y0 + r, y1 - r);
+    // NOT f32::clamp: when r equals the half-extent (thin fill at low battery), float error can
+    // leave lo microscopically ABOVE hi and std's clamp PANICS ("min > max", off by ~2e-6) —
+    // this froze the tray twice at ≤20%. Order min/max by hand and fall back to the midpoint.
+    let safe = |v: f32, lo: f32, hi: f32| if hi < lo { (lo + hi) * 0.5 } else { v.max(lo).min(hi) };
+    let dx = px - safe(px, x0 + r, x1 - r);
+    let dy = py - safe(py, y0 + r, y1 - r);
     dx * dx + dy * dy <= r * r
 }
 
@@ -365,6 +369,17 @@ fn stamp_text(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8, 
     true
 }
 // digits with the tray's soft shadow; pixel-font fallback keeps the tray alive without a font
+// stamp_digits, but shrink the font to keep the text within `max_w` output units (e.g. a longer
+// "−12.3W" must still fit the wstack canvas instead of clipping at the edges)
+fn stamp_digits_fit(hi: &mut Hi, text: &str, size: f32, max_w: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8), shadow: bool) {
+    let mut size = size;
+    if let Some(f) = sys_font() {
+        let px = size * hi.s;
+        let total: f32 = text.chars().map(|ch| f.metrics(ch, px).advance_width).sum::<f32>() / hi.s;
+        if total > max_w { size *= max_w / total; }
+    }
+    stamp_digits(hi, text, size, cx, cy, c, shadow);
+}
 fn stamp_digits(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8), shadow: bool) {
     if sys_font().is_some() {
         if shadow { let _ = stamp_text(hi, text, size, cx, cy + 0.7, DIGIT_SHADOW); }
@@ -537,12 +552,13 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
     let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
-    // top: power as real type — battery source is SIGNED (+charge/−discharge), system source plain
+    // top: power as real type — battery source is SIGNED with one decimal ("−4.3W"), system
+    // source plain integer. Longer strings auto-shrink to fit the canvas width.
     let wtxt = if signed {
-        let n = w_val.round() as i64;
-        if n == 0 { "0W".into() } else { format!("{}{}W", if n > 0 { "+" } else { "−" }, n.abs()) }
+        if w_val.abs() < 0.05 { "0W".into() }
+        else { format!("{}{:.1}W", if w_val > 0.0 { "+" } else { "−" }, w_val.abs()) }
     } else { format!("{}W", w_val.max(0.0).round() as u32) };
-    stamp_digits(&mut hi, &wtxt, 15.5, 24.0, 6.6, INK, true);
+    stamp_digits_fit(&mut hi, &wtxt, 15.5, 46.0, 24.0, 6.6, INK, true);
     // bottom: mini rounded battery, fill by level, with the level % inside (combo-style)
     let body_sh = (0u8, 0u8, 0u8, 95u8);
     hi.stroke_rrect(1.0, 15.7, 45.0, 36.0, 5.0, 2.0, body_sh);
@@ -741,6 +757,20 @@ mod tests {
     #[test]
     fn system_font_loads() {
         assert!(sys_font().is_some(), "no system font parsed — digits will fall back to the pixel font");
+    }
+
+    // every style must render at EVERY level 0..100 — the in_rr clamp panic only fired when the
+    // fill was thin enough that the corner radius met the half-extent (≤20%, float-order dependent)
+    #[test]
+    fn glyphs_render_all_levels() {
+        for pct in 0..=100 {
+            for chg in [false, true] {
+                let l = Live { ok: true, pct: pct as f64, charging: chg, discharging: !chg, watts: 4.3, ..Default::default() };
+                for style in ["icon", "icon_xl", "combo", "iconpct", "stack", "stack_plain", "wstack", "wstack_bat", "bar"] {
+                    let _ = render_style(style, &l, true, false, 6.2);
+                }
+            }
+        }
     }
 
     #[test]
