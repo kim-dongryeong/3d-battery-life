@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { initI18n, observeI18n, tr, curLang, t } from './i18n.js';
+import * as FV from './flatViewport.js';   // 2D 시간 창 상태 전이 (순수 모듈, tests/flatViewport.test.js)
 
 // ---- world dimensions ---------------------------------------------------
 // X = 하루 중 시각 (0..24h)  ·  Y = 배터리 %/W (높이)  ·  Z = 경과 일수 (깊이)
@@ -8,6 +9,18 @@ import { initI18n, observeI18n, tr, curLang, t } from './i18n.js';
 const X_BASE = 24, Y = 16, Z = 44;
 let X = X_BASE;                                          // effective time-axis width — stretchable via state.xScale
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
+
+// ---- 2D 연속 시간축 (state.view === 'flat') ----------------------------------------------------
+const FLAT_W = 72;                    // 2D 시간축의 월드 폭 (3D의 X=24보다 넓게)
+let _fw = { w0: 0, w1: 1 };           // buildLines 시점에 고정된 보이는 창 — 좌표·축·예상선이 공유
+const xFlat = tt => ((tt - _fw.w0) / (_fw.w1 - _fw.w0) - 0.5) * FLAT_W;
+const flatSpanNow = () => FV.span(state.report);
+// 창 적용: 이미 flatViewport 전이 함수로 정규화된 창(null 허용)만 받는다. rAF 스로틀 재구축.
+let _flatRAF = 0;
+function applyFlatWin(win) {
+  state.flatWin = win;
+  if (!_flatRAF) _flatRAF = requestAnimationFrame(() => { _flatRAF = 0; rebuild(); });
+}
 
 // ---- state --------------------------------------------------------------
 const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, detail: null, chargeRates: null, chargeCompare: '', rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', projDis: 'on', projChg: 'on', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
@@ -26,6 +39,15 @@ state.xScale = (() => {
   } catch { return 1; }
 })();
 X = X_BASE * state.xScale;   // apply the saved time-axis stretch before the first build
+// ---- 보기 모드: '3d'(시각×날짜) | 'flat'(연속 시간축 2D). 딥링크 ?view=flat 우선.
+state.view = (() => {
+  try {
+    const q = new URLSearchParams(location.search).get('view');
+    if (q === 'flat' || q === '3d') return q;
+    return localStorage.getItem('battView') === 'flat' ? 'flat' : '3d';
+  } catch { return '3d'; }
+})();
+state.flatWin = null;   // 2D 보이는 시간 창 {t0,t1}(epoch 초) · null = 전체 — 전이는 web/flatViewport.js 경유만
 // deep-linkable view (shareable): ?y=pct|watts|rate · ?color=state|lowPower|tempC|loadPct|watts
 try {
   const q = new URLSearchParams(location.search);
@@ -176,6 +198,49 @@ function buildAxes(valMax, valLabel, maxDay, firstT) {
   const zt = makeLabel(tr('경과 일수 (오래됨 → 최근)'), { color: TH().titleC }); zt.position.set(x0 - 2, baseY - 2.6, z1 - 6); sceneRoot.add(zt);
 }
 
+// 2D 시간축 모드의 축·격자 — 세로선 = 날짜/시간 눈금(DST 안전, Intl 라벨), 가로선 = 값 눈금.
+// 전부 z=0 평면(XY). 3D buildAxes는 건드리지 않는다.
+function buildFlatAxes(valMax, valLabel) {
+  disposeGroup(sceneRoot);
+  const x0 = -FLAT_W / 2, x1 = FLAT_W / 2;
+  const signed = isSignedY();
+  const baseY = signed ? Y / 2 : 0;
+
+  // 값(가로) 격자선 + 라벨 — 3D buildAxes의 Y 눈금과 같은 수식
+  for (let i = 0; i <= 4; i++) {
+    const v = signed ? valMax * (i / 2 - 1) : valMax * i / 4, y = Y * i / 4;
+    const mid = signed && i === 2;                            // 부호축의 0선(충전↔방전 경계)은 청록 강조
+    sceneRoot.add(axisLine([x0, y, 0], [x1, y, 0], mid ? 0x4dd0c0 : (i === 0 ? TH().gMain : TH().gMinor)));
+    const s = makeLabel(state.y === 'pct' ? `${Math.round(v)}%` : state.y === 'rate' ? v.toFixed(2) : `${v.toFixed(0)}W`, { size: 28, color: TH().tickC });
+    s.position.set(x0 - 2.2, y, 0); sceneRoot.add(s);
+  }
+  const yt = makeLabel(tr(valLabel), { color: TH().titleC }); yt.position.set(x0 - 4.5, Y + 1, 0); sceneRoot.add(yt);
+
+  // 시간(세로) 눈금 — flatViewport.calendarTicks: 창 폭 적응 밀도, DST에도 로컬 자정/정시 유지
+  for (const tk of FV.calendarTicks(state.flatWin, flatSpanNow(), curLang())) {
+    const x = xFlat(tk.t);
+    if (x < x0 - 0.01 || x > x1 + 0.01) continue;
+    sceneRoot.add(axisLine([x, 0, 0], [x, Y, 0], tk.major ? TH().gMain : TH().gMinor));
+    const s = makeLabel(tk.label, { size: 26, color: TH().tickC }); s.position.set(x, baseY - 1, 0); sceneRoot.add(s);
+  }
+  // 주말 음영: 창 안의 토·일 구간을 옅은 판으로 — 달력 연산으로 하루씩 전진(DST 안전)
+  const d = new Date(_fw.w0 * 1000); d.setHours(0, 0, 0, 0);
+  while (d.getTime() / 1000 < _fw.w1) {
+    const a0 = d.getTime() / 1000, day = d.getDay();
+    d.setDate(d.getDate() + 1);
+    const b0 = d.getTime() / 1000;
+    if (day !== 0 && day !== 6) continue;
+    const a = Math.max(a0, _fw.w0), b = Math.min(b0, _fw.w1);
+    if (b <= a) continue;
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(xFlat(b) - xFlat(a), Y),
+      new THREE.MeshBasicMaterial({ color: TH().gMain, transparent: true, opacity: 0.10, depthWrite: false }));
+    m.position.set((xFlat(a) + xFlat(b)) / 2, Y / 2, -0.05);   // 곡선(z=0)보다 살짝 뒤
+    sceneRoot.add(m);
+  }
+  const xt = makeLabel(tr('날짜/시간 →'), { color: TH().titleC }); xt.position.set(0, baseY - 2.6, 0); sceneRoot.add(xt);
+}
+
 // ---- battery curves (continuous runs: charge + discharge, gap-split) ----
 // per-theme palette: WebGL lines are 1px, so the lightness tuned for the dark scene washes out
 // on the light background — light theme gets darker, more saturated inks (incl. LPM yellow→ochre)
@@ -236,6 +301,20 @@ function buildLines(report) {
   // midnight anchor can push the last slice to spanDays+1 — include it so Z never overshoots the grid
   const lastDay = runs.length ? dayOfT(runs[runs.length - 1].points[runs[runs.length - 1].points.length - 1].t) : 0;
   const maxDay = Math.max(1, report.spanDays || 0, lastDay, ...runs.map(r => r.dayIndex));
+  // 2D 연속 시간축: 이 빌드에서 쓸 창을 고정하고, 창 폭 비례로 다운샘플 stride를 정한다
+  const flat = state.view === 'flat';
+  if (flat) {
+    const sp = flatSpanNow();
+    _fw = state.flatWin ? { w0: state.flatWin.t0, w1: state.flatWin.t1 } : { w0: sp.min, w1: sp.max };
+  }
+  const flatPad = flat ? (_fw.w1 - _fw.w0) * 0.02 : 0;   // 창 가장자리에서 선이 뚝 끊기지 않게 여유
+  let flatStride = 1;
+  if (flat) {
+    const total = runs.reduce((s, r) => s + r.points.length, 0);
+    const sp = flatSpanNow();
+    const frac = Math.min(1, (_fw.w1 - _fw.w0) / Math.max(1, sp.max - sp.min));
+    flatStride = Math.max(1, Math.ceil(total * frac / 50000));
+  }
   const numeric = state.color !== 'state' && state.color !== 'lowPower';   // 'state'/'lowPower' are categorical, not ramped
   let cMin = null, cMax = null;
   if (numeric) {
@@ -278,12 +357,15 @@ function buildLines(report) {
     };
     for (const p of run.points) {
       pi++;
+      if (flat && (p.t < _fw.w0 - flatPad || p.t > _fw.w1 + flatPad)) { flush(); continue; }   // 창 밖 점 스킵(선분 단절)
+      if (flat && flatStride > 1 && (pi % flatStride) !== 0) continue;                          // 넓은 창 다운샘플
       const yv = state.y === 'rate' ? (rates ? rates[pi] : null) : (state.y === 'pct' ? levelPct(p) : wattValueOf(p));   // 배터리 %는 정밀도, 전력은 레일+측정방식 설정
       if (yv == null || !Number.isFinite(yv)) continue;         // skip null/NaN -> no bad vertices
       const d = dayOfT(p.t);
-      if (curDay !== null && d !== curDay) flush();             // split at midnight: no cross-day diagonal
+      if (!flat && curDay !== null && d !== curDay) flush();    // 3D만 자정 분할 (2D는 시간축이 이어짐)
       curDay = d;
-      pos.push(xFromTod(todOf(p.t)), yFromVal(yv, yMax), zFromDay(d, maxDay));  // X=시각, Y=값, Z=날짜(점별)
+      if (flat) pos.push(xFlat(p.t), yFromVal(yv, yMax), 0);                                    // X=연속 시간, Z=0 평면
+      else pos.push(xFromTod(todOf(p.t)), yFromVal(yv, yMax), zFromDay(d, maxDay));             // X=시각, Y=값, Z=날짜(점별)
       const c = numeric
         ? ramp(cMax > cMin && p[state.color] != null ? (p[state.color] - cMin) / (cMax - cMin) : 0.5)
         : state.color === 'lowPower' ? (p.lowPower ? CC().lpm : CC().lpmOff)
@@ -341,9 +423,10 @@ function rebuild() {
   document.getElementById('empty').hidden = !(r && (!r.runs || r.runs.length === 0));
   if (!r) return;
   const { yMax, maxDay, cMin, cMax } = buildLines(r);
-  buildAxes(yMax, yLabel(), maxDay, r.firstT);
+  if (state.view === 'flat') buildFlatAxes(yMax, yLabel()); else buildAxes(yMax, yLabel(), maxDay, r.firstT);
   projYMax = yMax; projMaxDay = maxDay; drawProjection3D();   // 방전 예상선(현재→0%) 겹쳐 그리기
   drawNowMarker(r, yMax, maxDay);   // '현재' 위치 점 — 자다 깬 직후에도 지금 잔량을 찍어줌
+  syncFlatUI();                     // 2D 전용 UI(기간 세그·미니맵·힌트 문구) 표시/갱신
 
   const cm = COLOR_META[state.color];
   document.getElementById('legLbl').textContent = cm.label;
@@ -644,12 +727,89 @@ function drawNowMarker(r, yMax, maxDay) {
   const d0 = new Date((r.firstT || 0) * 1000); d0.setHours(0, 0, 0, 0);
   const day = Math.floor((L.t - d0.getTime() / 1000) / 86400);
   const lvl = state.rateLevel === 'pct' ? L.pct : (L.cap != null ? L.cap : L.pct);
-  const pos = new THREE.Vector3(xFromTod(todOf(L.t)), yFromVal(lvl, yMax), zFromDay(day, maxDay));
+  if (state.view === 'flat' && (L.t < _fw.w0 || L.t > _fw.w1)) return;   // 창 밖이면 생략
+  const pos = state.view === 'flat'
+    ? new THREE.Vector3(xFlat(L.t), yFromVal(lvl, yMax), 0)
+    : new THREE.Vector3(xFromTod(todOf(L.t)), yFromVal(lvl, yMax), zFromDay(day, maxDay));
   const col = L.charging ? CC().chg : (L.ac ? CC().full : CC().dis);   // 상태색과 일치
   const dot = new THREE.Mesh(new THREE.SphereGeometry(0.26, 18, 18), new THREE.MeshBasicMaterial({ color: 0xffffff }));
   dot.position.copy(pos); nowGroup.add(dot);
   const halo = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 18), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.32 }));
   halo.position.copy(pos); nowGroup.add(halo);
+}
+
+// ---- 2D 전용 UI 동기화 + 미니맵 브러시 --------------------------------------------------------
+// 미니맵: 전체 기간의 잔량 개형(600버킷 산술평균) + 현재 창. 창 안 드래그=이동, 가장자리=크기,
+// 바깥 클릭=그 지점으로 점프. body 직속 오버레이(#flatMini — 248px #panel 안에 두면 잘림, P0-1).
+function syncFlatUI() {
+  const on = state.view === 'flat';
+  const mini = document.getElementById('flatMini'); if (mini) mini.hidden = !on;
+  const rng = document.getElementById('flatRangeGrp'); if (rng) rng.hidden = !on;
+  const xs = document.getElementById('xScaleGrp'); if (xs) xs.hidden = on;        // 3D 전용 가로폭 배율
+  const spinLbl = document.getElementById('spin'); if (spinLbl && spinLbl.parentElement) spinLbl.parentElement.style.visibility = on ? 'hidden' : '';   // 자동회전은 3D 전용
+  const hint = document.getElementById('sceneHint');
+  if (hint) hint.textContent = tr(on ? '드래그=이동 · 휠=커서 중심 줌 · 더블클릭=전체 · 아래 미니맵으로 구간 선택'
+    : '드래그=회전 · 휠=줌 · 우클릭드래그=이동 · 곡선에 마우스를 올리면 그 세션 정보가 보입니다.');
+  const reset = document.getElementById('reset'); if (reset) reset.textContent = tr(on ? '전체 보기' : '시점 리셋');
+  if (rng) rng.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.val === 'all' && !state.flatWin));
+  if (on) drawFlatMini();
+}
+function drawFlatMini() {
+  const cv = document.getElementById('flatMiniCv'); if (!cv || !state.report) return;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const W = Math.max(1, Math.round(cv.clientWidth * dpr)), H = Math.max(1, Math.round(cv.clientHeight * dpr));
+  if (cv.width !== W) cv.width = W;
+  if (cv.height !== H) cv.height = H;
+  const g = cv.getContext('2d'); g.clearRect(0, 0, W, H);
+  const sp = flatSpanNow();
+  const { w0, w1 } = state.flatWin ? { w0: state.flatWin.t0, w1: state.flatWin.t1 } : { w0: sp.min, w1: sp.max };
+  const xOf = tt => (tt - sp.min) / Math.max(1, sp.max - sp.min) * W;
+  // 잔량 개형: 버킷별 sum/count 산술평균 ((old+v)/2는 순서 의존 지수가중 — Codex P1 지적으로 교체)
+  const N = 600, sum = new Float64Array(N), cnt = new Float64Array(N);
+  for (const r of (state.report.runs || [])) for (const p of r.points) {
+    const v = levelPct(p); if (v == null) continue;
+    const b = clamp(Math.floor((p.t - sp.min) / Math.max(1, sp.max - sp.min) * N), 0, N - 1);
+    sum[b] += v; cnt[b]++;
+  }
+  g.strokeStyle = state.theme === 'light' ? '#4a5570' : '#9aa7c4'; g.lineWidth = dpr;
+  g.beginPath(); let pen = false;
+  for (let b = 0; b < N; b++) {
+    if (!cnt[b]) { pen = false; continue; }
+    const x = (b + 0.5) / N * W, y = H - (sum[b] / cnt[b]) / 100 * (H - 4 * dpr) - 2 * dpr;
+    if (!pen) { g.moveTo(x, y); pen = true; } else g.lineTo(x, y);
+  }
+  g.stroke();
+  // 현재 창 표시
+  g.fillStyle = state.theme === 'light' ? 'rgba(12,143,128,.16)' : 'rgba(77,208,192,.20)';
+  g.fillRect(xOf(w0), 0, Math.max(2, xOf(w1) - xOf(w0)), H);
+  g.strokeStyle = state.theme === 'light' ? '#0c8f80' : '#4dd0c0'; g.lineWidth = dpr;
+  g.strokeRect(xOf(w0) + 0.5, 0.5, Math.max(2, xOf(w1) - xOf(w0)) - 1, H - 1);
+}
+let miniDrag = null;   // {mode:'move'|'l'|'r', startT, t0, t1}
+{
+  const cv = document.getElementById('flatMiniCv');
+  if (cv) {
+    const tAt = e => { const r = cv.getBoundingClientRect(); const sp = flatSpanNow(); return sp.min + (e.clientX - r.left) / Math.max(1, r.width) * (sp.max - sp.min); };
+    cv.addEventListener('pointerdown', e => {
+      const sp = flatSpanNow();
+      const { w0, w1 } = state.flatWin ? { w0: state.flatWin.t0, w1: state.flatWin.t1 } : { w0: sp.min, w1: sp.max };
+      const tt = tAt(e);
+      const r = cv.getBoundingClientRect();
+      const edge = 6 * (sp.max - sp.min) / Math.max(1, r.width);           // 6px 분량의 시간
+      const mode = Math.abs(tt - w0) < edge ? 'l' : Math.abs(tt - w1) < edge ? 'r' : (tt > w0 && tt < w1) ? 'move' : 'jump';
+      if (mode === 'jump') { const span = Math.min(w1 - w0, sp.max - sp.min); applyFlatWin(FV.normalizeWindow({ t0: tt - span / 2, t1: tt + span / 2 }, sp)); return; }
+      miniDrag = { mode, startT: tt, t0: w0, t1: w1 };
+      try { cv.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    });
+    cv.addEventListener('pointermove', e => {
+      if (!miniDrag) return;
+      const sp = flatSpanNow(), tt = tAt(e), d = tt - miniDrag.startT;
+      if (miniDrag.mode === 'move') applyFlatWin(FV.normalizeWindow({ t0: miniDrag.t0 + d, t1: miniDrag.t1 + d }, sp));
+      else if (miniDrag.mode === 'l') applyFlatWin(FV.normalizeWindow({ t0: Math.min(tt, miniDrag.t1 - FV.MIN_DUR), t1: miniDrag.t1 }, sp));
+      else applyFlatWin(FV.normalizeWindow({ t0: miniDrag.t0, t1: Math.max(tt, miniDrag.t0 + FV.MIN_DUR) }, sp));
+    });
+    cv.addEventListener('pointerup', () => { miniDrag = null; });
+  }
 }
 function drawProjection3D() {
   // 예상선을 dispose 하기 전에, 그 위의 호버 하이라이트(공유 HI 재질)를 원복해 dispose 대상에서 뺀다
@@ -671,6 +831,11 @@ function drawProjection3DInner(r) {
   const d0 = new Date((r.firstT || 0) * 1000); d0.setHours(0, 0, 0, 0);
   const t0 = d0.getTime() / 1000, dayOfT = t => Math.floor((t - t0) / 86400);
   const yMax = projYMax, maxDay = projMaxDay;
+  const flat = state.view === 'flat';   // 2D: 연속 시간축에 한 줄로, 창 밖은 clip (Codex P0-5)
+  const posOf = (rt, lvl) => flat
+    ? new THREE.Vector3(xFlat(rt), yFromVal(lvl, yMax), 0)
+    : new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(lvl, yMax), zFromDay(dayOfT(rt), maxDay));
+  const inWin = rt => !flat || (rt >= _fw.w0 && rt <= _fw.w1);
   let startDrawn = false;
 
   const drawSet = (P, dir) => {   // P: {L0, target, curveMin, linMin, pts, baseT}
@@ -686,9 +851,13 @@ function drawProjection3DInner(r) {
         const mm = Math.min(tm, endMin);
         const lvl = isLinear ? P.L0 + (P.target - P.L0) * (mm / endMin) : lvlAtMin(mm);
         const rt = P.baseT + mm * 60, day = dayOfT(rt);
-        if (prevDay !== null && day !== prevDay) { segs.push([]); metas.push([]); }   // 자정에서 분리 → 가로 점프선 방지
+        // clip: 카메라 가로 여유(±6%)까지만 그린다 — 그 밖은 어차피 화면 밖이고, 창이 바뀌면 재구축된다
+        const margin = (_fw.w1 - _fw.w0) * 0.06;
+        if (flat && rt > _fw.w1 + margin) break;
+        if (flat && rt < _fw.w0 - margin) continue;
+        if (!flat && prevDay !== null && day !== prevDay) { segs.push([]); metas.push([]); }   // 3D만 자정 분리 → 가로 점프선 방지
         prevDay = day;
-        segs[segs.length - 1].push(new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(lvl, yMax), zFromDay(day, maxDay)));
+        segs[segs.length - 1].push(posOf(rt, lvl));
         metas[metas.length - 1].push({ t: rt, lvl, mm, dir });
       }
       for (let si = 0; si < segs.length; si++) {
@@ -708,9 +877,9 @@ function drawProjection3DInner(r) {
     const lineStr = isChg ? (lt ? '#4d8f68' : '#8fd6a8') : (lt ? '#5b7691' : '#9fb2c6');
     build(P.curveMin, false, curveHex, false, 0.9, isChg ? 'chgCurve' : 'disCurve');   // 구간별 곡선 (실선)
     build(P.linMin, true, lineHex, true, lt ? 0.8 : 0.6, isChg ? 'chgLine' : 'disLine');   // 등속 직선 (점선)
-    if (!startDrawn) {   // 시작점(현재 잔량) 표식 + '예상' 라벨 — 방전·충전이 같은 지점에서 출발하므로 한 번만
+    if (!startDrawn && inWin(P.baseT)) {   // 시작점(현재 잔량) 표식 + '예상' 라벨 — 방전·충전이 같은 지점에서 출발하므로 한 번만
       startDrawn = true;
-      const sp = new THREE.Vector3(xFromTod(todOf(P.baseT)), yFromVal(P.L0, yMax), zFromDay(dayOfT(P.baseT), maxDay));
+      const sp = posOf(P.baseT, P.L0);
       const dot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), new THREE.MeshBasicMaterial({ color: lt ? 0x2b3444 : 0xffffff }));
       dot.position.copy(sp); projGroup.add(dot);
       const lab = makeLabel(t('예상'), { size: 26, color: lt ? '#2f5e50' : '#dfeeea' }); lab.position.copy(sp).add(new THREE.Vector3(0, 1, 0)); projGroup.add(lab);
@@ -718,7 +887,8 @@ function drawProjection3DInner(r) {
     // 목표면(0% 또는 100%) 도달 지점: 작은 종점 점 + 화면좌표로 항상 뜨는 시각 태그
     const markEnd = (endMin, colHex, colStr, prefix, yBias) => {
       const rt = P.baseT + endMin * 60;
-      const p = new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(P.target, yMax), zFromDay(dayOfT(rt), maxDay));
+      if (!inWin(rt)) return;   // 2D에서 종점이 창 밖이면 점·태그 모두 생략 (P0-5: 태그가 화면 가장자리에 clamp돼 오독됨)
+      const p = posOf(rt, P.target);
       const d = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), new THREE.MeshBasicMaterial({ color: colHex }));
       d.position.copy(p); projGroup.add(d);
       addProjTag(p.clone(), `${prefix} ${P.target}% · ${fmtWhen(rt * 1000)}`, colStr, yBias);
@@ -1211,24 +1381,31 @@ overlay.add(marker, xLine, zLine, valLine, valDot, valPlane);
 
 // 마커에서 시각(X)·날짜(Z) 축(바닥) + 값(z축=세로) 축으로 안내선/점/면 배치
 function placeGuides(vp) {
-  const baseY = isSignedY() ? Y / 2 : 0, x0 = -X / 2, z0 = -Z / 2;
+  // 2D 시간축(flat): 축 상수가 다르다 — 값축 x0=-FLAT_W/2, 평면 z0=0 (Codex P0-2: 3D 상수를
+  // 고정 사용하면 안내선이 옛 3D 축으로 뻗음). 수평면(valPlane)은 정면 뷰에서 무의미 → 숨김.
+  const flat = state.view === 'flat';
+  const baseY = isSignedY() ? Y / 2 : 0, x0 = flat ? -FLAT_W / 2 : -X / 2, z0 = flat ? 0 : -Z / 2;
   const fp = new THREE.Vector3(vp.x, baseY, vp.z);            // 바닥 투영점
   marker.position.copy(vp);
   const fg = state.floorGuide === 'on';
-  xLine.visible = zLine.visible = fg;
+  xLine.visible = fg;
+  zLine.visible = fg && !flat;                                // 날짜(Z)축 안내선은 3D 전용
   if (fg) {
-    xLine.geometry.setFromPoints([fp.clone(), new THREE.Vector3(vp.x, baseY, z0)]);   // → 시각(X)축
-    zLine.geometry.setFromPoints([fp.clone(), new THREE.Vector3(x0, baseY, vp.z)]);    // → 날짜(Z)축
+    // flat: 점→시간축(baseY)으로 수직 낙하 · 3D: 바닥 투영점→시각(X)축
+    xLine.geometry.setFromPoints(flat ? [vp.clone(), fp.clone()] : [fp.clone(), new THREE.Vector3(vp.x, baseY, z0)]);
+    if (!flat) zLine.geometry.setFromPoints([fp.clone(), new THREE.Vector3(x0, baseY, vp.z)]);   // → 날짜(Z)축
   }
   const vg = state.valGuide;                                  // diag | step | dot | plane | off
   const VA = new THREE.Vector3(x0, vp.y, z0);                 // 값축(세로 x0,z0) 위, 같은 높이
   valLine.visible = vg === 'diag' || vg === 'step';
   valDot.visible = vg === 'dot';
-  valPlane.visible = vg === 'plane';
+  valPlane.visible = vg === 'plane' && !flat;
   if (vg === 'diag') valLine.geometry.setFromPoints([vp.clone(), VA.clone()]);                                   // 대각선 바로 축으로
-  else if (vg === 'step') valLine.geometry.setFromPoints([fp.clone(), vp.clone(), new THREE.Vector3(x0, vp.y, vp.z), VA.clone()]);   // 바닥→수직↑→축과평행→값축
+  else if (vg === 'step') valLine.geometry.setFromPoints(flat
+    ? [vp.clone(), VA.clone()]                                                                                   // flat: 값축까지 수평선
+    : [fp.clone(), vp.clone(), new THREE.Vector3(x0, vp.y, vp.z), VA.clone()]);   // 바닥→수직↑→축과평행→값축
   else if (vg === 'dot') { valDot.position.copy(VA); valDot.scale.setScalar(Math.max(0.12, state.markerSize * 0.9)); }              // 값축에 점만
-  else if (vg === 'plane') { valPlane.position.set(0, vp.y, 0); valPlane.scale.set(X + 0.5, Z + 0.5, 1); }                          // 그 높이의 수평면
+  else if (vg === 'plane' && !flat) { valPlane.position.set(0, vp.y, 0); valPlane.scale.set(X + 0.5, Z + 0.5, 1); }                 // 그 높이의 수평면
 }
 
 function pickAt(cx, cy) {   // raycast the curves → nearest vertex, or null
@@ -1286,6 +1463,39 @@ renderer.domElement.addEventListener('pointerup', e => {
     if (curHover.proj) showProjTip(curHover.proj, e.clientX, e.clientY, true);
     else showTip(curHover.dayIndex, curHover.point, e.clientX, e.clientY, true); }
 });
+// ---- 2D 시간축 내비게이션: 휠 = 커서 중심 줌 · 드래그 = 팬 · 더블클릭 = 전체 ------------------
+// 카메라는 고정이므로 화면 x(px) → z=0 평면의 월드 x → epoch 초로 되돌린다.
+function flatTimeAtScreen(cx) {
+  const ndc = new THREE.Vector3((cx / innerWidth) * 2 - 1, 0, 0.5).unproject(camera);
+  const dir = ndc.sub(camera.position).normalize();
+  const k = -camera.position.z / dir.z;
+  const wx = camera.position.x + dir.x * k;
+  return _fw.w0 + (wx / FLAT_W + 0.5) * (_fw.w1 - _fw.w0);
+}
+renderer.domElement.addEventListener('wheel', e => {
+  if (state.view !== 'flat') return;
+  e.preventDefault();                                          // 페이지 스크롤 방지
+  const f = e.deltaY > 0 ? 1.25 : 1 / 1.25;                    // 아래로 굴리면 축소
+  applyFlatWin(FV.zoomAt(state.flatWin, flatSpanNow(), flatTimeAtScreen(e.clientX), f));
+}, { passive: false });
+let flatDrag = null;
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (state.view !== 'flat') return;
+  const w = state.flatWin ? { ...state.flatWin } : (() => { const sp = flatSpanNow(); return { t0: sp.min, t1: sp.max }; })();
+  flatDrag = { x: e.clientX, ...w, moved: false };
+});
+addEventListener('pointermove', e => {
+  if (!flatDrag || state.view !== 'flat') return;
+  const dx = e.clientX - flatDrag.x;
+  if (Math.abs(dx) > 3) flatDrag.moved = true;
+  if (!flatDrag.moved) return;
+  // 1.06 = fitFlatCamera의 가로 여유 — 화면 px → 시간의 환산에 반영
+  const dt = -dx / innerWidth * (flatDrag.t1 - flatDrag.t0) * 1.06;
+  applyFlatWin(FV.normalizeWindow({ t0: flatDrag.t0 + dt, t1: flatDrag.t1 + dt }, flatSpanNow()));
+});
+addEventListener('pointerup', () => { flatDrag = null; });
+renderer.domElement.addEventListener('dblclick', () => { if (state.view === 'flat') applyFlatWin(null); });
+
 // 고정된 툴팁은 드래그로 옮길 수 있음 (그래프 관찰 시 걸리적거리지 않게)
 let tipDrag = null;
 tip.addEventListener('pointerdown', e => {
@@ -1388,10 +1598,14 @@ function scheduleLive() {
 }
 
 async function load() {
+  // 최신 추적 판정은 fetch "이전" 창·스팬으로 (P0-4: 새 데이터 도착 후 판정하면 긴 공백에 추적을 잃음)
+  const wasFollowing = state.report ? FV.isFollowingEnd(state.flatWin, flatSpanNow()) : true;
   try {
     const res = await fetch(`/api/report?source=${state.source}&level=${state.rateLevel}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     state.report = await res.json();
+    // 2D에서 끝(최신)을 보고 있었다면 폭을 유지한 채 새 끝을 따라간다
+    if (state.view === 'flat' && wasFollowing) state.flatWin = FV.followEnd(state.flatWin, flatSpanNow());
     document.getElementById('empty').innerHTML = emptyDefaultHTML;
   } catch (e) {
     // keep the previous report on screen (don't clobber state with an error body);
@@ -1441,9 +1655,11 @@ document.querySelectorAll('.seg').forEach(seg => {
     seg.querySelectorAll('button').forEach(x => x.classList.remove('on'));
     b.classList.add('on');
     const group = seg.dataset.group, val = b.dataset.val;
-    if (group === 'source') { state.source = val; state.selectedPeriod = null; load(); }   // stale period keys don't cross sources
+    if (group === 'source') { state.source = val; state.selectedPeriod = null; state.flatWin = null; load(); }   // stale period keys don't cross sources · 2D 창은 소스별 epoch라 반드시 리셋(P0-3)
     else if (group === 'ui') { applyUI(val); }
     else if (group === 'layout') { applyLayout(val); }
+    else if (group === 'view') { setView(val); }
+    else if (group === 'flatRange') { applyFlatRange(val); }
     else if (group === 'xScale') { setXScale(+val); }
     else if (group === 'rateWin') { state.rateWin = +val; try { localStorage.setItem('battRateWin', val); } catch { /* ignore */ } rebuild(); }
     else if (group === 'wattsRail') { state.wattsRail = val; try { localStorage.setItem('battWattsRail', val); } catch { /* ignore */ } rebuild(); }
@@ -1505,8 +1721,11 @@ document.querySelectorAll('.seg').forEach(seg => {
   }
 }
 
-document.getElementById('spin').addEventListener('change', e => { controls.autoRotate = e.target.checked; controls.autoRotateSpeed = 0.6; });
-document.getElementById('reset').addEventListener('click', () => { camera.position.copy(HOME).multiplyScalar(0.6 + 0.4 * state.xScale); controls.target.copy(LOOK); });
+document.getElementById('spin').addEventListener('change', e => { if (state.view === 'flat') { e.target.checked = false; return; } controls.autoRotate = e.target.checked; controls.autoRotateSpeed = 0.6; });
+document.getElementById('reset').addEventListener('click', () => {
+  if (state.view === 'flat') { applyFlatWin(null); return; }   // 2D: 전체 보기로 리셋
+  camera.position.copy(HOME).multiplyScalar(0.6 + 0.4 * state.xScale); controls.target.copy(LOOK);
+});
 // info (i) tooltips: portal a copy to <body> on hover so a panel's overflow:auto can't clip them
 {
   const portal = document.createElement('div');
@@ -1529,6 +1748,28 @@ document.getElementById('gear').addEventListener('click', () => {   // ⚙ 뷰�
 });
 
 // stretch the 하루 중 시각 (X) axis so a day's curve spreads out horizontally; dolly the camera out to keep it framed
+// ---- 보기 모드 전환 (3D ↔ 2D 시간축) ----------------------------------------------------------
+// 2D는 카메라를 정면 고정하고 OrbitControls를 끈다 — 팬/줌은 시간 창(state.flatWin)으로 한다.
+// 전역 `camera` 변수는 교체하지 않는다(pickAt·툴팁 투영·projTag가 참조).
+function setView(v) {
+  state.view = v === 'flat' ? 'flat' : '3d';
+  try { localStorage.setItem('battView', state.view); } catch { /* ignore */ }
+  if (state.view === 'flat') { controls.enabled = false; controls.autoRotate = false; fitFlatCamera(); }
+  else { controls.enabled = true; camera.position.copy(HOME).multiplyScalar(0.6 + 0.4 * state.xScale); controls.target.copy(LOOK); }
+  rebuild();
+}
+// 정면 카메라: FLAT_W가 화면 가로에 (여유 6%로) 꽉 차는 거리를 fov·종횡비로 계산
+function fitFlatCamera() {
+  const vFov = camera.fov * Math.PI / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  const D = (FLAT_W / 2 * 1.17) / Math.tan(hFov / 2);   // 여유 17%: 값 라벨(x0−2.2)·축 제목(x0−4.5)까지 프레임 안에
+  camera.position.set(0, Y / 2, D);
+  camera.lookAt(0, Y / 2, 0);
+}
+function applyFlatRange(v) {
+  applyFlatWin(FV.presetWindow(v, state.flatWin, flatSpanNow()));
+}
+
 function setXScale(v) {
   state.xScale = v;
   X = X_BASE * v;
@@ -1650,6 +1891,7 @@ document.getElementById('trendchart').addEventListener('click', e => {
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  if (state.view === 'flat') fitFlatCamera();
   renderer.setSize(innerWidth, innerHeight);
   if (t3 && state.trendAll && state.trendView === '3d' && !state.foldTrend) renderTrend();   // 3D trend canvas resizes too
 });
@@ -1657,7 +1899,7 @@ addEventListener('resize', () => {
 // keep labels readable (face camera handled by Sprite; nothing extra needed)
 (function animate() {
   requestAnimationFrame(animate);
-  controls.update();
+  if (controls.enabled) controls.update();   // 2D 모드에선 카메라 고정(팬/줌은 시간 창)
   if (pinned && !tipManual) {   // 고정 마커를 화면좌표로 투영해 툴팁이 따라붙게 (단, 직접 드래그로 옮겼으면 그 자리 유지)
     const s = pinned.vp.clone().project(camera);
     positionTip((s.x * 0.5 + 0.5) * innerWidth, (-s.y * 0.5 + 0.5) * innerHeight - 16);
@@ -1688,4 +1930,6 @@ addEventListener('resize', () => {
   if (h.includes('big')) state.trendBig = true;
   if (h.includes('light')) { state.theme = 'light'; applyTheme(); } }
 
+// 저장/딥링크로 2D 시간축 모드로 시작하는 경우: 첫 로드 전에 카메라 고정 + 회전 컨트롤 off
+if (state.view === 'flat') { controls.enabled = false; fitFlatCamera(); }
 load();

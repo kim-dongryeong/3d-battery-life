@@ -334,3 +334,9 @@ html.lay-e #insight { display: flex; }
 .modalX { position: absolute; top: 9px; right: 11px; z-index: 2; width: 30px; height: 30px; border-radius: 50%;
   border: 1px solid var(--line); background: var(--btn); color: var(--fg); font-size: 14px; line-height: 1; cursor: pointer; }
 .modalX:hover { border-color: var(--accent); color: var(--accent); }
+
+/* 2D 시간축 미니맵 브러시 — body 직속 오버레이 (#panel 밖: 248px 패널 안에 두면 잘림 · Codex P0-1) */
+#flatMini { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px;
+  width: min(72vw, 920px); height: 46px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel); overflow: hidden; cursor: crosshair; z-index: 5; }
+#flatMini canvas { display: block; width: 100%; height: 100%; }

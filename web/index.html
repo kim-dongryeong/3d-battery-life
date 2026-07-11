@@ -62,6 +62,23 @@
       </div>
     </div>
     <div class="grp">
+      <span class="lbl">보기</span>
+      <div class="seg" data-group="view">
+        <button data-val="3d" class="on">3D</button>
+        <button data-val="flat" title="가로축이 날짜를 잇는 하나의 긴 시간축이 되는 2D 보기">2D 시간축</button>
+      </div>
+    </div>
+    <div class="grp" id="flatRangeGrp" hidden>
+      <span class="lbl">기간</span>
+      <div class="seg" data-group="flatRange">
+        <button data-val="all" class="on">전체</button>
+        <button data-val="30d">30일</button>
+        <button data-val="7d">7일</button>
+        <button data-val="24h">24시간</button>
+        <button data-val="end" title="현재 폭을 유지한 채 가장 최근으로 이동">오늘로</button>
+      </div>
+    </div>
+    <div class="grp" id="xScaleGrp">
       <span class="lbl">시각 축 (X · 가로 폭)</span>
       <div class="seg" data-group="xScale">
         <button data-val="1" class="on">1×</button>
@@ -139,10 +156,13 @@
       <div class="bar"></div>
       <div class="ends"><span id="legMin"></span><span id="legLbl"></span><span id="legMax"></span></div>
     </div>
-    <p class="hint">드래그=회전 · 휠=줌 · 우클릭드래그=이동 · 곡선에 마우스를 올리면 그 세션 정보가 보입니다.</p>
+    <p class="hint" id="sceneHint">드래그=회전 · 휠=줌 · 우클릭드래그=이동 · 곡선에 마우스를 올리면 그 세션 정보가 보입니다.</p>
     <div id="projChart" class="projbox"></div>
     <div id="chgChart" class="projbox"></div>
   </section>
+
+  <!-- 2D 시간축 미니맵 브러시 — #panel(248px, overflow) 밖 body 직속 오버레이여야 함 (Codex P0-1) -->
+  <div id="flatMini" hidden data-i18n><canvas id="flatMiniCv"></canvas></div>
 
   <!-- bottom-left: per-band average discharge speed -->
   <section id="buckets" data-i18n></section>
