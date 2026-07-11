@@ -216,8 +216,11 @@ export function startServer({ root, port } = {}) {
         // 에너지 수지: 벌크(→80%) + 참고용 전체(→100%, CV 꼬리는 낙관적이라 뷰어가 밴드 통계로 스플라이스)
         const eb = live ? energyBalanceETA({ samples, live, targetPct: 80 }) : null;
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        // avgSysChargeW: 클라이언트의 "정격 기반 물리 추정"(bandsForProfile 스케일링)의 기준값 —
+        // 이 키가 빠지면 스케일링이 조용히 비활성화되어 15W와 96W가 같은 ETA를 내는 회귀가 된다
         res.end(JSON.stringify({ current: key ? { key, cls, meta: adapters[key] || null } : null,
-          resolved, profiles: stats.profiles, classes: stats.classes, global: stats.global, adapters, energyBalance: eb }));
+          resolved, profiles: stats.profiles, classes: stats.classes, global: stats.global,
+          avgSysChargeW: stats.avgSysChargeW, adapters, energyBalance: eb }));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
       return;
     }
