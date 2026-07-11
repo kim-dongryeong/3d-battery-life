@@ -465,17 +465,36 @@ function chargeBands() {
   }
   return { rates: chargeRatesByBand(), tier: null, tierByBand: null, totalMin: null };
 }
-// 비교용: 특정 충전기 프로필의 밴드 속도 (표본 부족 밴드는 전체 pooled로 메움) — 8분(480s) 기준
+// 비교용: 특정 충전기 프로필의 밴드 속도. 그 충전기의 실제 이력이 있는 밴드는 그대로 쓰고,
+// 없는 밴드는 전체 pooled를 **정격 기반 물리 추정으로 스케일링**해서 메운다 — 그냥 전체 평균을
+// 쓰면 15W 파워뱅크와 96W가 같은 예상이 나오는 거짓말이 되기 때문(kdr 지적, 2026-07-11).
+//   추정: 밴드의 전체 평균 속도 g가 암시하는 배터리 충전 전력 P_ref = g × 배터리Wh/100 × 60.
+//   대상 충전기의 가용 전력 P_avail = 정격W×효율 − 충전 중 시스템 평균. 스케일 = min(P_avail, P_ref)/P_ref
+//   — 작은 충전기는 비례로 느려지고, 큰 충전기는 관측된 배터리 수용 한도(P_ref) 이상으로
+//   빨라진다고 주장하지 않는다(보수적·정직). CC/CV 구분 없이 min이 자연스럽게 처리.
+const CHG_EFF = 0.88;
 function bandsForProfile(key) {
   const cr = state.chargeRates; if (!cr) return null;
   const prof = cr.profiles && cr.profiles[key];
+  const L = state.report && state.report.latest;
+  const capWh = L && L.rawMax > 0 ? L.rawMax / 1000 * (L.voltage || 11.5) : null;
+  const watts = (cr.adapters && cr.adapters[key] && cr.adapters[key].watts) || +((/^(\d+)W@/.exec(key) || [])[1] || 0) || null;
+  const sysW = cr.avgSysChargeW;
+  const pAvail = (watts && sysW != null) ? Math.max(0.3, watts * CHG_EFF - sysW) : null;
   const out = {};
+  let estimated = false;
   for (let b = 10; b <= 100; b += 10) {
     const own = prof && prof.byBand[b] != null && (prof.secByBand[b] || 0) >= 480;
-    const v = own ? prof.byBand[b] : (cr.global && cr.global.byBand[b] != null ? cr.global.byBand[b] : null);
-    if (v != null) out[b] = v;
+    if (own) { out[b] = prof.byBand[b]; continue; }
+    const g = cr.global && cr.global.byBand[b] != null ? cr.global.byBand[b] : null;
+    if (g == null) continue;
+    if (pAvail != null && capWh) {
+      const pRef = g * capWh / 100 * 60;                     // 그 밴드에서 배터리가 실제로 받던 전력(W)
+      out[b] = +(g * Math.min(pAvail, pRef) / pRef).toFixed(4);
+      estimated = true;
+    } else { out[b] = g; estimated = true; }
   }
-  return Object.keys(out).length ? out : null;
+  return Object.keys(out).length ? { rates: out, estimated } : null;
 }
 // 충전 예상: 현재 잔량 → 100% (구간별 곡선 + 현재구간 등속 직선). 완충/충전이력없음 → null.
 // `ratesOverride` = 비교 셀렉터가 고른 다른 충전기 프로필의 밴드 속도.
@@ -582,8 +601,9 @@ function renderChargeCard() {
     let cmpRow = '';
     if (state.chargeCompare) {
       const CB = bandsForProfile(state.chargeCompare);
-      const CP = CB ? computeCharge(CB) : null;
-      cmpRow = CP ? `<div class="prjR"><span class="prjK">↳ 그 충전기라면</span><b>${dur(CP.curveMin)}</b> · ${eta(CP.curveMin)}</div>`
+      const CP = CB ? computeCharge(CB.rates) : null;
+      cmpRow = CP ? `<div class="prjR"><span class="prjK">↳ 그 충전기라면</span><b>${dur(CP.curveMin)}</b> · ${eta(CP.curveMin)}</div>${
+        CB.estimated ? '<div class="prjEq prjMuted">이력 없는 구간은 정격 전력 기반 추정</div>' : ''}`
         : '<div class="prjEq prjMuted">그 충전기의 충전 이력이 아직 부족해요</div>';
     }
     cmpHTML = `<div class="prjR"><select id="chgCmp">${opts.join('')}</select></div>${cmpRow}`;
