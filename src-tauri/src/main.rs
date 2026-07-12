@@ -364,7 +364,7 @@ fn main() {
                             if let Ok(a) = std::fs::read_to_string(&af) {
                                 let _ = std::fs::remove_file(&af);
                                 match a.trim() {
-                                    "report" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { show_main(&h); if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } }); }
+                                    "report" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } show_main(&h); }); }
                                     "quit" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || h.exit(0)); }
                                     "record" => { let on = !plist_path().exists(); std::thread::spawn(move || run_record(if on { "on" } else { "off" })); }
                                     "hide" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } }); }
@@ -454,73 +454,69 @@ fn main() {
 
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        // If the viewer is already on screen, this is just a normal bring-to-front request. Its
+        // Regular-app registration already exists, so there is no Dock registration race to wait for.
+        if w.is_visible().unwrap_or(false) {
+            let _ = w.unminimize();
+            let _ = w.show();
+            let _ = w.set_focus();
+            #[cfg(target_os = "macos")]
+            unsafe {
+                use objc::runtime::Object;
+                use objc::{class, msg_send, sel, sel_impl};
+                let cur: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
+                let _: () = msg_send![cur, activateWithOptions: 3u64];
+            }
+            return;
+        }
+
         // viewer visible → become a Regular app so it shows in ⌘Tab / can be focused normally
         #[cfg(target_os = "macos")]
         let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
-        // Promoting Accessory→Regular does NOT make the app frontmost by itself, and activating in the
-        // SAME runloop turn as the policy switch is ignored by modern macOS → the app lands LAST in ⌘Tab.
-        // Defer the activation one turn (run_on_main_thread posts to the next loop iteration) and use
-        // NSRunningApplication.activateWithOptions (the non-deprecated path) so it registers as active.
+
+        // Accessory→Regular registers the app with Dock asynchronously. Showing the window before that
+        // finishes exposes a short interval where the viewer is visible but still sits at the far end of
+        // ⌘Tab. Do the activation bounce while the window is hidden, then reveal it only after the real
+        // activation event has put us at the front of Dock's MRU list.
         #[cfg(target_os = "macos")]
         {
-            let h = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                if let Some(w) = h.get_webview_window("main") { let _ = w.set_focus(); }
-                unsafe {
-                    use objc::runtime::{Object, YES};
-                    use objc::{class, msg_send, sel, sel_impl};
-                    let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-                    let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
-                    // NSApplicationActivateAllWindows(1) | NSApplicationActivateIgnoringOtherApps(2)
-                    let cur: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
-                    let _: () = msg_send![cur, activateWithOptions: 3u64];
-                }
-            });
-            // ⌘Tab MRU 등록 (한 런루프 지연만으론 부족했던 부분): Accessory→Regular 직후 Dock의
-            // 앱 전환기는 우리를 목록 "맨 끝"에 새로 등록하는데, 전환기 순서는 실제 활성화
-            // '이벤트'로만 앞으로 온다. 위 활성화 시점엔 아직 등록 전이고, 이미 활성인 앱의
-            // 재활성화는 이벤트를 만들지 않는다 → Dock 등록이 끝난 뒤(≈220ms) 비활성화→재활성화를
-            // 한 번 튕겨 진짜 이벤트 쌍을 만든다. (여전히 우리가 앞일 때만 — 사용자가 그 사이
-            // 다른 앱으로 갔으면 포커스를 빼앗지 않고 건너뛴다.)
             let h2 = app.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(220));
                 let h3 = h2.clone();
-                let (tx, rx) = std::sync::mpsc::channel::<bool>();
                 let _ = h2.run_on_main_thread(move || {
-                    let active = unsafe {
-                        use objc::runtime::{Object, BOOL, NO};
-                        use objc::{class, msg_send, sel, sel_impl};
-                        let cur: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
-                        let a: BOOL = msg_send![cur, isActive];
-                        a != NO
-                    };
-                    if active {
-                        unsafe {
-                            use objc::runtime::Object;
-                            use objc::{class, msg_send, sel, sel_impl};
-                            let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-                            let _: () = msg_send![ns_app, deactivate];
-                        }
-                    }
-                    let _ = tx.send(active);
-                });
-                if !rx.recv_timeout(std::time::Duration::from_millis(500)).unwrap_or(false) { return; }
-                std::thread::sleep(std::time::Duration::from_millis(90));
-                let h4 = h3.clone();
-                let _ = h3.run_on_main_thread(move || {
-                    if let Some(w) = h4.get_webview_window("main") { let _ = w.set_focus(); }
                     unsafe {
                         use objc::runtime::Object;
                         use objc::{class, msg_send, sel, sel_impl};
+                        let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+                        let _: () = msg_send![ns_app, deactivate];
+                    }
+                });
+                std::thread::sleep(std::time::Duration::from_millis(90));
+                let h4 = h3.clone();
+                let _ = h3.run_on_main_thread(move || {
+                    if let Some(w) = h4.get_webview_window("main") {
+                        let _ = w.unminimize();
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                    unsafe {
+                        use objc::runtime::{Object, YES};
+                        use objc::{class, msg_send, sel, sel_impl};
+                        let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+                        let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
                         let cur: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
                         let _: () = msg_send![cur, activateWithOptions: 3u64];
                     }
                 });
             });
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = w.unminimize();
+            let _ = w.show();
+            let _ = w.set_focus();
         }
     }
 }
