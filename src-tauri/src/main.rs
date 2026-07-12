@@ -479,6 +479,48 @@ fn show_main(app: &AppHandle) {
                     let _: () = msg_send![cur, activateWithOptions: 3u64];
                 }
             });
+            // ⌘Tab MRU 등록 (한 런루프 지연만으론 부족했던 부분): Accessory→Regular 직후 Dock의
+            // 앱 전환기는 우리를 목록 "맨 끝"에 새로 등록하는데, 전환기 순서는 실제 활성화
+            // '이벤트'로만 앞으로 온다. 위 활성화 시점엔 아직 등록 전이고, 이미 활성인 앱의
+            // 재활성화는 이벤트를 만들지 않는다 → Dock 등록이 끝난 뒤(≈220ms) 비활성화→재활성화를
+            // 한 번 튕겨 진짜 이벤트 쌍을 만든다. (여전히 우리가 앞일 때만 — 사용자가 그 사이
+            // 다른 앱으로 갔으면 포커스를 빼앗지 않고 건너뛴다.)
+            let h2 = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(220));
+                let h3 = h2.clone();
+                let (tx, rx) = std::sync::mpsc::channel::<bool>();
+                let _ = h2.run_on_main_thread(move || {
+                    let active = unsafe {
+                        use objc::runtime::{Object, BOOL, NO};
+                        use objc::{class, msg_send, sel, sel_impl};
+                        let cur: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
+                        let a: BOOL = msg_send![cur, isActive];
+                        a != NO
+                    };
+                    if active {
+                        unsafe {
+                            use objc::runtime::Object;
+                            use objc::{class, msg_send, sel, sel_impl};
+                            let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+                            let _: () = msg_send![ns_app, deactivate];
+                        }
+                    }
+                    let _ = tx.send(active);
+                });
+                if !rx.recv_timeout(std::time::Duration::from_millis(500)).unwrap_or(false) { return; }
+                std::thread::sleep(std::time::Duration::from_millis(90));
+                let h4 = h3.clone();
+                let _ = h3.run_on_main_thread(move || {
+                    if let Some(w) = h4.get_webview_window("main") { let _ = w.set_focus(); }
+                    unsafe {
+                        use objc::runtime::Object;
+                        use objc::{class, msg_send, sel, sel_impl};
+                        let cur: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
+                        let _: () = msg_send![cur, activateWithOptions: 3u64];
+                    }
+                });
+            });
         }
     }
 }
