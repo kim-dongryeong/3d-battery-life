@@ -666,7 +666,9 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
     let ind = if l.charging || l.full { 12.0f32 } else { 0.0 };
     if ind > 0.0 { charge_overlay_cut(&mut hi, l, 9.5, 25.2, 9.0, 14.0, WCLIP); }
     let digits = format!("{}", pct.round() as u32);
-    let (dsz, dcx) = if ind > 0.0 { (14.5, (3.0 + ind + 43.0) / 2.0) } else { (16.2, 23.0) };
+    // 축소는 볼트+세 자리("100")가 겹칠 때만 — 두 자리는 볼트 옆에도 16.2pt가 그대로 들어간다 (kdr)
+    let dsz = if ind > 0.0 && digits.len() >= 3 { 14.5 } else { 16.2 };
+    let dcx = if ind > 0.0 { (3.0 + ind + 43.0) / 2.0 } else { 23.0 };
     stamp_digits_cut(&mut hi, &digits, dsz, dcx, 25.3, 1.0, WCLIP);   // 1px rim in the fill
     stamp_digits(&mut hi, &digits, dsz, dcx, 25.3, INK, true);        // level % inside the battery
     hi.down()
