@@ -46,9 +46,9 @@ test('불변량 4: 전체를 덮는 창은 언제나 null 로 정규화', () => 
 });
 
 test('불변량 5: 날짜 눈금은 DST 경계를 지나도 로컬 자정에 놓인다', () => {
-  // 2026-03-29 는 EU DST 시작(하루=23h). 그 주를 걸치는 10일 창.
-  const d = new Date('2026-03-25T00:00:00');
-  const w = { t0: d.getTime() / 1000, t1: d.getTime() / 1000 + 10 * 86400 };
+  // 2026-03-29 는 EU DST 시작(하루=23h). 그 주를 걸치는 30일 창(일 단위 눈금 경로).
+  const d = new Date('2026-03-15T00:00:00');
+  const w = { t0: d.getTime() / 1000, t1: d.getTime() / 1000 + 30 * 86400 };
   const sp = { min: w.t0 - 86400, max: w.t1 + 86400 };
   const ticks = calendarTicks(w, sp);
   assert.ok(ticks.length >= 8, `ticks ${ticks.length}`);
@@ -56,8 +56,24 @@ test('불변량 5: 날짜 눈금은 DST 경계를 지나도 로컬 자정에 놓
     const dd = new Date(tk.t * 1000);
     assert.equal(dd.getHours(), 0, `자정 아님: ${dd.toString()}`);
     assert.equal(dd.getMinutes(), 0);
-    assert.ok(tk.major);
   }
+  assert.ok(ticks.some(tk => tk.label), '라벨 눈금 존재');
+});
+
+test('세부선(minor): 라벨보다 촘촘한 무라벨 눈금이 줌에 따라 나타난다', () => {
+  // 10일 창: 라벨은 일 단위(≤12개), 세부선은 하루 미만(12h/6h) — 시각 정보가 라벨 전에 먼저 보임
+  const d = new Date('2026-06-11T00:00:00');
+  const w = { t0: d.getTime() / 1000, t1: d.getTime() / 1000 + 10 * 86400 };
+  const ticks = calendarTicks(w, SP);
+  const labeled = ticks.filter(t => t.label), minors = ticks.filter(t => !t.label);
+  assert.ok(labeled.length > 0 && labeled.length <= 13, `라벨 ${labeled.length}`);
+  assert.ok(minors.length > 0, '세부선 존재');
+  assert.ok(ticks.length <= 66, `전체 ${ticks.length} ≤ 64+α`);
+  for (const tk of minors) assert.equal(new Date(tk.t * 1000).getMinutes(), 0);   // 하루 미만 세부선도 정시
+  // 5일 창이면 라벨이 12시간 단위로 — "시각 라벨"이 종전(≤48h)보다 훨씬 이른 줌에서 등장
+  const w5 = { t0: w.t0, t1: w.t0 + 5 * 86400 };
+  const lab5 = calendarTicks(w5, SP).filter(t => t.label);
+  assert.ok(lab5.some(t => new Date(t.t * 1000).getHours() === 12), '12시 라벨 존재');
 });
 
 test('불변량 6: 최신 추적 — 폭 유지, t1 만 새 끝으로', () => {
@@ -74,17 +90,20 @@ test('불변량 6: 최신 추적 — 폭 유지, t1 만 새 끝으로', () => {
   assert.equal(followEnd(null, newSp), null);
 });
 
-test('시간 눈금(≤48h 창): 정시에 놓이고 major=자정', () => {
+test('시간 눈금(30h 창): 라벨=3시간 간격 정시, major=자정, 세부선은 그보다 촘촘', () => {
   const d = new Date('2026-06-11T05:30:00');
   const w = { t0: d.getTime() / 1000, t1: d.getTime() / 1000 + 30 * 3600 };
   const ticks = calendarTicks(w, SP, 'en');
   assert.ok(ticks.length >= 8);
-  for (const tk of ticks) {
+  const labeled = ticks.filter(t => t.label);
+  assert.ok(labeled.length > 0 && labeled.length <= 13);
+  for (const tk of labeled) {
     const dd = new Date(tk.t * 1000);
     assert.equal(dd.getMinutes(), 0);
-    assert.equal(dd.getHours() % 3, 0);                    // 30h 창 → 3시간 간격
+    assert.equal(dd.getHours() % 3, 0);                    // 30h 창 → 라벨 3시간 간격
     assert.equal(tk.major, dd.getHours() === 0);
   }
+  assert.ok(ticks.some(t => !t.label), '세부선 존재');
 });
 
 test('프리셋: 7d/24h 는 끝 기준, end 는 폭 유지', () => {

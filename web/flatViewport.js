@@ -68,33 +68,47 @@ export function followEnd(win, newSp, minDur = MIN_DUR, futurePad = FUTURE_PAD) 
   return normalizeWindow({ t0: newSp.max - (win.t1 - win.t0), t1: newSp.max }, newSp, minDur, futurePad);
 }
 
-// 달력 눈금 — DST 안전: 고정 86400초 증가 대신 Date 의 달력 연산(setDate/setHours)으로
+// 달력 눈금 — DST 안전: 고정 86400초 증가 대신 Date 의 달력 연산(setMinutes/setDate)으로
 // 로컬 자정·정시를 전진시킨다 (P1: DST 전환일은 하루가 23/25시간이라 +86400 이 자정을 1시간 벗어남).
-// 반환: [{t, label, major}] — major 는 자정(날짜 라벨).
+// 두 단계 사다리: "라벨 눈금"은 ≤12개가 되는 가장 촘촘한 단계, "세부선(minor)"은 그보다 한 단계
+// 이상 촘촘하면서 ≤64개 — 줌 정도에 따라 개수가 다이나믹하게 바뀌고, 라벨이 붙기 전에도
+// 시각을 가늠할 세부선이 먼저 나타난다 (kdr: "시각이 나타나는 줌이 늦다").
+// 반환: [{t, label|null, major}] — major=자정(날짜), label=null 은 선만 긋는 세부선.
+const LADDER_MIN = [30, 60, 180, 360, 720, 1440, 2880, 4320, 10080, 21600, 43200, 129600];   // 30분…90일
 export function calendarTicks(win, sp, locale = 'ko') {
   const { t0: w0, t1: w1 } = resolve(win, sp);
-  const spanH = (w1 - w0) / 3600;
-  const ticks = [];
+  const spanMin = (w1 - w0) / 60;
+  const labeled = LADDER_MIN.find(s => spanMin / s <= 12) ?? LADDER_MIN[LADDER_MIN.length - 1];
+  const finer = LADDER_MIN.filter(s => s < labeled && spanMin / s <= 64);
+  const step = finer.length ? finer[finer.length - 1] : labeled;   // 세부선 단계 (없으면 라벨 단계)
   const dayFmt = new Intl.DateTimeFormat(locale, { month: 'numeric', day: 'numeric' });
-  if (spanH <= 48) {
-    const step = spanH <= 12 ? 1 : 3;   // 시간 간격
-    const hourFmt = new Intl.DateTimeFormat(locale, { hour: 'numeric' });
-    const d = new Date(w0 * 1000); d.setMinutes(0, 0, 0);
+  const hourFmt = new Intl.DateTimeFormat(locale, { hour: 'numeric' });
+  const ticks = [];
+  if (step < 1440) {
+    // 하루 미만 단계: 로컬 자정 기준 "분 오프셋"이 step 배수인 지점 — 30분 격자로 달력 전진
+    const d = new Date(w0 * 1000); d.setSeconds(0, 0);
+    d.setMinutes(Math.floor(d.getMinutes() / 30) * 30);
     while (d.getTime() / 1000 <= w1) {
-      const t = d.getTime() / 1000;
-      if (t >= w0 && d.getHours() % step === 0) {
-        const mid = d.getHours() === 0;
-        ticks.push({ t, label: mid ? dayFmt.format(d) : hourFmt.format(d), major: mid });
+      const t = d.getTime() / 1000, mo = d.getHours() * 60 + d.getMinutes();
+      if (t >= w0 && mo % step === 0) {
+        const isLab = labeled >= 1440 ? mo === 0 : mo % labeled === 0;
+        const mid = mo === 0;
+        ticks.push({ t, label: isLab ? (mid ? dayFmt.format(d) : hourFmt.format(d)) : null, major: mid });
       }
-      d.setHours(d.getHours() + 1);     // 달력 연산 — DST 경계에서도 로컬 정시 유지
+      d.setMinutes(d.getMinutes() + 30);
     }
   } else {
-    const days = Math.ceil(spanH / 24), stepD = Math.max(1, Math.ceil(days / 12));
+    // 일 단위: 자정을 하루씩 전진, 고정 일번호(dayNo) 모듈로로 골라 팬해도 눈금이 안 튄다
+    const stepD = Math.round(step / 1440), labD = Math.round(labeled / 1440);
     const d = new Date(w0 * 1000); d.setHours(0, 0, 0, 0);
-    if (d.getTime() / 1000 < w0) d.setDate(d.getDate() + 1);   // 창 시작 이후의 첫 자정부터
+    if (d.getTime() / 1000 < w0) d.setDate(d.getDate() + 1);
     while (d.getTime() / 1000 <= w1) {
-      ticks.push({ t: d.getTime() / 1000, label: dayFmt.format(d), major: true });
-      d.setDate(d.getDate() + stepD);   // 달력 연산 (DST 안전)
+      const t = d.getTime() / 1000, dayNo = Math.round(t / 86400);
+      if (dayNo % stepD === 0) {
+        const isLab = dayNo % labD === 0;
+        ticks.push({ t, label: isLab ? dayFmt.format(d) : null, major: isLab });
+      }
+      d.setDate(d.getDate() + 1);
     }
   }
   return ticks;

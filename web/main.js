@@ -216,12 +216,13 @@ function buildFlatAxes(valMax, valLabel) {
   }
   const yt = makeLabel(tr(valLabel), { color: TH().titleC }); yt.position.set(x0 - 4.5, Y + 1, 0); sceneRoot.add(yt);
 
-  // 시간(세로) 눈금 — flatViewport.calendarTicks: 창 폭 적응 밀도, DST에도 로컬 자정/정시 유지
+  // 시간(세로) 눈금 — flatViewport.calendarTicks: 라벨(≤12) + 세부선(≤64) 2단 사다리,
+  // DST에도 로컬 자정/정시 유지. label=null 인 세부선은 선만 긋는다(줌 비례로 개수 변동).
   for (const tk of FV.calendarTicks(state.flatWin, flatSpanNow(), curLang())) {
     const x = xFlat(tk.t);
     if (x < x0 - 0.01 || x > x1 + 0.01) continue;
-    sceneRoot.add(axisLine([x, 0, 0], [x, Y, 0], tk.major ? TH().gMain : TH().gMinor));
-    const s = makeLabel(tk.label, { size: 26, color: TH().tickC }); s.position.set(x, baseY - 1, 0); sceneRoot.add(s);
+    sceneRoot.add(axisLine([x, 0, 0], [x, tk.label ? Y : Y * 0.985, 0], tk.major ? TH().gMain : TH().gMinor));
+    if (tk.label) { const s = makeLabel(tk.label, { size: 26, color: TH().tickC }); s.position.set(x, baseY - 1, 0); sceneRoot.add(s); }
   }
   // 주말 음영: 창 안의 토·일 구간을 옅은 판으로 — 달력 연산으로 하루씩 전진(DST 안전)
   const d = new Date(_fw.w0 * 1000); d.setHours(0, 0, 0, 0);
@@ -888,6 +889,8 @@ function drawProjection3DInner(r) {
     const markEnd = (endMin, colHex, colStr, prefix, yBias) => {
       const rt = P.baseT + endMin * 60;
       if (!inWin(rt)) return;   // 2D에서 종점이 창 밖이면 점·태그 모두 생략 (P0-5: 태그가 화면 가장자리에 clamp돼 오독됨)
+      // 2D: 예상 시각 태그는 치역(0–100%) "밖"에 — 충전(→100%)은 윗선 위로, 방전(→0%)은 아랫선 아래로
+      if (flat) yBias = isChg ? -(34 + yBias) : (10 + yBias);
       const p = posOf(rt, P.target);
       const d = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), new THREE.MeshBasicMaterial({ color: colHex }));
       d.position.copy(p); projGroup.add(d);
@@ -1475,8 +1478,20 @@ function flatTimeAtScreen(cx) {
 renderer.domElement.addEventListener('wheel', e => {
   if (state.view !== 'flat') return;
   e.preventDefault();                                          // 페이지 스크롤 방지
-  const f = e.deltaY > 0 ? 1.25 : 1 / 1.25;                    // 아래로 굴리면 축소
-  applyFlatWin(FV.zoomAt(state.flatWin, flatSpanNow(), flatTimeAtScreen(e.clientX), f));
+  const sp = flatSpanNow();
+  const unit = e.deltaMode === 1 ? 16 : 1;                     // Firefox line-mode 보정
+  // 좌/우 스크롤(두 손가락 가로 스와이프) = 팬 — 절대 줌하지 않는다.
+  // (종전엔 deltaY≈0이 "줌 인"으로 처리돼 가로 스크롤이 줌+이동처럼 보였음)
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+    const w = state.flatWin ? { ...state.flatWin } : { t0: sp.min, t1: sp.max };
+    const dt = e.deltaX * unit / innerWidth * (w.t1 - w.t0) * 1.17;
+    applyFlatWin(FV.normalizeWindow({ t0: w.t0 + dt, t1: w.t1 + dt }, sp));
+    return;
+  }
+  // 위/아래 스크롤 = 커서 중심 줌 — delta 크기 비례 지수 배율.
+  // 계수 0.00022 ≈ 종전 고정 1.25(휠 한 칸 deltaY≈100)의 1/10 속도 (kdr: "10배 느리게")
+  const f = Math.exp(e.deltaY * unit * 0.00022);
+  applyFlatWin(FV.zoomAt(state.flatWin, sp, flatTimeAtScreen(e.clientX), f));
 }, { passive: false });
 let flatDrag = null;
 renderer.domElement.addEventListener('pointerdown', e => {
