@@ -578,13 +578,19 @@ function bandsForProfile(key) {
     if (g == null) continue;
     if (pAvail != null && capWh) {
       // 이 밴드에서 "어떤 충전기로든 실제로 관측된" 최대 배터리 수용 전력 — 여기까지는 상향 허용.
-      // (전체 평균 pRef만 쓰면 큰 충전기가 느린 이력(파워뱅크)에 발목 잡혀 30W보다 35W가
-      // 오래 걸리는 역전이 생긴다. 관측 최대를 넘는 상향은 여전히 주장하지 않는다 — CV 꼬리처럼
-      // 배터리가 제한하는 밴드는 관측 최대 자체가 낮아 자연히 상향이 막힌다.)
-      let pCap = toW(g);
-      for (const p of Object.values(cr.profiles || {})) {
-        if (p.byBand[b] != null && (p.secByBand[b] || 0) >= 480) pCap = Math.max(pCap, toW(p.byBand[b]));
+      // 단, 그 기록을 세운 충전기가 그때 "어댑터 포화"(실측 입력 ≥ 정격×0.85)였다면 그 기록은
+      // 배터리 수용 한도가 아니라 어댑터 한도의 관측이다 → 더 큰 충전기는 선형 상향 허용
+      // (안전 상한 ≈0.85C). 포화 증거가 없는 밴드(CV 꼬리 등)는 관측 최대에 캡 — 배터리 제한.
+      // (이 규칙이 없으면 "지금 30W가 갱신 중인 관측 최대"에 35W가 캡돼 항상 동일 ETA가 나온다.)
+      let pCap = toW(g), satSeen = false;
+      for (const [pk2, p] of Object.entries(cr.profiles || {})) {
+        if (!(p.byBand[b] != null && (p.secByBand[b] || 0) >= 480)) continue;
+        pCap = Math.max(pCap, toW(p.byBand[b]));
+        const rated = +((/^(\d+)W@/.exec(pk2) || [])[1] || 0);
+        const adp = p.adpWByBand && p.adpWByBand[b];
+        if (rated && adp != null && adp >= rated * 0.85) satSeen = true;
       }
+      if (satSeen) pCap = Math.max(pCap, Math.min(pAvail, capWh * 0.85));   // 포화 증거 → pAvail까지 (0.85C 안전 상한)
       const pRef = toW(g);
       out[b] = +(g * Math.min(pAvail, pCap) / pRef).toFixed(4);
       estimated = true;

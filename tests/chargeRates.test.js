@@ -59,7 +59,8 @@ function chargeRun({ t0, pct0, pct1, ratePctMin, adapter }) {
   for (let m = 0; m <= minutes; m++) {
     const pct = pct0 + ratePctMin * m;
     out.push({ t: t0 + m * 60, charging: true, ac: true, pct: Math.round(pct),
-      rawCap: Math.round(RAWMAX * pct / 100), rawMax: RAWMAX, systemW: 8, ...adapter });
+      rawCap: Math.round(RAWMAX * pct / 100), rawMax: RAWMAX, systemW: 8,
+      adapterW: adapter.adapterWnom ? adapter.adapterWnom * 0.9 : null, ...adapter });
   }
   return out;
 }
@@ -81,6 +82,9 @@ test('chargeStats: 프로필별 밴드 속도 분리 + 어댑터 교체는 쌍 �
   const g = st.global.byBand[40];
   assert.ok(g > b40s && g < b40f, 'global은 둘 사이 pooled');
   assert.ok(Math.abs(st.avgSysChargeW - 8) < 0.01, `충전 중 시스템 평균 ${st.avgSysChargeW}`);   // 물리 추정의 기준값
+  // 밴드별 어댑터 입력 평균 — "포화 증거"(입력≈정격) 판별의 근거 데이터
+  assert.ok(Math.abs(st.profiles[SLOW_KEY].adpWByBand[40] - 13.5) < 0.1, `slow adpW ${st.profiles[SLOW_KEY].adpWByBand[40]}`);   // 15W×0.9
+  assert.ok(Math.abs(st.profiles[FAST_KEY].adpWByBand[40] - 86.4) < 0.5, `fast adpW ${st.profiles[FAST_KEY].adpWByBand[40]}`);   // 96W×0.9
   // 클래스 분리: usbc-5v:≤20W vs usbc-pd:71W+
   assert.ok(st.classes[classKey(SLOW)] && st.classes[classKey(FAST)]);
 });
