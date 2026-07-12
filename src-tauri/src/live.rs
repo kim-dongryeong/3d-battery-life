@@ -660,9 +660,15 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
     hi.fill_rrect(45.5, 21.5, 48.0, 27.5, 1.5, INK);
     let fw = (40.0 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
+    // 충전 볼트/완충 플러그: 배터리 안 왼쪽에 작게, 잔량 숫자는 오른쪽으로 비킨다 (kdr 2026-07-12
+    // — 종전엔 "전력 숫자가 이미 충전을 말해준다"고 생략했으나 한눈에 보이는 표시를 원함)
+    const WCLIP: (f32, f32, f32, f32) = (3.0, 17.0, 43.0, 33.3);
+    let ind = if l.charging || l.full { 12.0f32 } else { 0.0 };
+    if ind > 0.0 { charge_overlay_cut(&mut hi, l, 9.5, 25.2, 9.0, 14.0, WCLIP); }
     let digits = format!("{}", pct.round() as u32);
-    stamp_digits_cut(&mut hi, &digits, 16.2, 23.0, 25.3, 1.0, (3.0, 17.0, 43.0, 33.3));   // 1px rim in the fill
-    stamp_digits(&mut hi, &digits, 16.2, 23.0, 25.3, INK, true);   // level % inside the battery
+    let (dsz, dcx) = if ind > 0.0 { (14.5, (3.0 + ind + 43.0) / 2.0) } else { (16.2, 23.0) };
+    stamp_digits_cut(&mut hi, &digits, dsz, dcx, 25.3, 1.0, WCLIP);   // 1px rim in the fill
+    stamp_digits(&mut hi, &digits, dsz, dcx, 25.3, INK, true);        // level % inside the battery
     hi.down()
 }
 
