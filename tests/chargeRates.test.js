@@ -101,6 +101,17 @@ test('ratesWithFallback: 프로필 → 클래스 → 전체 계층', () => {
   assert.equal(r3.tierByBand[40], 'class');
 });
 
+test('ratesWithFallback: 완전 지문은 같은 충전기의 레거시 부분 키 이력을 이어받는다', () => {
+  // 과거 이력은 부분 키("15W@5V/?#?")로만 존재 — 새 완전 지문("…/e0004009#10")이 그걸 profile 계층으로 사용
+  const legacy = { adapterWnom: 15, adapterVnom: 5 };   // familyCode/adapterId 없던 시기
+  const samples = chargeRun({ t0: 1000000, pct0: 30, pct1: 60, ratePctMin: 0.3, adapter: legacy });
+  const st = chargeStats(samples);
+  const fullKey = '15W@5V/e0004009#10';
+  const r = ratesWithFallback(st, fullKey, 'usbc-5v:≤20W');
+  assert.equal(r.tierByBand[40], 'profile', '레거시 이력이 profile 계층으로 잡혀야 함');
+  assert.ok(r.totalMin >= 90, `레거시 포함 totalMin ${r.totalMin}`);
+});
+
 // ── energyBalanceETA: 고정점 스캔 · 레짐 · 완충 불가 ───────────────────────────────────
 function sysHistory(nowT, hours, w) {   // 지난 `hours`시간 동안 분당 systemW=w
   const out = [];

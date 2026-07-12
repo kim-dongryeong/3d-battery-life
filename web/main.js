@@ -560,21 +560,33 @@ const CHG_EFF = 0.88;
 function bandsForProfile(key) {
   const cr = state.chargeRates; if (!cr) return null;
   const prof = cr.profiles && cr.profiles[key];
+  // 어댑터 필드 기록 전의 같은 충전기(부분 키 "35W@20V/?#?") 이력도 이 충전기 것으로 잇는다
+  const legacy = key && !key.endsWith('/?#?') ? cr.profiles && cr.profiles[key.replace(/\/[^/]*$/, '/?#?')] : null;
   const L = state.report && state.report.latest;
   const capWh = L && L.rawMax > 0 ? L.rawMax / 1000 * (L.voltage || 11.5) : null;
   const watts = (cr.adapters && cr.adapters[key] && cr.adapters[key].watts) || +((/^(\d+)W@/.exec(key) || [])[1] || 0) || null;
   const sysW = cr.avgSysChargeW;
   const pAvail = (watts && sysW != null) ? Math.max(0.3, watts * CHG_EFF - sysW) : null;
+  const toW = rate => rate * capWh / 100 * 60;               // %/min → 그 속도가 뜻하는 배터리 전력(W)
   const out = {};
   let estimated = false;
   for (let b = 10; b <= 100; b += 10) {
-    const own = prof && prof.byBand[b] != null && (prof.secByBand[b] || 0) >= 480;
-    if (own) { out[b] = prof.byBand[b]; continue; }
+    const ownOf = p => p && p.byBand[b] != null && (p.secByBand[b] || 0) >= 480 ? p.byBand[b] : null;
+    const own = ownOf(prof) ?? ownOf(legacy);
+    if (own != null) { out[b] = own; continue; }
     const g = cr.global && cr.global.byBand[b] != null ? cr.global.byBand[b] : null;
     if (g == null) continue;
     if (pAvail != null && capWh) {
-      const pRef = g * capWh / 100 * 60;                     // 그 밴드에서 배터리가 실제로 받던 전력(W)
-      out[b] = +(g * Math.min(pAvail, pRef) / pRef).toFixed(4);
+      // 이 밴드에서 "어떤 충전기로든 실제로 관측된" 최대 배터리 수용 전력 — 여기까지는 상향 허용.
+      // (전체 평균 pRef만 쓰면 큰 충전기가 느린 이력(파워뱅크)에 발목 잡혀 30W보다 35W가
+      // 오래 걸리는 역전이 생긴다. 관측 최대를 넘는 상향은 여전히 주장하지 않는다 — CV 꼬리처럼
+      // 배터리가 제한하는 밴드는 관측 최대 자체가 낮아 자연히 상향이 막힌다.)
+      let pCap = toW(g);
+      for (const p of Object.values(cr.profiles || {})) {
+        if (p.byBand[b] != null && (p.secByBand[b] || 0) >= 480) pCap = Math.max(pCap, toW(p.byBand[b]));
+      }
+      const pRef = toW(g);
+      out[b] = +(g * Math.min(pAvail, pCap) / pRef).toFixed(4);
       estimated = true;
     } else { out[b] = g; estimated = true; }
   }
@@ -636,9 +648,11 @@ function renderProjection() {
 const TECH_KO = { 'usbc-pd': 'USB-C PD', 'usbc-5v': 'USB-C 5V', usb: 'USB(구형)', dedicated: '전용 어댑터', unknown: '미상' };
 const TIER_KO = { profile: '이 충전기 이력 기준', class: '비슷한 급 충전기 기준', global: '전체 충전 이력 평균' };
 function chargerLabel(key, meta) {
-  if (meta && meta.name) return meta.name;
-  if (key === 'unknown') return '미상(과거 기록)';   // 어댑터 필드가 없던 시기의 충전 이력
   const m = /^(\d+)W@(\S+?)V\//.exec(key || '');
+  // 같은 물리 충전기라도 계약이 다르면(듀얼포트 35W→27W) 별도 프로필 — 이름만 쓰면 목록에
+  // "35W USB-C Power Adapter"가 두 개 떠서 구분이 안 된다 → 이름 뒤에 계약을 병기
+  if (meta && meta.name) return m ? `${meta.name} · 계약 ${m[1]}W` : meta.name;
+  if (key === 'unknown') return '미상(과거 기록)';   // 어댑터 필드가 없던 시기의 충전 이력
   const tech = meta && meta.tech ? `${TECH_KO[meta.tech] || ''} ` : '';
   return m ? `${tech}${m[1]}W (${m[2]}V)`.trim() : (key || '충전기');
 }
@@ -652,22 +666,23 @@ function renderChargeCard() {
   if (!P) { box.innerHTML = ''; return; }   // 완충/이력 없음 — 카드 숨김 (방전 카드처럼 비충전 중에도 '지금 충전한다면'으로 표시)
   const dur = min => fmtDur(min * 60), eta = min => fmtWhen(((P ? P.baseT : Date.now() / 1000) + min * 60) * 1000);
   const rows = [];
-  // ① 구간별 통계 (현재 충전기 프로필, 계층 폴백)
+  // ① 구간별 통계(=그래프의 실선 "곡선") + 직선 등속(=그래프의 점선) — 그래프와 1:1 대응
   if (P) {
     const tierNote = P.tier && TIER_KO[P.tier] ? `${TIER_KO[P.tier]}${P.tier === 'profile' && P.tierMin ? ` · ${dur(P.tierMin)} 분량` : ''}` : '';
-    rows.push(`<div class="prjR"><span class="prjK"><i class="prjL solid"></i>구간별 통계</span><b>${dur(P.curveMin)}</b> · ${eta(P.curveMin)}</div>`);
-    if (tierNote) rows.push(`<div class="prjEq">속도 출처: ${tierNote}</div>`);
+    rows.push(`<div class="prjR"><span class="prjK"><i class="prjL solid"></i>구간별 통계 (곡선)</span><b>${dur(P.curveMin)}</b> · ${eta(P.curveMin)}</div>`);
+    rows.push(`<div class="prjR"><span class="prjK"><i class="prjL dash"></i>직선 등속</span><b>${dur(P.linMin)}</b> · ${eta(P.linMin)}</div>`);
+    if (tierNote) rows.push(`<div class="prjEq">속도 출처: ${tierNote} · 직선 = 현재 구간 속도로 등속 외삽</div>`);
   }
   // ② 에너지 수지 (kdr 방식): →80%는 수지, 80→100%는 구간별 통계로 스플라이스
   const eb = cr.energyBalance;
   if (charging && eb) {
     if (!eb.feasible) {
-      rows.push(`<div class="prjR"><span class="prjK"><i class="prjL dash"></i>에너지 수지</span><b>이 부하로는 완충 불가</b></div>`);
+      rows.push(`<div class="prjR"><span class="prjK">⚖ 에너지 수지</span><b>이 부하로는 완충 불가</b></div>`);
       rows.push(`<div class="prjEq">공급 여유 ${eb.pBat != null ? eb.pBat.toFixed(1) : '?'}W ≤ 0 — 소비가 충전을 앞서고 있어요</div>`);
     } else {
       const tail = P && P.L0 < 80 && P.minsAt && P.minsAt[80] != null ? P.curveMin - P.minsAt[80] : 0;   // 80→100% 밴드 통계
       const total = (eb.minutes || 0) + Math.max(0, tail);
-      rows.push(`<div class="prjR"><span class="prjK"><i class="prjL dash"></i>에너지 수지</span><b>${dur(total)}</b> · ${eta(total)}</div>`);
+      rows.push(`<div class="prjR"><span class="prjK">⚖ 에너지 수지</span><b>${dur(total)}</b> · ${eta(total)}</div>`);   // 그래프에는 안 그리는 제3 추정
       rows.push(`<div class="prjEq">→80% 수지 ${dur(eb.minutes)} (${eb.regime === 'adapter-limited'
         ? `어댑터 포화 · 지난 ${eb.window}h 시스템 평균 ${eb.avgSysW != null ? eb.avgSysW.toFixed(1) : '?'}W 차감`
         : '배터리 제한 · 현재 수지'} · 충전 여유 ${eb.pBat}W)${tail > 0 ? ` + 80→100% 통계 ${dur(tail)}` : ''}</div>`);
