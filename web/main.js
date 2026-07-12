@@ -717,8 +717,10 @@ function renderChargeCard() {
   const badge = cur
     ? `${chargerLabel(cur.key, cur.meta)}${cur.meta && cur.meta.tech ? ` · ${TECH_KO[cur.meta.tech]}` : ''}${cur.meta && cur.meta.voltage && cur.meta.current ? ` · 계약 ${cur.meta.voltage}V×${cur.meta.current}A` : ''}`
     : '충전기 미상';
+  // 미연결 시엔 "가장 최근 충전기"를 가정해 예측 — 어떤 충전기 기준인지 항상 명시
+  const badgeLine = cur ? ` · 🔌 ${cur.assumed ? `${tr('마지막 충전기 기준')}: ` : ''}${badge}` : '';
   box.innerHTML = `
-    <div class="hcHdr">⚡ 충전 예상 <small>현재 ${P.L0.toFixed(1)}% → 100%${charging ? '' : ' (지금 충전한다면)'}${charging ? ` · 🔌 ${badge}` : ''}</small></div>
+    <div class="hcHdr">⚡ 충전 예상 <small>현재 ${P.L0.toFixed(1)}% → 100%${charging ? '' : ' (지금 충전한다면)'}${badgeLine}</small></div>
     <div class="prjF">${rows.join('')}${cmpHTML}</div>`;
   const sel = document.getElementById('chgCmp');
   if (sel) sel.onchange = () => { state.chargeCompare = sel.value; renderChargeCard(); };
@@ -1635,13 +1637,15 @@ function scheduleLive() {
 
 async function load() {
   // 최신 추적 판정은 fetch "이전" 창·스팬으로 (P0-4: 새 데이터 도착 후 판정하면 긴 공백에 추적을 잃음)
-  const wasFollowing = state.report ? FV.isFollowingEnd(state.flatWin, flatSpanNow()) : true;
+  const oldSp = state.report ? flatSpanNow() : null;
+  const wasFollowing = oldSp ? FV.isFollowingEnd(state.flatWin, oldSp) : true;
   try {
     const res = await fetch(`/api/report?source=${state.source}&level=${state.rateLevel}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     state.report = await res.json();
-    // 2D에서 끝(최신)을 보고 있었다면 폭을 유지한 채 새 끝을 따라간다
-    if (state.view === 'flat' && wasFollowing) state.flatWin = FV.followEnd(state.flatWin, flatSpanNow());
+    // 2D에서 끝(최신)을 보고 있었다면 "지금 기준 상대 위치"를 유지하며 Δ만큼 따라간다
+    // (끝점 스냅 방식은 미래 패드로 팬해 둔 창을 매분 왼쪽으로 되돌렸음)
+    if (state.view === 'flat' && wasFollowing) state.flatWin = FV.followEnd(state.flatWin, flatSpanNow(), oldSp ? oldSp.max : null);
     document.getElementById('empty').innerHTML = emptyDefaultHTML;
   } catch (e) {
     // keep the previous report on screen (don't clobber state with an error body);

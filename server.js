@@ -208,17 +208,24 @@ export function startServer({ root, port } = {}) {
         let live = null;
         try { live = sample(); if (live && live.t && samples.length && live.t > samples[samples.length - 1].t) samples = samples.concat(live); } catch { /* ioreg 실패 → 저장 샘플만 */ }
         const stats = chargeStats(samples, level);
-        const cur = live && live.ac ? live : null;
-        const key = cur ? chargerKey(cur) : null;
-        const cls = cur ? classKey(cur) : null;
         const adapters = readAdapters();
+        let key = null, cls = null, assumed = false;
+        if (live && live.ac) { key = chargerKey(live); cls = classKey(live); }
+        else {
+          // 미연결: "가장 최근에 목격한 충전기"를 가정해 예측 — 어떤 충전기 기준인지 배지로 명시(kdr)
+          const ents = Object.entries(adapters);
+          if (ents.length) {
+            const [k, m] = ents.reduce((a, b) => ((b[1].lastSeen || 0) > (a[1].lastSeen || 0) ? b : a));
+            key = k; cls = classKey({ familyCode: m.family, adapterWnom: m.watts }); assumed = true;
+          }
+        }
         const resolved = ratesWithFallback(stats, key, cls);
         // 에너지 수지: 벌크(→80%) + 참고용 전체(→100%, CV 꼬리는 낙관적이라 뷰어가 밴드 통계로 스플라이스)
         const eb = live ? energyBalanceETA({ samples, live, targetPct: 80 }) : null;
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         // avgSysChargeW: 클라이언트의 "정격 기반 물리 추정"(bandsForProfile 스케일링)의 기준값 —
         // 이 키가 빠지면 스케일링이 조용히 비활성화되어 15W와 96W가 같은 ETA를 내는 회귀가 된다
-        res.end(JSON.stringify({ current: key ? { key, cls, meta: adapters[key] || null } : null,
+        res.end(JSON.stringify({ current: key ? { key, cls, meta: adapters[key] || null, assumed } : null,
           resolved, profiles: stats.profiles, classes: stats.classes, global: stats.global,
           avgSysChargeW: stats.avgSysChargeW, adapters, energyBalance: eb }));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }

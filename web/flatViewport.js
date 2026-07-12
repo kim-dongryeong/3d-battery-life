@@ -63,9 +63,12 @@ export function presetWindow(kind, win, sp, minDur = MIN_DUR, futurePad = FUTURE
 export function isFollowingEnd(win, sp, slack = 180) {
   return !win || win.t1 >= sp.max - slack;
 }
-export function followEnd(win, newSp, minDur = MIN_DUR, futurePad = FUTURE_PAD) {
+// "지금" 기준 상대 위치를 보존하며 창을 시간과 함께 민다: Δ = 새 끝 − 이전 끝 만큼 평행이동.
+// (끝점을 newSp.max 로 스냅하면, 미래 패드로 팬해 둔 창이 매 갱신마다 왼쪽으로 튄다 — kdr 발견)
+export function followEnd(win, newSp, oldMax, minDur = MIN_DUR, futurePad = FUTURE_PAD) {
   if (!win) return null;   // 전체 보기는 그대로 전체
-  return normalizeWindow({ t0: newSp.max - (win.t1 - win.t0), t1: newSp.max }, newSp, minDur, futurePad);
+  const d = oldMax != null ? newSp.max - oldMax : newSp.max - win.t1;
+  return normalizeWindow({ t0: win.t0 + d, t1: win.t1 + d }, newSp, minDur, futurePad);
 }
 
 // 달력 눈금 — DST 안전: 고정 86400초 증가 대신 Date 의 달력 연산(setMinutes/setDate)으로

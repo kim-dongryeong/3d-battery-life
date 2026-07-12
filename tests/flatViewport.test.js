@@ -76,18 +76,22 @@ test('세부선(minor): 라벨보다 촘촘한 무라벨 눈금이 줌에 따라
   assert.ok(lab5.some(t => new Date(t.t * 1000).getHours() === 12), '12시 라벨 존재');
 });
 
-test('불변량 6: 최신 추적 — 폭 유지, t1 만 새 끝으로', () => {
+test('불변량 6: 최신 추적 — 폭 보존 + "지금" 기준 상대 위치 보존(Δ 평행이동)', () => {
   const win = { t0: SP.max - 7200, t1: SP.max - 60 };     // 끝에 붙어 있던 2시간 창
   assert.ok(isFollowingEnd(win, SP));
   const newSp = { min: SP.min, max: SP.max + 600 };        // 10분치 새 샘플
-  const f = followEnd(win, newSp);
+  const f = followEnd(win, newSp, SP.max);
   assert.ok(Math.abs((f.t1 - f.t0) - (win.t1 - win.t0)) < 1e-6, '폭 보존');
-  assert.equal(f.t1, newSp.max);
+  assert.equal(f.t1 - newSp.max, win.t1 - SP.max, '끝점의 now 기준 오프셋 보존');
+  // 미래 패드로 팬해 둔 창(t1 > max): 스냅백 없이 같은 오프셋으로 따라간다 (매분 왼쪽 튐 방지)
+  const fut = { t0: SP.max - 3600, t1: SP.max + 7200 };
+  const ff = followEnd(fut, newSp, SP.max);
+  assert.equal(ff.t1 - newSp.max, fut.t1 - SP.max, '미래 오프셋 보존(스냅백 금지)');
   // 과거를 보고 있던 창은 추적하지 않는다
   assert.ok(!isFollowingEnd({ t0: SP.min, t1: SP.min + 3600 }, SP));
   // 전체 보기(null)는 항상 추적 상태이고 전체 그대로
   assert.ok(isFollowingEnd(null, SP));
-  assert.equal(followEnd(null, newSp), null);
+  assert.equal(followEnd(null, newSp, SP.max), null);
 });
 
 test('시간 눈금(30h 창): 라벨=3시간 간격 정시, major=자정, 세부선은 그보다 촘촘', () => {
