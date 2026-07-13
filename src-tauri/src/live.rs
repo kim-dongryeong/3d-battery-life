@@ -677,8 +677,8 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
 // power number already conveys draw), so no bolt clutters the tight cell. `watt` = the resolved
 // power the ticker passes in (sys or battery per w7_src).
 pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool) -> (Vec<u8>, u32, u32) {
-    // Extra width belongs to the larger charge indicator; the power/level type sizes stay unchanged.
-    let (w, h) = (54u32, 39u32);   // room for the bolt's lower tip beyond the battery outline
+    // Keep the original width: charge-state artwork must not make this menu-bar item grow sideways.
+    let (w, h) = (48u32, 39u32);   // extra height only, for the bolt tips beyond the battery outline
     let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
@@ -688,24 +688,24 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
         if w_val.abs() < 0.05 { "0W".into() }
         else { format!("{}{:.1}W", if w_val > 0.0 { "+" } else { "−" }, w_val.abs()) }
     } else { format!("{:.1}W", w_val.max(0.0)) };
-    stamp_digits_fit(&mut hi, &wtxt, 15.5, 52.0, 27.0, 6.6, INK, true);
+    stamp_digits_fit(&mut hi, &wtxt, 15.5, 46.0, 24.0, 6.6, INK, true);
     // bottom: mini rounded battery, fill by level, with the level % inside (combo-style)
     let body_sh = (0u8, 0u8, 0u8, 95u8);
-    hi.stroke_rrect(1.0, 15.7, 51.0, 36.0, 5.0, 2.0, body_sh);
-    hi.fill_rrect(51.5, 22.2, 54.0, 28.2, 1.5, body_sh);
-    hi.stroke_rrect(1.0, 15.0, 51.0, 35.3, 5.0, 2.0, INK);
-    hi.fill_rrect(51.5, 21.5, 54.0, 27.5, 1.5, INK);
-    let fw = (46.0 * pct as f32 / 100.0).max(2.5);
+    hi.stroke_rrect(1.0, 15.7, 45.0, 36.0, 5.0, 2.0, body_sh);
+    hi.fill_rrect(45.5, 22.2, 48.0, 28.2, 1.5, body_sh);
+    hi.stroke_rrect(1.0, 15.0, 45.0, 35.3, 5.0, 2.0, INK);
+    hi.fill_rrect(45.5, 21.5, 48.0, 27.5, 1.5, INK);
+    let fw = (40.0 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
-    // Charging: a tall, slim Stats-style bolt crosses the battery's top/bottom outline. Its 2.7px
+    // Charging: a tall, slim Stats-style bolt crosses the battery's top/bottom outline. Its 2px
     // transparent cutout includes the fill AND outline, so the white bolt never melts into either.
     // Full keeps the compact plug. Neither state is allowed to shrink the level digits.
-    const WCLIP: (f32, f32, f32, f32) = (0.0, 8.0, 52.0, 39.0);
+    const WCLIP: (f32, f32, f32, f32) = (0.0, 8.0, 46.0, 39.0);
     let ind = if l.charging { 15.5f32 } else if l.full { 12.0 } else { 0.0 };
-    if l.charging { charge_overlay_cut_r(&mut hi, l, 10.5, 25.2, 13.5, 28.0, 2.7, true, WCLIP); }
+    if l.charging { charge_overlay_cut_r(&mut hi, l, 8.5, 25.2, 13.5, 25.2, 2.0, true, WCLIP); }
     else if l.full { charge_overlay_cut(&mut hi, l, 10.0, 25.2, 9.0, 14.0, WCLIP); }
     let digits = format!("{}", pct.round() as u32);
-    let dcx = if ind > 0.0 { (3.0 + ind + 49.0) / 2.0 } else { 26.0 };
+    let dcx = if ind > 0.0 { (3.0 + ind + 43.0) / 2.0 } else { 23.0 };
     stamp_digits_cut(&mut hi, &digits, 16.2, dcx, 25.3, 1.0, WCLIP);   // 1px rim in the fill
     stamp_digits(&mut hi, &digits, 16.2, dcx, 25.3, INK, true);        // level % inside the battery
     hi.down()
