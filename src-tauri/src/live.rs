@@ -505,7 +505,9 @@ fn plug_erase(hi: &mut Hi, cx: f32, top: f32, s: f32, r: f32, clip: (f32, f32, f
 // wstack deliberately includes the outline so its oversized Stats-style bolt can break through it.
 fn charge_overlay_cut_r(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, r: f32, clip: (f32, f32, f32, f32)) {
     if l.charging {
-        const P: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.60), (0.45, 0.60), (0.36, 1.0), (0.92, 0.38), (0.50, 0.38)];
+        // Keep the long tips, but make the middle cross-band slim: the two inner horizontal edges
+        // sit close together instead of giving the bolt a vertically-heavy body.
+        const P: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.53), (0.45, 0.53), (0.36, 1.0), (0.92, 0.47), (0.50, 0.47)];
         let (ew, eh) = (w + 2.0 * r, h + 2.0 * r);   // proportional enlarge ≈ the dilation for this convex-ish shape
         let pts: Vec<(f32, f32)> = P.iter().map(|&(u, v)| (cx - ew / 2.0 + u * ew, cy - eh / 2.0 + v * eh)).collect();
         erase_poly(hi, &pts, clip);
@@ -645,7 +647,7 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
 // power the ticker passes in (sys or battery per w7_src).
 pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool) -> (Vec<u8>, u32, u32) {
     // Extra width belongs to the larger charge indicator; the power/level type sizes stay unchanged.
-    let (w, h) = (54u32, 36u32);
+    let (w, h) = (54u32, 39u32);   // room for the bolt's lower tip beyond the battery outline
     let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
@@ -664,12 +666,12 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
     hi.fill_rrect(51.5, 21.5, 54.0, 27.5, 1.5, INK);
     let fw = (46.0 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
-    // Charging: an oversized Stats-style bolt crosses the battery's top/bottom outline. Its 1.35px
+    // Charging: a tall, slim Stats-style bolt crosses the battery's top/bottom outline. Its 2.7px
     // transparent cutout includes the fill AND outline, so the white bolt never melts into either.
     // Full keeps the compact plug. Neither state is allowed to shrink the level digits.
-    const WCLIP: (f32, f32, f32, f32) = (0.0, 13.0, 52.0, 36.0);
+    const WCLIP: (f32, f32, f32, f32) = (0.0, 8.0, 52.0, 39.0);
     let ind = if l.charging { 15.5f32 } else if l.full { 12.0 } else { 0.0 };
-    if l.charging { charge_overlay_cut_r(&mut hi, l, 10.5, 25.2, 13.5, 22.5, 1.35, WCLIP); }
+    if l.charging { charge_overlay_cut_r(&mut hi, l, 10.5, 25.2, 13.5, 28.0, 2.7, WCLIP); }
     else if l.full { charge_overlay_cut(&mut hi, l, 10.0, 25.2, 9.0, 14.0, WCLIP); }
     let digits = format!("{}", pct.round() as u32);
     let dcx = if ind > 0.0 { (3.0 + ind + 49.0) / 2.0 } else { 26.0 };
