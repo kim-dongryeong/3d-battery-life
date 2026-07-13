@@ -12,6 +12,7 @@ import { sample, detail } from './lib/battery.js';
 import { chargerKey, readAdapters, upsertAdapter } from './lib/adapters.js';
 import { chargeStats, ratesWithFallback, classKey, energyBalanceETA } from './lib/chargeRates.js';
 import { userDataDir, cacheDir } from './lib/paths.js';
+import * as measure from './lib/measure.js';
 import { generateDemoLines } from './scripts/gen-demo.js';
 import { generateDemo2Lines } from './scripts/gen-demo2.js';
 
@@ -101,6 +102,46 @@ function sanitizeCfg(p) {
   if (typeof p.text_adp === 'boolean') o.text_adp = p.text_adp;
   return o;
 }
+
+// ── 전력 분석(측정) 세션 — calculations live in lib/measure.js (tested); this block owns only
+// timers + persistence. Samples come from live-smc.json (the tray app's ~2s SMC publish, now
+// carrying seq/monoMs); the gauge trace comes from sample()'s coulomb fields every ~60s.
+const measureFile = () => path.join(userDataDir(), 'measure-session.json');
+let mSt = null, mTick = null, mCoul = null;
+try { mSt = JSON.parse(fs.readFileSync(measureFile(), 'utf8')); } catch { mSt = null; }
+function measurePersist() {
+  if (!mSt) { try { fs.unlinkSync(measureFile()); } catch { /* absent */ } return; }
+  const f = measureFile();
+  try { fs.writeFileSync(f + '.tmp', JSON.stringify(mSt)); fs.renameSync(f + '.tmp', f); } catch { /* disk hiccup — next snapshot retries */ }
+}
+function readLiveSMC() {
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(userDataDir(), 'live-smc.json'), 'utf8'));
+    return (Date.now() / 1000 - s.at < 6) ? s : null;    // same stale rule as applyLiveSMC
+  } catch { return null; }
+}
+function coulombTick() {
+  if (!mSt || mSt.state !== 'running') return;
+  try {
+    const s = sample();
+    if (s.rawCap != null && s.voltage) measure.coulombPoint(mSt, { t: s.t, mah: s.rawCap, mv: Math.round(s.voltage * 1000) });
+  } catch { /* ioreg 실패 → 다음 분에 재시도 */ }
+}
+function measureTimersStart() {
+  if (mTick) return;
+  mTick = setInterval(() => {
+    if (!mSt || mSt.state !== 'running') return;
+    const smc = readLiveSMC();
+    // stale/missing publisher: no acceptSample call — the next unique sample's monoMs delta
+    // exceeds GAP_SEC and lib/measure.js records the whole silence as one coalesced gap.
+    if (smc) measure.acceptSample(mSt, smc);
+    const now = Date.now();
+    if (now >= (mSt.nextPersistAt || 0)) { mSt.nextPersistAt = now + measure.PERSIST_MS; measurePersist(); }
+  }, 2000);
+  mCoul = setInterval(coulombTick, 60_000);
+}
+function measureTimersStop() { clearInterval(mTick); clearInterval(mCoul); mTick = mCoul = null; }
+if (mSt && mSt.state === 'running') measureTimersStart();   // resume across a server restart
 
 function hostAllowed(req) {
   const h = String(req.headers.host || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
@@ -229,6 +270,41 @@ export function startServer({ root, port } = {}) {
           resolved, profiles: stats.profiles, classes: stats.classes, global: stats.global,
           avgSysChargeW: stats.avgSysChargeW, adapters, energyBalance: eb }));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+
+    // 전력 분석(측정) 세션: start/stop/reset + 상태 폴링. 계산은 lib/measure.js(테스트됨).
+    if (url.pathname === '/api/measure' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(mSt ? measure.summary(mSt) : { state: 'idle' }));
+      return;
+    }
+    if (url.pathname === '/api/measure/start' && req.method === 'POST') {
+      if (mSt && mSt.state === 'running') { res.writeHead(409, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'already running' })); return; }
+      let startInfo = null;
+      try {
+        const s = sample();
+        startInfo = { rawCapMah: s.rawCap ?? null, voltageMv: s.voltage ? Math.round(s.voltage * 1000) : null, pct: s.pct ?? null,
+          adapter: s.ac ? { key: chargerKey(s), watts: s.adapterWnom ?? null } : null };
+        mSt = measure.newSession(startInfo, s.t);
+        if (s.rawCap != null && s.voltage) measure.coulombPoint(mSt, { t: s.t, mah: s.rawCap, mv: Math.round(s.voltage * 1000) });
+      } catch { mSt = measure.newSession({ rawCapMah: null, voltageMv: null, pct: null, adapter: null }, Math.round(Date.now() / 1000)); }
+      measurePersist(); measureTimersStart();
+      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(measure.summary(mSt)));
+      return;
+    }
+    if (url.pathname === '/api/measure/stop' && req.method === 'POST') {
+      if (!mSt || mSt.state !== 'running') { res.writeHead(409, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'not running' })); return; }
+      coulombTick();                                      // 마지막 게이지 점을 확정하고 나서 멈춘다
+      measure.stopSession(mSt, Math.round(Date.now() / 1000));
+      measureTimersStop(); measurePersist();
+      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(measure.summary(mSt)));
+      return;
+    }
+    if (url.pathname === '/api/measure/reset' && req.method === 'POST') {
+      if (mSt && mSt.state === 'running') { res.writeHead(409, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'still running' })); return; }
+      mSt = null; measurePersist();
+      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ state: 'idle' }));
       return;
     }
 

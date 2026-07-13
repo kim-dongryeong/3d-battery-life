@@ -282,3 +282,18 @@ body.settings-open #foot .vsel { opacity: .4; }
 .subseg button { font: inherit; font-size: 10.5px; font-weight: 650; padding: 4px 9px; background: var(--card); color: var(--dim); border: 0; cursor: pointer; }
 .subseg button.on { background: color-mix(in srgb, var(--accent) 18%, var(--card)); color: var(--fg); }
 .chiphint { color: var(--faint); font-size: 10.5px; line-height: 1.5; margin: 7px 0 4px; }
+
+/* ── 전력량 측정 세션 카드 ── */
+.mrow { display: flex; align-items: center; gap: 9px; margin: 5px 0 2px; }
+.mbtn {
+  border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  border-radius: 8px; padding: 4px 12px; font-size: 11.5px; font-weight: 650; cursor: pointer;
+}
+.mbtn:hover { border-color: var(--accent); }
+.mbtn.stop { color: #ff453a; }
+.mhint { color: var(--faint); font-size: 10px; }
+.mnote { color: var(--faint); font-size: 10px; margin: 3px 0 1px; }
+.mbadge {
+  font-style: normal; font-size: 8.5px; font-weight: 700; color: var(--dim);
+  border: 1px solid var(--line); border-radius: 4px; padding: 0 3px; margin-left: 3px; vertical-align: 1px;
+}

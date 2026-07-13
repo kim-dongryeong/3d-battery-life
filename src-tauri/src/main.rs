@@ -305,6 +305,11 @@ fn main() {
                 let mut last_pop_h = 0.0f64;   // last height the popover reported (to size its window)
                 let mut last_title = String::new();   // last native window title the viewer requested (i18n)
                 let mut pwin: Vec<(u64, f64, f64, f64)> = Vec::new();   // rolling 60s (t, sysW, adpW, batW) → 1-min avg for the recorder
+                // measurement sessions (lib/measure.js): seq lets the consumer dedupe samples, monoMs is
+                // the monotonic clock its integrator uses for dt (wall-clock steps must not distort ∫W dt).
+                // A process restart resets BOTH (seq=0, monoMs≈0) — the consumer treats that as a new baseline.
+                let t0 = std::time::Instant::now();
+                let mut smc_seq: u64 = 0;
                 loop {
                     // A panic ANYWHERE in one tick must not kill this thread — a dead ticker freezes
                     // the tray at a stale % and stops the SMC bridge (popover loses PPBR/system power)
@@ -358,9 +363,14 @@ fn main() {
                             for (_, sw, aw, bw) in &pwin { ss += sw; sa += aw; sb += bw; }
                             let n = pwin.len() as f64;
                             let av = |sum: f64| if n > 0.0 { Some(sum / n) } else { None };
-                            let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"batteryW\":{},\"systemWAvg\":{},\"adapterWAvg\":{},\"batteryWAvg\":{},\"dcInV\":{},\"dcInA\":{},\"at\":{}}}",
-                                f(s.battery_temp_c()), f(sys_w), f(adp_w), f(bat_w), f(av(ss)), f(av(sa)), f(av(sb)), f(s.dc_in_volts()), f(s.dc_in_amps()), now);
-                            let _ = std::fs::write(data_dir().join("live-smc.json"), j);
+                            smc_seq += 1;
+                            let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+                            let mono_ms = t0.elapsed().as_millis() as u64;
+                            let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"batteryW\":{},\"systemWAvg\":{},\"adapterWAvg\":{},\"batteryWAvg\":{},\"dcInV\":{},\"dcInA\":{},\"at\":{},\"seq\":{},\"sampleAtMs\":{},\"monoMs\":{}}}",
+                                f(s.battery_temp_c()), f(sys_w), f(adp_w), f(bat_w), f(av(ss)), f(av(sa)), f(av(sb)), f(s.dc_in_volts()), f(s.dc_in_amps()), now, smc_seq, now_ms, mono_ms);
+                            // atomic publish (tmp+rename): a reader must never see a torn/partial JSON
+                            let (tmp, fin) = (data_dir().join("live-smc.json.tmp"), data_dir().join("live-smc.json"));
+                            if std::fs::write(&tmp, j).is_ok() { let _ = std::fs::rename(&tmp, &fin); }
                         }
                         // battery W for the WIDGET/title — 혼합 method (viewer의 '혼합'): 방전 → SMC PPBR
                         // 실측(매 틱 갱신, 음수), 그 외 → 수지(어댑터−시스템, 충전 시 양수). ioreg 셀 실측

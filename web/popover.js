@@ -356,7 +356,45 @@ function loop3D() {
   t3d.renderer.render(t3d.scene, t3d.camera);
   t3d.raf = requestAnimationFrame(loop3D);
 }
-function tailHTML(s) { return powerCompareHTML(s) + detailHTML(s) + procsHTML(); }
+// ── 전력량 측정 세션 ("전력 분석 세션") ─────────────────────────────────────
+// 서버(/api/measure)가 SMC 2초 샘플을 적산 — 여기는 표시와 start/stop 버튼만.
+// 배터리는 두 추정치를 동급 병기: 수지(어댑터−시스템 적분) vs 게이지(잔량 델타) — 차이의 원인은 단정하지 않는다.
+let msr = { state: 'idle' };
+async function pullMeasure() {
+  try { const r = await fetch('/api/measure', { cache: 'no-store' }); if (r.ok) msr = await r.json(); } catch { /* keep */ }
+}
+async function doMeasure(act) {
+  try { await fetch(`/api/measure/${act}`, { method: 'POST' }); } catch { /* server down */ }
+  await pullMeasure(); if (!settingsOpen) render();
+}
+const fmtDurS = sec => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), x = sec % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`; };
+function measureHTML() {
+  const m = msr;
+  const sW = v => v == null ? '–' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)} Wh`;
+  const uW = v => v == null ? '–' : `${v.toFixed(2)} Wh`;
+  let body;
+  if (!m.state || m.state === 'idle') {
+    body = `<div class="mrow"><button class="mbtn" data-m="start">⏱ 측정 시작</button><span class="mhint">지금부터 전력량(Wh)을 적산해요</span></div>`;
+  } else {
+    const run = m.state === 'running';
+    const rows = [
+      ['경과', `${fmtDurS(m.durSec)}${m.gapSec ? ` · 공백 ${fmtDurS(m.gapSec)}` : ''}`],
+      ['외부 입력 <em class="mbadge">센서</em>', `${uW(m.adapterWh)}${m.avgAdapterW != null ? ` · ${m.avgAdapterW.toFixed(1)} W` : ''}`],
+      ['시스템 사용 <em class="mbadge">센서</em>', `${uW(m.systemWh)}${m.avgSystemW != null ? ` · ${m.avgSystemW.toFixed(1)} W` : ''}`],
+      ['배터리 <em class="mbadge">수지 추정</em>', `${sW(m.balanceWh)}${m.balanceChgWh || m.balanceDisWh ? ` (+${uW(m.balanceChgWh)} / −${uW(m.balanceDisWh)})` : ''}`],
+      ['배터리 <em class="mbadge">게이지 검산</em>', `${sW(m.gaugeDeltaWh)}${m.gaugeDeltaMah != null ? ` · ${m.gaugeDeltaMah >= 0 ? '+' : ''}${m.gaugeDeltaMah} mAh` : ''}`],
+    ];
+    if (!run && m.differenceWh != null) rows.push(['두 추정의 차이', `${sW(m.differenceWh)}${m.differencePct != null ? ` (${m.differencePct}%)` : ''}`]);
+    body = rows.map(([k, v]) => `<div class="cmp"><span>${k}</span><b>${v}</b></div>`).join('')
+      + (m.gapSec ? `<div class="mnote">측정 공백은 적산에서 제외돼요 — 게이지 검산은 공백과 무관해요(칩이 계속 적분)</div>` : '')
+      + `<div class="mrow">${run
+          ? `<button class="mbtn stop" data-m="stop">■ 정지</button><span class="mhint">피크 시스템 ${m.peakSystemW != null ? m.peakSystemW.toFixed(1) : '–'} W</span>`
+          : `<button class="mbtn" data-m="reset">새 측정</button><span class="mhint">결과는 새 측정 시작 전까지 유지돼요</span>`}</div>`;
+  }
+  return `<div class="sec">전력량 측정</div>${body}`;
+}
+function tailHTML(s) { return powerCompareHTML(s) + measureHTML() + detailHTML(s) + procsHTML(); }
 
 // ── settings panel (gear) ──────────────────────────────────────────────
 // data-k = a localStorage display pref (popover-only) · data-c = a server cfg key (menu-bar/alerts)
@@ -643,6 +681,8 @@ $('pop').addEventListener('change', e => {
   else if (t.matches('select[data-c]')) applyCfg(t.dataset.c, coerce(t.dataset.c, t.value));
 });
 $('pop').addEventListener('click', e => {
+  const mb = e.target.closest('[data-m]');             // 전력량 측정 start/stop/reset
+  if (mb) { doMeasure(mb.dataset.m); return; }
   const sim = e.target.closest('[data-sim]');          // preview state simulator (현재/충전/부족/저전력)
   if (sim) { pvSim = sim.dataset.sim; render(); return; }
   const w7 = e.target.closest('[data-w7]');            // widget-7 power source (checked before [data-w])
@@ -709,8 +749,9 @@ document.addEventListener('keydown', e => {
 
 initI18nPop();   // 언어(팝오버 설정에서 선택, localStorage 공용) 적용 + 이후 렌더 자동 번역
 render();
-pull(); pullProcs(); pullDetail(); pullConfig(); pullSpark();
+pull(); pullProcs(); pullDetail(); pullConfig(); pullSpark(); pullMeasure();
 setInterval(() => { if (!document.hidden) pull(); }, 2000);
+setInterval(() => { if (!document.hidden && msr.state === 'running') pullMeasure(); }, 2000);   // 측정 중일 때만 폴링
 setInterval(() => { if (!document.hidden) pullProcs(); }, 5000);
 setInterval(() => { if (!document.hidden) pullDetail(); }, 12000);
 setInterval(() => { if (!document.hidden) pullSpark(); }, 30000);

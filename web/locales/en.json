@@ -1,144 +1,441 @@
 {
   "_comment": "English translation. KEY = the Korean source string (verbatim, incl. · − × → units). Add a language: copy this file to web/locales/<code>.json, translate the VALUES (keep keys), add it to index.json. Missing keys fall back to Korean. _patterns = [regex, replacement] applied to interpolated strings (numbers+units) that can't be exact-keyed; ordered — phrases/ago-forms before bare units so words like 분석/분리 aren't broken.",
   "_patterns": [
-    ["(\\d+)\\s*시간\\s*전", "$1h ago"],
-    ["(\\d+)\\s*분\\s*전", "$1m ago"],
-    ["(\\d+)\\s*일\\s*전", "$1d ago"],
-    ["(\\d+)\\s*초\\s*전", "$1s ago"],
-    ["(\\d+)일차", "day $1"],
-    ["(\\d+)방전세션", "$1 discharge sessions"],
-    ["(\\d+)세션", "$1 sessions"],
-    ["배터리 정보를 읽을 수 없습니다", "Can't read battery info"],
-    ["기록 중", "Recording"],
-    ["방전 예상", "Discharge forecast"],
-    ["충전 예상", "Charge forecast"],
-    ["과거 방전 속도 기준", "based on past discharge rate"],
-    ["지금 뽑으면", "if unplugged now"],
-    ["직선 기울기 = 현재", "Line slope = current"],
-    ["현재 구간", "current band"],
-    ["구간 방전율", "band discharge rate"],
-    ["방전속도로 외삽", "extrapolated from discharge speed"],
-    ["충전속도로 외삽", "extrapolated from charge speed"],
-    ["macOS 추정\\(ioreg\\)", "macOS estimate (ioreg)"],
-    ["참고\\(공식 비공개\\)", "reference (official private)"],
-    ["방전속도", "discharge speed"],
-    ["구간별", "Per-band"],
-    ["추세선은 데이터가 더 쌓이면 표시돼요", "Trend line appears once more data accumulates"],
-    ["추세선", "trend line"],
-    ["점점 빨라짐\\(노화/부하↑\\)", "speeding up (aging/load↑)"],
-    ["Wh/% 하락 = 노화 진행", "Wh/% dropping = aging"],
-    ["안정/개선", "steady/improving"],
-    ["점점 빨라짐", "speeding up"],
-    ["변화 없음", "no change"],
-    ["날짜 단면", "date cross-section"],
-    ["노화Wh/%", "Aging Wh/%"],
-    ["배터리 전력 W", "Battery power W"],
-    ["\\(\\+충전/−방전\\)", "(+charge/−discharge)"],
-    ["수지 PDTR−PSTR", "Balance PDTR−PSTR"],
-    ["혼합\\(방전 PPBR·충전 수지\\)", "Hybrid (discharge PPBR·charge balance)"],
-    ["소모 평균", "avg drain"],
-    ["충전 중", "charging"],
-    ["방전 중", "discharging"],
-    ["만충/유휴", "full/idle"],
-    ["분리", "unplugged"],
-    ["중앙값", "median"],
-    ["초기", "initial"],
-    ["최근", "recent"],
-    ["관측", "observed"],
-    ["평균", "avg"],
-    ["만충", "full"],
-    ["유휴", "idle"],
-    ["비공개", "private"],
-    ["정밀", "precise"],
-    ["뒤", "later"],
-    ["일별", "daily"],
-    ["주별", "weekly"],
-    ["월별", "monthly"],
-    ["행 클릭→추세", "click row → trend"],
-    ["음수=방전", "negative = discharge"],
-    ["(\\d+)시간", "$1h"],
-    ["(\\d+)시", "$1h"],
-    ["(\\d+)분", "$1m"],
-    ["(\\d+)초", "$1s"],
-    ["(\\d+)사이클", "$1 cycles"],
-    ["(\\d+)회", "$1 cyc"],
-    ["(\\d+)일당", "per $1d"],
-    ["(\\d+)일치", "$1d"],
-    ["(\\d+)주치", "$1wk"],
-    ["(\\d+)월치", "$1mo"],
-    ["(\\d+)일", "$1d"],
-    ["(\\d+)주", "$1wk"],
-    ["(\\d+)\\s*개월", "$1mo"],
-    ["(\\d+)월", "$1mo"],
-    ["(\\d+)\\s*년", "$1y"],
-    ["([\\d,]+)개", "$1"],
-    ["%/분", "%/min"],
-    ["곡선", "Curve"],
-    ["직선", "Line"],
-    ["추세", "trend"],
-    ["예상", "forecast"],
-    ["현재", "now"],
-    ["온도", "Temperature"],
-    ["전력", "Power"],
-    ["속도", "speed"],
-    ["안정", "steady"],
-    ["증가", "rising"],
-    ["감소", "falling"],
-    ["최소", "min"],
-    ["필요", "needed"],
-    ["오전", "AM"],
-    ["오후", "PM"],
-    ["방금", "just now"]
+    [
+      "공백",
+      "gap"
+    ],
+    [
+      "피크 시스템",
+      "peak system"
+    ],
+    [
+      "(\\d+)\\s*시간\\s*전",
+      "$1h ago"
+    ],
+    [
+      "(\\d+)\\s*분\\s*전",
+      "$1m ago"
+    ],
+    [
+      "(\\d+)\\s*일\\s*전",
+      "$1d ago"
+    ],
+    [
+      "(\\d+)\\s*초\\s*전",
+      "$1s ago"
+    ],
+    [
+      "(\\d+)일차",
+      "day $1"
+    ],
+    [
+      "(\\d+)방전세션",
+      "$1 discharge sessions"
+    ],
+    [
+      "(\\d+)세션",
+      "$1 sessions"
+    ],
+    [
+      "배터리 정보를 읽을 수 없습니다",
+      "Can't read battery info"
+    ],
+    [
+      "기록 중",
+      "Recording"
+    ],
+    [
+      "방전 예상",
+      "Discharge forecast"
+    ],
+    [
+      "충전 예상",
+      "Charge forecast"
+    ],
+    [
+      "과거 방전 속도 기준",
+      "based on past discharge rate"
+    ],
+    [
+      "지금 뽑으면",
+      "if unplugged now"
+    ],
+    [
+      "직선 기울기 = 현재",
+      "Line slope = current"
+    ],
+    [
+      "현재 구간",
+      "current band"
+    ],
+    [
+      "구간 방전율",
+      "band discharge rate"
+    ],
+    [
+      "방전속도로 외삽",
+      "extrapolated from discharge speed"
+    ],
+    [
+      "충전속도로 외삽",
+      "extrapolated from charge speed"
+    ],
+    [
+      "macOS 추정\\(ioreg\\)",
+      "macOS estimate (ioreg)"
+    ],
+    [
+      "참고\\(공식 비공개\\)",
+      "reference (official private)"
+    ],
+    [
+      "방전속도",
+      "discharge speed"
+    ],
+    [
+      "구간별",
+      "Per-band"
+    ],
+    [
+      "추세선은 데이터가 더 쌓이면 표시돼요",
+      "Trend line appears once more data accumulates"
+    ],
+    [
+      "추세선",
+      "trend line"
+    ],
+    [
+      "점점 빨라짐\\(노화/부하↑\\)",
+      "speeding up (aging/load↑)"
+    ],
+    [
+      "Wh/% 하락 = 노화 진행",
+      "Wh/% dropping = aging"
+    ],
+    [
+      "안정/개선",
+      "steady/improving"
+    ],
+    [
+      "점점 빨라짐",
+      "speeding up"
+    ],
+    [
+      "변화 없음",
+      "no change"
+    ],
+    [
+      "날짜 단면",
+      "date cross-section"
+    ],
+    [
+      "노화Wh/%",
+      "Aging Wh/%"
+    ],
+    [
+      "배터리 전력 W",
+      "Battery power W"
+    ],
+    [
+      "\\(\\+충전/−방전\\)",
+      "(+charge/−discharge)"
+    ],
+    [
+      "수지 PDTR−PSTR",
+      "Balance PDTR−PSTR"
+    ],
+    [
+      "혼합\\(방전 PPBR·충전 수지\\)",
+      "Hybrid (discharge PPBR·charge balance)"
+    ],
+    [
+      "소모 평균",
+      "avg drain"
+    ],
+    [
+      "충전 중",
+      "charging"
+    ],
+    [
+      "방전 중",
+      "discharging"
+    ],
+    [
+      "만충/유휴",
+      "full/idle"
+    ],
+    [
+      "분리",
+      "unplugged"
+    ],
+    [
+      "중앙값",
+      "median"
+    ],
+    [
+      "초기",
+      "initial"
+    ],
+    [
+      "최근",
+      "recent"
+    ],
+    [
+      "관측",
+      "observed"
+    ],
+    [
+      "평균",
+      "avg"
+    ],
+    [
+      "만충",
+      "full"
+    ],
+    [
+      "유휴",
+      "idle"
+    ],
+    [
+      "비공개",
+      "private"
+    ],
+    [
+      "정밀",
+      "precise"
+    ],
+    [
+      "뒤",
+      "later"
+    ],
+    [
+      "일별",
+      "daily"
+    ],
+    [
+      "주별",
+      "weekly"
+    ],
+    [
+      "월별",
+      "monthly"
+    ],
+    [
+      "행 클릭→추세",
+      "click row → trend"
+    ],
+    [
+      "음수=방전",
+      "negative = discharge"
+    ],
+    [
+      "(\\d+)시간",
+      "$1h"
+    ],
+    [
+      "(\\d+)시",
+      "$1h"
+    ],
+    [
+      "(\\d+)분",
+      "$1m"
+    ],
+    [
+      "(\\d+)초",
+      "$1s"
+    ],
+    [
+      "(\\d+)사이클",
+      "$1 cycles"
+    ],
+    [
+      "(\\d+)회",
+      "$1 cyc"
+    ],
+    [
+      "(\\d+)일당",
+      "per $1d"
+    ],
+    [
+      "(\\d+)일치",
+      "$1d"
+    ],
+    [
+      "(\\d+)주치",
+      "$1wk"
+    ],
+    [
+      "(\\d+)월치",
+      "$1mo"
+    ],
+    [
+      "(\\d+)일",
+      "$1d"
+    ],
+    [
+      "(\\d+)주",
+      "$1wk"
+    ],
+    [
+      "(\\d+)\\s*개월",
+      "$1mo"
+    ],
+    [
+      "(\\d+)월",
+      "$1mo"
+    ],
+    [
+      "(\\d+)\\s*년",
+      "$1y"
+    ],
+    [
+      "([\\d,]+)개",
+      "$1"
+    ],
+    [
+      "%/분",
+      "%/min"
+    ],
+    [
+      "곡선",
+      "Curve"
+    ],
+    [
+      "직선",
+      "Line"
+    ],
+    [
+      "추세",
+      "trend"
+    ],
+    [
+      "예상",
+      "forecast"
+    ],
+    [
+      "현재",
+      "now"
+    ],
+    [
+      "온도",
+      "Temperature"
+    ],
+    [
+      "전력",
+      "Power"
+    ],
+    [
+      "속도",
+      "speed"
+    ],
+    [
+      "안정",
+      "steady"
+    ],
+    [
+      "증가",
+      "rising"
+    ],
+    [
+      "감소",
+      "falling"
+    ],
+    [
+      "최소",
+      "min"
+    ],
+    [
+      "필요",
+      "needed"
+    ],
+    [
+      "오전",
+      "AM"
+    ],
+    [
+      "오후",
+      "PM"
+    ],
+    [
+      "방금",
+      "just now"
+    ]
   ],
-
   "3D 분석 리포트": "3D Analysis Report",
   "🔋 3D 분석 리포트": "🔋 3D Analysis Report",
   "?안내": "?Guide",
-
   "데이터": "Data",
   "데모2 ✨": "Demo 2 ✨",
   "데모1": "Demo 1",
   "내 데이터": "My data",
-
   "세로축 (Y · 높이)": "Vertical axis (Y · height)",
   "배터리 %": "Battery %",
   "전력 W": "Power W",
   "잔량 변화 %/min": "Δ charge %/min",
-
   "평활 창 · 후행 (좁을수록 예민)": "Smoothing window · trailing (narrower = twitchier)",
-  "2분": "2 min", "5분": "5 min", "10분": "10 min", "20분": "20 min",
-
+  "2분": "2 min",
+  "5분": "5 min",
+  "10분": "10 min",
+  "20분": "20 min",
   "전력 레일": "Power rail",
-  "배터리": "Battery", "시스템": "System", "어댑터": "Adapter",
-
+  "배터리": "Battery",
+  "시스템": "System",
+  "어댑터": "Adapter",
   "시각 축 (X · 가로 폭)": "Time axis (X · width)",
-
   "색상": "Color",
-  "충/방전": "Chg/Dis", "저전력": "LPM", "온도": "Temp", "CPU부하": "CPU", "전력": "Power",
-
+  "충/방전": "Chg/Dis",
+  "저전력": "LPM",
+  "온도": "Temp",
+  "CPU부하": "CPU",
+  "전력": "Power",
   "자동회전": "Auto-rotate",
-  "🌙 다크": "🌙 Dark", "☀︎ 라이트": "☀︎ Light",
+  "🌙 다크": "🌙 Dark",
+  "☀︎ 라이트": "☀︎ Light",
   "시점 리셋": "Reset view",
-
-  "포인터 마커 크기": "Pointer marker size", "작게": "Small", "보통": "Medium", "크게": "Large",
-  "바닥 안내선 (시각·날짜축)": "Floor guides (time · date)", "켜기": "On", "끄기": "Off",
-  "값 안내선 (z축=세로)": "Value guide (vertical)", "대각선": "Diagonal", "직각": "Right-angle", "점": "Dot", "면": "Plane",
-  "방전·충전 예상선 (3D · 배터리 % 모드)": "Discharge · Charge projection (3D · Battery % mode)", "방전": "Discharge", "충전": "Charge",
-  "계산 정밀도": "Precision", "정밀 mAh": "Precise mAh", "정수%": "Integer %",
-  "배터리 전력 측정 방식": "Battery power method", "(전력 W 그래프 · 구간별전력)": "(Power W graph · per-band power)",
-  "수지 PDTR−PSTR": "Balance PDTR−PSTR", "혼합": "Hybrid",
-
+  "포인터 마커 크기": "Pointer marker size",
+  "작게": "Small",
+  "보통": "Medium",
+  "크게": "Large",
+  "바닥 안내선 (시각·날짜축)": "Floor guides (time · date)",
+  "켜기": "On",
+  "끄기": "Off",
+  "값 안내선 (z축=세로)": "Value guide (vertical)",
+  "대각선": "Diagonal",
+  "직각": "Right-angle",
+  "점": "Dot",
+  "면": "Plane",
+  "방전·충전 예상선 (3D · 배터리 % 모드)": "Discharge · Charge projection (3D · Battery % mode)",
+  "방전": "Discharge",
+  "충전": "Charge",
+  "계산 정밀도": "Precision",
+  "정밀 mAh": "Precise mAh",
+  "정수%": "Integer %",
+  "배터리 전력 측정 방식": "Battery power method",
+  "(전력 W 그래프 · 구간별전력)": "(Power W graph · per-band power)",
+  "수지 PDTR−PSTR": "Balance PDTR−PSTR",
+  "혼합": "Hybrid",
   "드래그=회전 · 휠=줌 · 우클릭드래그=이동 · 곡선에 마우스를 올리면 그 세션 정보가 보입니다.": "Drag = rotate · Wheel = zoom · Right-drag = pan · Hover a curve for that session's info.",
-
-  "최대 용량": "Max capacity", "정밀": "precise",
-  "현재": "Now", "기준 시각": "As of", "방금": "just now",
-  "저전력 모드": "Low Power Mode", "켜짐": "On", "꺼짐": "Off",
-  "배터리 건강도": "Battery health", "사이클": "Cycles", "만충 용량": "Full capacity",
-  "설계 사이클 한도": "Design cycle limit", "배터리 시리얼": "Battery serial",
-  "기록 기간": "Logging span", "샘플 수": "Samples",
-  "마지막 충전 이후": "Since last charge", "그중 사용(켜짐)": "Used while awake",
-  "상태": "State", "상태(컨디션)": "Condition", "정상": "Normal",
-
+  "최대 용량": "Max capacity",
+  "정밀": "precise",
+  "현재": "Now",
+  "기준 시각": "As of",
+  "방금": "just now",
+  "저전력 모드": "Low Power Mode",
+  "켜짐": "On",
+  "꺼짐": "Off",
+  "배터리 건강도": "Battery health",
+  "사이클": "Cycles",
+  "만충 용량": "Full capacity",
+  "설계 사이클 한도": "Design cycle limit",
+  "배터리 시리얼": "Battery serial",
+  "기록 기간": "Logging span",
+  "샘플 수": "Samples",
+  "마지막 충전 이후": "Since last charge",
+  "그중 사용(켜짐)": "Used while awake",
+  "상태": "State",
+  "상태(컨디션)": "Condition",
+  "정상": "Normal",
   "배터리 · 수지 PDTR−PSTR": "Battery · Balance PDTR−PSTR",
   "배터리 · ioreg V×I": "Battery · ioreg V×I",
   "배터리 · PPBR 방전": "Battery · PPBR discharge",
@@ -151,66 +448,151 @@
   "어댑터 종류": "Adapter type",
   "어댑터 · ioreg 공칭": "Adapter · ioreg nominal",
   "어댑터 · SMC 실측 PDTR": "Adapter · SMC measured PDTR",
-  "배터리 온도": "Battery temp", "CPU 부하": "CPU load",
-  "변화율": "Rate", "충전 중": "Charging", "방전 중": "Discharging", "만충/유휴": "Full / idle",
-
+  "배터리 온도": "Battery temp",
+  "CPU 부하": "CPU load",
+  "변화율": "Rate",
+  "충전 중": "Charging",
+  "방전 중": "Discharging",
+  "만충/유휴": "Full / idle",
   "구간별 방전 속도": "Per-band discharge speed",
-  "속도": "Speed", "노화Wh/%": "Aging Wh/%", "전력W": "Power W", "온도°C": "Temp °C",
-  "기간": "Period", "일": "Day", "주": "Week", "월": "Month",
-  "구간": "Band", "음수=방전": "negative = discharge", "행 클릭→추세": "click a row → trend",
-  "방전속도": "discharge speed", "방전 속도": "discharge speed",
-  "낮을수록 노화": "lower = more aging", "순수 부하": "pure load", "발열": "heat",
-  "안정": "steady", "점점 빨라짐": "speeding up",
-
-  "전체구간": "All bands", "2D선": "2D line", "히트맵": "Heatmap",
-  "확대": "Expand", "축소": "Collapse", "델타": "Delta", "눈금": "Ticks",
-  "더 보기": "More", "간단히": "Less",
-  "선": "Lines", "능선": "Ridges", "선+능선": "Lines+Ridges", "선+면": "Lines+Surface",
-  "적": "Sparse", "중": "Med", "촘": "Dense", "끔": "Off",
-  "날짜": "Date", "잔량": "Level",
-  "날짜 →": "Date →", "구간(잔량) →": "Band (level) →", "경과 일수 (오래됨 → 최근)": "Days elapsed (old → recent)",
+  "속도": "Speed",
+  "노화Wh/%": "Aging Wh/%",
+  "전력W": "Power W",
+  "온도°C": "Temp °C",
+  "기간": "Period",
+  "일": "Day",
+  "주": "Week",
+  "월": "Month",
+  "구간": "Band",
+  "음수=방전": "negative = discharge",
+  "행 클릭→추세": "click a row → trend",
+  "방전속도": "discharge speed",
+  "방전 속도": "discharge speed",
+  "낮을수록 노화": "lower = more aging",
+  "순수 부하": "pure load",
+  "발열": "heat",
+  "안정": "steady",
+  "점점 빨라짐": "speeding up",
+  "전체구간": "All bands",
+  "2D선": "2D line",
+  "히트맵": "Heatmap",
+  "확대": "Expand",
+  "축소": "Collapse",
+  "델타": "Delta",
+  "눈금": "Ticks",
+  "더 보기": "More",
+  "간단히": "Less",
+  "선": "Lines",
+  "능선": "Ridges",
+  "선+능선": "Lines+Ridges",
+  "선+면": "Lines+Surface",
+  "적": "Sparse",
+  "중": "Med",
+  "촘": "Dense",
+  "끔": "Off",
+  "날짜": "Date",
+  "잔량": "Level",
+  "날짜 →": "Date →",
+  "구간(잔량) →": "Band (level) →",
+  "경과 일수 (오래됨 → 최근)": "Days elapsed (old → recent)",
   "하루 중 시각 →": "Time of day →",
-  "추세": "trend", "데이터 더 필요": "need more data",
+  "추세": "trend",
+  "데이터 더 필요": "need more data",
   "아직 방전 데이터가 부족합니다.": "Not enough discharge data yet.",
-
-  "접기": "Collapse", "접기(최소화)": "Collapse (minimize)", "펼치기": "Expand",
-  "구간별 곡선": "Per-band curve", "직선 등속": "Linear (constant)",
-  "곡선": "Curve", "직선": "Line", "예상": "Forecast",
-  "방전 예상": "Discharge forecast", "충전 예상": "Charge forecast",
-  "예상 시각": "ETA", "지금부터": "From now",
-  "완충(100%)까지": "To full (100%)", "0%까지": "To 0%",
-  "구간별(곡선)": "Per-band (curve)", "지금": "now",
-  "보기": "View", "2D 시간축": "2D timeline",
-  "30일": "30d", "7일": "7d", "24시간": "24h", "오늘로": "Latest",
-  "날짜/시간 →": "Date/time →", "전체 보기": "Show all",
+  "접기": "Collapse",
+  "접기(최소화)": "Collapse (minimize)",
+  "펼치기": "Expand",
+  "구간별 곡선": "Per-band curve",
+  "직선 등속": "Linear (constant)",
+  "곡선": "Curve",
+  "직선": "Line",
+  "예상": "Forecast",
+  "방전 예상": "Discharge forecast",
+  "충전 예상": "Charge forecast",
+  "예상 시각": "ETA",
+  "지금부터": "From now",
+  "완충(100%)까지": "To full (100%)",
+  "0%까지": "To 0%",
+  "구간별(곡선)": "Per-band (curve)",
+  "지금": "now",
+  "보기": "View",
+  "2D 시간축": "2D timeline",
+  "30일": "30d",
+  "7일": "7d",
+  "24시간": "24h",
+  "오늘로": "Latest",
+  "날짜/시간 →": "Date/time →",
+  "전체 보기": "Show all",
   "드래그=이동 · 휠=커서 중심 줌 · 더블클릭=전체 · 아래 미니맵으로 구간 선택": "Drag = pan · wheel = zoom at cursor · double-click = all · pick a range on the minimap below",
   "가로축이 날짜를 잇는 하나의 긴 시간축이 되는 2D 보기": "2D view where the horizontal axis is one continuous timeline across days",
   "현재 폭을 유지한 채 가장 최근으로 이동": "Jump to the latest, keeping the current width",
-  "구간별 통계": "Per-band stats", "구간별 통계 (곡선)": "Per-band stats (curve)", "에너지 수지": "Energy balance",
-  "⚖ 에너지 수지": "⚖ Energy balance", "이 부하로는 완충 불가": "Can't reach full at this load",
-  "다른 충전기라면…": "With another charger…", "↳ 그 충전기라면": "↳ with that charger",
+  "구간별 통계": "Per-band stats",
+  "구간별 통계 (곡선)": "Per-band stats (curve)",
+  "에너지 수지": "Energy balance",
+  "⚖ 에너지 수지": "⚖ Energy balance",
+  "이 부하로는 완충 불가": "Can't reach full at this load",
+  "다른 충전기라면…": "With another charger…",
+  "↳ 그 충전기라면": "↳ with that charger",
   "그 충전기의 충전 이력이 아직 부족해요": "Not enough charge history for that charger yet",
-  "충전기 미상": "Unknown charger", "(비교 모드)": "(compare mode)", "마지막 충전기 기준": "Assuming last-used charger",
-  "이 충전기 이력 기준": "from this charger's history", "비슷한 급 충전기 기준": "from similar-class chargers", "전체 충전 이력 평균": "from all charge history",
-  "충전 기술": "Charge tech", "제공 프로필": "Offered profiles",
-  "USB-C 5V": "USB-C 5V", "USB(구형)": "USB (legacy)", "전용 어댑터": "Dedicated adapter", "미상": "Unknown",
-
-  "불러오는 중…": "Loading…", "라이브": "Live", "최근 추세": "Recent trend",
-  "표시": "Display", "언어 / Language": "Language", "레이아웃": "Layout", "테마": "Theme",
-  "온도 단위": "Temp unit", "시간 형식": "Time format", "상위 프로세스 수": "Top processes",
-  "목록": "List", "카드": "Cards", "게이지": "Gauge", "다크": "Dark", "라이트": "Light",
-  "메뉴바": "Menu bar", "큰 아이콘": "Large icon",
-  "모양": "Shape", "옆에 붙는 텍스트": "Text beside it", "상태별 색상": "Color by state",
-  "채움": "Fill", "채움+숫자": "Fill + number", "테두리+숫자": "Outline + number",
-  "숫자↑아이콘": "Number↑icon", "전력↑잔량": "Power↑level", "세로 막대": "Vertical bar", "텍스트만": "Text only",
-  "넓음": "Wide", "최다 정보": "Most info", "macOS풍": "macOS-style", "전력+잔량": "Power + level",
-  "좁음": "Narrow", "가장 좁음": "Narrowest", "아이콘 없음": "No icon",
-  "시스템 전력": "System power", "배터리 전력": "Battery power", "위 숫자 전력": "Top number power",
+  "충전기 미상": "Unknown charger",
+  "(비교 모드)": "(compare mode)",
+  "마지막 충전기 기준": "Assuming last-used charger",
+  "이 충전기 이력 기준": "from this charger's history",
+  "비슷한 급 충전기 기준": "from similar-class chargers",
+  "전체 충전 이력 평균": "from all charge history",
+  "충전 기술": "Charge tech",
+  "제공 프로필": "Offered profiles",
+  "USB-C 5V": "USB-C 5V",
+  "USB(구형)": "USB (legacy)",
+  "전용 어댑터": "Dedicated adapter",
+  "미상": "Unknown",
+  "불러오는 중…": "Loading…",
+  "라이브": "Live",
+  "최근 추세": "Recent trend",
+  "표시": "Display",
+  "언어 / Language": "Language",
+  "레이아웃": "Layout",
+  "테마": "Theme",
+  "온도 단위": "Temp unit",
+  "시간 형식": "Time format",
+  "상위 프로세스 수": "Top processes",
+  "목록": "List",
+  "카드": "Cards",
+  "게이지": "Gauge",
+  "다크": "Dark",
+  "라이트": "Light",
+  "메뉴바": "Menu bar",
+  "큰 아이콘": "Large icon",
+  "모양": "Shape",
+  "옆에 붙는 텍스트": "Text beside it",
+  "상태별 색상": "Color by state",
+  "채움": "Fill",
+  "채움+숫자": "Fill + number",
+  "테두리+숫자": "Outline + number",
+  "숫자↑아이콘": "Number↑icon",
+  "전력↑잔량": "Power↑level",
+  "세로 막대": "Vertical bar",
+  "텍스트만": "Text only",
+  "넓음": "Wide",
+  "최다 정보": "Most info",
+  "macOS풍": "macOS-style",
+  "전력+잔량": "Power + level",
+  "좁음": "Narrow",
+  "가장 좁음": "Narrowest",
+  "아이콘 없음": "No icon",
+  "시스템 전력": "System power",
+  "배터리 전력": "Battery power",
+  "위 숫자 전력": "Top number power",
   "양수(+)는 충전, 음수(−)는 방전 — 배터리로 드나드는 전력": "Positive (+) = charging, negative (−) = discharging — power in/out of the battery",
   "배터리 전력은 부호로 방향을 나타내요 — 양수(+)는 충전, 음수(−)는 방전. 시스템 전력은 항상 양수(소비)예요.": "Battery power is signed — positive (+) charging, negative (−) discharging. System power is always positive (consumption).",
-  "잔량 %": "Level %", "남은/완충 시간": "Time to empty/full", "숫자 색·테두리": "Number color & outline",
-  "아이콘에 포함": "in the icon", "기본 표시": "always on", "부족": "Low",
-  "점유 폭": "Width", "미리보기 준비 중…": "Preparing preview…",
+  "잔량 %": "Level %",
+  "남은/완충 시간": "Time to empty/full",
+  "숫자 색·테두리": "Number color & outline",
+  "아이콘에 포함": "in the icon",
+  "기본 표시": "always on",
+  "부족": "Low",
+  "점유 폭": "Width",
+  "미리보기 준비 중…": "Preparing preview…",
   "이 모양은 잔량 숫자를 아이콘 안에 그려요 — 옆 텍스트와 중복되지 않아요.": "This shape draws the % inside the icon — it won't repeat in the text.",
   "텍스트만 모양은 비워둘 수 없어 잔량을 기본 표시해요.": "Text-only can't be empty, so the level is always shown.",
   "켠 항목이 · 로 이어져 아이콘 옆에 붙어요. 시간은 계산될 때만 보여요.": "Enabled items join with · beside the icon. Time shows only when known.",
@@ -218,9 +600,11 @@
   "어댑터 전력": "Adapter power",
   "충전기가 공급 중인 실측 전력 — 외부 전원 연결 중에만 보여요": "Measured power the charger is supplying — shown only on external power",
   "배터리 온도(°C) — 센서가 읽힐 때만 보여요": "Battery temperature (°C) — shown when the sensor reads",
-  "배터리 부족": "Low battery", "충전 완료": "Charge complete",
-  "설정": "Settings", "배터리 기록 시작": "Start battery logging", "배터리 기록 중지": "Stop battery logging",
-
+  "배터리 부족": "Low battery",
+  "충전 완료": "Charge complete",
+  "설정": "Settings",
+  "배터리 기록 시작": "Start battery logging",
+  "배터리 기록 중지": "Stop battery logging",
   "완충": "Full",
   "외부 전원(유휴)": "External power (idle)",
   "배터리 사용": "On battery",
@@ -257,7 +641,6 @@
   "⏸  배터리 기록 중지": "⏸  Stop battery logging",
   "▶  배터리 기록 시작": "▶  Start battery logging",
   "⏻  앱 종료": "⏻  Quit App",
-
   "전원": "Power",
   "건강": "Health",
   "🟡 저전력 모드": "🟡 Low Power Mode",
@@ -265,7 +648,6 @@
   "어댑터 = 시스템 소비 + 배터리 충전": "Adapter = system draw + battery charge",
   "설정 열기…": "Open settings…",
   "3D 로딩 중…": "Loading 3D…",
-
   "🔋 최대 용량": "🔋 Max capacity",
   "현재 🟢": "Now 🟢",
   "🟡 켜짐": "🟡 On",
@@ -298,7 +680,6 @@
   "면 = 방전속도 지형 (색=값, 빈 날짜는 메우지 않음)": "Surface = discharge-speed terrain (color = value, empty dates left blank)",
   "격자 · 메인=구간선(색)·능선=회색 · \"선+능선\" 또 클릭→전환": "Grid · main = band lines (color) · ridges = gray · click \"Lines+Ridges\" again to switch",
   "격자 · 메인=능선(파랑=과거→빨강=최근)·구간선=회색 · \"선+능선\" 또 클릭→전환": "Grid · main = ridges (blue = past → red = recent) · band lines = gray · click \"Lines+Ridges\" again to switch",
-
   "지표·방법 과학 안내": "Metrics & methods — science guide",
   "지표·방법 안내": "Metrics & methods guide",
   "뷰어 설정": "Viewer settings",
@@ -320,5 +701,19 @@
   "macOS가 1% 단위 정수로 주는 표시 %입니다. 정밀하지 않고 권장하지 않습니다 — 이 값으로 한 분석은 유의미한 insight를 주지 못합니다. 켜면 배터리 %·잔량 변화·구간별 방전 속도 등 모든 계산이 정밀 mAh 없이 거친 정수%가 됩니다.": "The display % macOS gives in whole 1% steps. Imprecise and not recommended — analysis on this value yields no meaningful insight. Turning it on makes every calculation (battery %, level change, per-band discharge speed, etc.) coarse integer % without precise mAh.",
   "에너지 수지: 어댑터 입력(PDTR) − 시스템 소비(PSTR). 실시간 부호값(+충전/−방전). 권장 기본값.": "Energy balance: adapter input (PDTR) − system draw (PSTR). Real-time signed value (+charge/−discharge). Recommended default.",
   "ioreg 배터리 셀의 전압×전류(V×I). 정확하지만 macOS가 ~60초마다 갱신해 지연이 있습니다.": "ioreg battery cell voltage×current (V×I). Accurate, but macOS refreshes it only ~every 60s, so it lags.",
-  "방전 중엔 PPBR(배터리 버스 방전 전력 직접 측정), 충전 중엔 수지(PDTR−PSTR). PPBR은 충전 중 ~0이라 충전은 수지로 대체합니다.": "On discharge, PPBR (directly measured battery-bus discharge power); on charge, balance (PDTR−PSTR). PPBR is ~0 while charging, so charging falls back to balance."
+  "방전 중엔 PPBR(배터리 버스 방전 전력 직접 측정), 충전 중엔 수지(PDTR−PSTR). PPBR은 충전 중 ~0이라 충전은 수지로 대체합니다.": "On discharge, PPBR (directly measured battery-bus discharge power); on charge, balance (PDTR−PSTR). PPBR is ~0 while charging, so charging falls back to balance.",
+  "전력량 측정": "Energy Measurement",
+  "⏱ 측정 시작": "⏱ Start measuring",
+  "지금부터 전력량(Wh)을 적산해요": "Accumulates energy (Wh) from now on",
+  "경과": "Elapsed",
+  "외부 입력": "External input",
+  "시스템 사용": "System use",
+  "센서": "sensor",
+  "수지 추정": "balance est.",
+  "게이지 검산": "gauge check",
+  "두 추정의 차이": "Difference of the two",
+  "■ 정지": "■ Stop",
+  "새 측정": "New measurement",
+  "결과는 새 측정 시작 전까지 유지돼요": "Result stays until a new measurement starts",
+  "측정 공백은 적산에서 제외돼요 — 게이지 검산은 공백과 무관해요(칩이 계속 적분)": "Gaps are excluded from integration — the gauge check is unaffected (the chip keeps integrating)"
 }
