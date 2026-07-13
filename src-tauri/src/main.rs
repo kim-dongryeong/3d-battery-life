@@ -12,6 +12,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::process::Command as Sh;
 use std::sync::{Arc, LazyLock, Mutex};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Instant;
 
 // When the popover loses focus we hide it. A tray click on an already-open popover fires
@@ -31,6 +33,56 @@ use tauri::{
     AppHandle, Manager, PhysicalPosition, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
+
+// macOS activation lifecycle: 0 = Accessory, 1 = waiting for Dock registration, 2 = Regular-ready.
+// A popover/viewer is shown only in state 2, so its focus event updates Cmd+Tab's MRU ordering.
+#[cfg(target_os = "macos")]
+static APP_MODE: AtomicU8 = AtomicU8::new(0);
+
+#[cfg(target_os = "macos")]
+fn with_regular_app<F>(app: &AppHandle, action: F)
+where
+    F: FnOnce(AppHandle) + Send + 'static,
+{
+    if APP_MODE.load(Ordering::SeqCst) == 2 {
+        action(app.clone());
+        return;
+    }
+    if APP_MODE.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        return; // another click is already waiting for the same promotion
+    }
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    let h = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if APP_MODE.compare_exchange(1, 2, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+            return; // the UI was dismissed while Dock registration was pending
+        }
+        let h2 = h.clone();
+        let _ = h.run_on_main_thread(move || action(h2));
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn with_regular_app<F>(app: &AppHandle, action: F)
+where
+    F: FnOnce(AppHandle) + Send + 'static,
+{
+    action(app.clone());
+}
+
+#[cfg(target_os = "macos")]
+fn demote_if_no_visible_ui(app: &AppHandle) {
+    let main_visible = app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false));
+    let pop_visible = app.get_webview_window("popover").is_some_and(|w| w.is_visible().unwrap_or(false));
+    if !main_visible && !pop_visible {
+        APP_MODE.store(0, Ordering::SeqCst); // also cancels an in-flight promotion
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn demote_if_no_visible_ui(_app: &AppHandle) {}
 
 const LABEL: &str = "com.kdr.3d-battery-life.sampler";
 
@@ -131,8 +183,8 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
-            // menu-bar app: no Dock icon / no ⌘Tab entry while only the tray is up. We flip to Regular
-            // while the viewer window is open (so it's ⌘Tab-able) and back to Accessory when it closes.
+            // Menu-bar-only until a popover/viewer is requested. with_regular_app waits for Dock to
+            // finish its async registration before showing and focusing that first window.
             #[cfg(target_os = "macos")]
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             // 1) start the local server (bundled single binary) as a sidecar
@@ -367,7 +419,7 @@ fn main() {
                                     "report" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } show_main(&h); }); }
                                     "quit" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || h.exit(0)); }
                                     "record" => { let on = !plist_path().exists(); std::thread::spawn(move || run_record(if on { "on" } else { "off" })); }
-                                    "hide" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } }); }
+                                    "hide" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } demote_if_no_visible_ui(&h); }); }
                                     _ => {}
                                 }
                                 break;   // re-read state promptly after acting
@@ -427,14 +479,13 @@ fn main() {
                 WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     let _ = window.hide();
-                    // viewer closed → drop the Dock/⌘Tab presence back to menu-bar-only
-                    #[cfg(target_os = "macos")]
-                    if window.label() == "main" { let _ = window.app_handle().set_activation_policy(tauri::ActivationPolicy::Accessory); }
+                    demote_if_no_visible_ui(window.app_handle());
                 }
                 // popover auto-hides when it loses focus (menu-bar popover convention)
                 WindowEvent::Focused(false) if window.label() == "popover" => {
                     note_popover_hidden();   // so a tray click that caused this doesn't re-show it
                     let _ = window.hide();
+                    demote_if_no_visible_ui(window.app_handle());
                 }
                 _ => {}
             }
@@ -453,63 +504,20 @@ fn main() {
 }
 
 fn show_main(app: &AppHandle) {
+    with_regular_app(app, |app| show_main_ready(&app));
+}
+
+fn show_main_ready(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
-        // If the viewer is already on screen, this is just a normal bring-to-front request. Its
-        // Regular-app registration already exists, so there is no Dock registration race to wait for.
-        if w.is_visible().unwrap_or(false) {
-            let _ = w.unminimize();
-            let _ = w.show();
-            let _ = w.set_focus();
-            #[cfg(target_os = "macos")]
-            unsafe {
-                use objc::runtime::Object;
-                use objc::{class, msg_send, sel, sel_impl};
-                let cur: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
-                let _: () = msg_send![cur, activateWithOptions: 3u64];
-            }
-            return;
-        }
-
-        // viewer visible → become a Regular app so it shows in ⌘Tab / can be focused normally
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
         #[cfg(target_os = "macos")]
-        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
-
-        // Accessory→Regular 직후의 ⌘Tab MRU 등록 — 3차 수정 (Apple 버그 FB7743313):
-        // 자기 deactivate 바운스(2차)도, 등록 후 첫 objc 활성화(Codex)도 순서를 못 움직였다.
-        // 남은 가설: 앱 스스로의 NSRunningApplication 활성화는 Dock의 전환기 MRU에 반영되지
-        // 않는다(프로그램적 활성화 차별). 그래서 Dock 아이콘 클릭/Spotlight와 같은 경로인
-        // **LaunchServices 경유 활성화(`open -b <bundle id>`)** 로 우리를 활성화시킨다 —
-        // 시스템이 "밖에서" 우리를 여는 모양이라 진짜 사용자 전환처럼 기록되길 기대.
-        // 순서: 등록이 끝날 때까지(250ms) 창을 숨긴 채 대기 → 창 표시(포커스 없이) →
-        // `open -b`가 활성화(이때가 등록 후 첫 활성화 이벤트) → 안전망 set_focus.
-        // (open의 reopen 이벤트가 show_main을 재호출해도 위의 is_visible 분기로 무해.)
-        #[cfg(target_os = "macos")]
-        {
-            let h2 = app.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(250));
-                let h3 = h2.clone();
-                let _ = h2.run_on_main_thread(move || {
-                    if let Some(w) = h3.get_webview_window("main") {
-                        let _ = w.unminimize();
-                        let _ = w.show();   // 포커스 없이 표시 — 활성화는 아래 LaunchServices가 담당
-                    }
-                });
-                // LaunchServices 활성화: 이미 실행 중인 앱이면 활성화만 일으킨다
-                let _ = Sh::new("/usr/bin/open").args(["-b", "com.kdr.battery-life"]).status();
-                std::thread::sleep(std::time::Duration::from_millis(200));
-                let h4 = h2.clone();
-                let _ = h2.run_on_main_thread(move || {
-                    if let Some(w) = h4.get_webview_window("main") { let _ = w.set_focus(); }
-                });
-            });
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = w.unminimize();
-            let _ = w.show();
-            let _ = w.set_focus();
+        unsafe {
+            use objc::runtime::Object;
+            use objc::{class, msg_send, sel, sel_impl};
+            let current: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
+            let _: () = msg_send![current, activateWithOptions: 3u64];
         }
     }
 }
@@ -610,16 +618,18 @@ fn icon_anchor(app: &AppHandle) -> Option<(f64, f64, f64, f64)> {
 // lands on the dashboard (closeSettings), so re-opening never gets stuck in the settings panel.
 fn toggle_popover(app: &AppHandle, anchor: Option<(f64, f64, f64, f64)>) {
     if let Some(w) = app.get_webview_window("popover") {
-        if w.is_visible().unwrap_or(false) { let _ = w.hide(); return; }
+        if w.is_visible().unwrap_or(false) { let _ = w.hide(); demote_if_no_visible_ui(app); return; }
         if hidden_just_now() { return; }   // this same click may have just hidden it via focus-loss
     }
-    if let Some(w) = ensure_popover(app) {
-        fit_popover(&w);
-        place_popover(&w, anchor.or_else(|| icon_anchor(app)));
-        let _ = w.eval("window.closeSettings&&closeSettings()");
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
+    with_regular_app(app, move |app| {
+        if let Some(w) = ensure_popover(&app) {
+            fit_popover(&w);
+            place_popover(&w, anchor.or_else(|| icon_anchor(&app)));
+            let _ = w.eval("window.closeSettings&&closeSettings()");
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+    });
 }
 
 // Size the popover to the height its web content last reported, so a fresh show is already
@@ -634,17 +644,19 @@ fn fit_popover(w: &tauri::WebviewWindow) {
 // opens it straight in the settings panel via the page's window.openSettings() hook — retried
 // briefly in case the page is still loading.
 fn open_popover(app: &AppHandle, settings: bool) {
-    if let Some(w) = ensure_popover(app) {
-        fit_popover(&w);
-        place_popover(&w, icon_anchor(app));
-        let _ = w.show();
-        let _ = w.set_focus();
-        let _ = w.eval(if settings {
-            "(function r(n){if(window.openSettings){openSettings()}else if(n<40){setTimeout(function(){r(n+1)},50)}})(0)"
-        } else {
-            "window.closeSettings&&closeSettings()"
-        });
-    }
+    with_regular_app(app, move |app| {
+        if let Some(w) = ensure_popover(&app) {
+            fit_popover(&w);
+            place_popover(&w, icon_anchor(&app));
+            let _ = w.show();
+            let _ = w.set_focus();
+            let _ = w.eval(if settings {
+                "(function r(n){if(window.openSettings){openSettings()}else if(n<40){setTimeout(function(){r(n+1)},50)}})(0)"
+            } else {
+                "window.closeSettings&&closeSettings()"
+            });
+        }
+    });
 }
 
 // Anchor the popover just below the clicked menu-bar icon, horizontally centered under it and
