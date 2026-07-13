@@ -439,10 +439,14 @@ fn stamp_digits(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8
     }
 }
 // charge-state overlays: the SF-style bolt + plug, white over a soft dark backing
-fn bolt(hi: &mut Hi, cx: f32, cy: f32, w: f32, h: f32, c: (u8, u8, u8, u8)) {
-    const P: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.60), (0.45, 0.60), (0.36, 1.0), (0.92, 0.38), (0.50, 0.38)];
-    let pts: Vec<(f32, f32)> = P.iter().map(|&(u, v)| (cx - w / 2.0 + u * w, cy - h / 2.0 + v * h)).collect();
-    hi.fill_poly(&pts, c);
+const BOLT: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.60), (0.45, 0.60), (0.36, 1.0), (0.92, 0.38), (0.50, 0.38)];
+const BOLT_SLIM: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.53), (0.45, 0.53), (0.36, 1.0), (0.92, 0.47), (0.50, 0.47)];
+fn bolt_pts(cx: f32, cy: f32, w: f32, h: f32, slim: bool) -> Vec<(f32, f32)> {
+    let shape = if slim { &BOLT_SLIM } else { &BOLT };
+    shape.iter().map(|&(u, v)| (cx - w / 2.0 + u * w, cy - h / 2.0 + v * h)).collect()
+}
+fn bolt_shape(hi: &mut Hi, cx: f32, cy: f32, w: f32, h: f32, slim: bool, c: (u8, u8, u8, u8)) {
+    hi.fill_poly(&bolt_pts(cx, cy, w, h, slim), c);
 }
 fn plug(hi: &mut Hi, cx: f32, top: f32, s: f32, c: (u8, u8, u8, u8)) {
     let pw = s * 0.09;
@@ -450,10 +454,10 @@ fn plug(hi: &mut Hi, cx: f32, top: f32, s: f32, c: (u8, u8, u8, u8)) {
     hi.fill_rrect(cx - s * 0.32, top + s * 0.22, cx + s * 0.32, top + s * 0.62, s * 0.10, c);
     hi.fill_rrect(cx - s * 0.05, top + s * 0.60, cx + s * 0.05, top + s, s * 0.05, c);
 }
-fn charge_overlay(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32) {
+fn charge_overlay_shape(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, slim: bool) {
     if l.charging {
-        bolt(hi, cx + 0.4, cy + 0.7, w, h, DIGIT_SHADOW);
-        bolt(hi, cx, cy, w, h, INK);
+        bolt_shape(hi, cx + 0.4, cy + 0.7, w, h, slim, DIGIT_SHADOW);
+        bolt_shape(hi, cx, cy, w, h, slim, INK);
     } else if l.full {
         plug(hi, cx + 0.4, cy - h / 2.0 + 0.7, h, DIGIT_SHADOW);
         plug(hi, cx, cy - h / 2.0, h, INK);
@@ -483,6 +487,38 @@ fn erase_poly(hi: &mut Hi, pts: &[(f32, f32)], clip: (f32, f32, f32, f32)) {
         }
     }
 }
+// True round dilation of a polygon by `r` output pixels. Unlike scaling the polygon's bounding box,
+// this measures the shortest Euclidean distance to every edge, so slanted sides and sharp tips get
+// the same-width transparent rim. Supersampling supplies the antialiasing at the boundary.
+fn erase_poly_dilated(hi: &mut Hi, pts: &[(f32, f32)], r: f32, clip: (f32, f32, f32, f32)) {
+    let s = hi.s;
+    let inside_clip = clip_test(s, clip);
+    let p: Vec<(f32, f32)> = pts.iter().map(|&(x, y)| (x * s, y * s)).collect();
+    let rr = (r * s).max(0.0);
+    let rr2 = rr * rr;
+    let (x0, x1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.0), a.1.max(q.0)));
+    let (y0, y1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.1), a.1.max(q.1)));
+    for y in ((y0 - rr).floor() as i32).max(0)..((y1 + rr).ceil() as i32).min(hi.h) {
+        for x in ((x0 - rr).floor() as i32).max(0)..((x1 + rr).ceil() as i32).min(hi.w) {
+            if !inside_clip(x, y) { continue; }
+            let q = (x as f32 + 0.5, y as f32 + 0.5);
+            let mut within = false;
+            let mut j = p.len() - 1;
+            for i in 0..p.len() {
+                let (a, b) = (p[j], p[i]);
+                let (vx, vy) = (b.0 - a.0, b.1 - a.1);
+                let len2 = vx * vx + vy * vy;
+                let t = if len2 > 0.0 { ((q.0 - a.0) * vx + (q.1 - a.1) * vy) / len2 } else { 0.0 }.clamp(0.0, 1.0);
+                let (dx, dy) = (q.0 - (a.0 + t * vx), q.1 - (a.1 + t * vy));
+                if dx * dx + dy * dy <= rr2 { within = true; break; }
+                j = i;
+            }
+            // Edge distance covers the rim; the original fill covers the polygon interior.
+            if within { hi.erase(x, y, 1.0); }
+        }
+    }
+    erase_poly(hi, pts, clip);
+}
 fn erase_rrect(hi: &mut Hi, x0: f32, y0: f32, x1: f32, y1: f32, r: f32, clip: (f32, f32, f32, f32)) {
     let s = hi.s;
     let inside = clip_test(s, clip);
@@ -503,21 +539,16 @@ fn plug_erase(hi: &mut Hi, cx: f32, top: f32, s: f32, r: f32, clip: (f32, f32, f
 // Transparent rim under the bolt/plug: knock the enlarged shape out of the existing drawing first,
 // then draw the normal shadow+ink into the hole. Most glyphs clip this to the battery's inner zone;
 // wstack deliberately includes the outline so its oversized Stats-style bolt can break through it.
-fn charge_overlay_cut_r(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, r: f32, clip: (f32, f32, f32, f32)) {
+fn charge_overlay_cut_r(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, r: f32, slim: bool, clip: (f32, f32, f32, f32)) {
     if l.charging {
-        // Keep the long tips, but make the middle cross-band slim: the two inner horizontal edges
-        // sit close together instead of giving the bolt a vertically-heavy body.
-        const P: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.53), (0.45, 0.53), (0.36, 1.0), (0.92, 0.47), (0.50, 0.47)];
-        let (ew, eh) = (w + 2.0 * r, h + 2.0 * r);   // proportional enlarge ≈ the dilation for this convex-ish shape
-        let pts: Vec<(f32, f32)> = P.iter().map(|&(u, v)| (cx - ew / 2.0 + u * ew, cy - eh / 2.0 + v * eh)).collect();
-        erase_poly(hi, &pts, clip);
+        erase_poly_dilated(hi, &bolt_pts(cx, cy, w, h, slim), r, clip);
     } else if l.full {
         plug_erase(hi, cx, cy - h / 2.0, h, r, clip);
     }
-    charge_overlay(hi, l, cx, cy, w, h);
+    charge_overlay_shape(hi, l, cx, cy, w, h, slim);
 }
 fn charge_overlay_cut(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, clip: (f32, f32, f32, f32)) {
-    charge_overlay_cut_r(hi, l, cx, cy, w, h, 1.0, clip);
+    charge_overlay_cut_r(hi, l, cx, cy, w, h, 1.0, false, clip);
 }
 
 // Level → fill color (shared by the icon + bar glyphs). Low Power Mode → yellow, like macOS' own
@@ -581,7 +612,7 @@ pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u
     // left indicator so iconpct still shows charge state: bolt (charging) / plug (full), in ink.
     // 번개를 큼지막하게 → 그만큼 숫자 자리를 오른쪽으로 더 확보(ind)
     let ind = if l.charging || l.full { 15.0f32 } else { 0.0 };
-    if l.charging { bolt(&mut hi, 13.0, 20.0, 12.0, 27.0, ink); }
+    if l.charging { bolt_shape(&mut hi, 13.0, 20.0, 12.0, 27.0, false, ink); }
     else if l.full { plug(&mut hi, 13.0, 9.0, 20.0, ink); }
     let digits = format!("{}", l.pct.clamp(0.0, 100.0).round() as u32);
     stamp_digits(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, ink, true);
@@ -671,7 +702,7 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
     // Full keeps the compact plug. Neither state is allowed to shrink the level digits.
     const WCLIP: (f32, f32, f32, f32) = (0.0, 8.0, 52.0, 39.0);
     let ind = if l.charging { 15.5f32 } else if l.full { 12.0 } else { 0.0 };
-    if l.charging { charge_overlay_cut_r(&mut hi, l, 10.5, 25.2, 13.5, 28.0, 2.7, WCLIP); }
+    if l.charging { charge_overlay_cut_r(&mut hi, l, 10.5, 25.2, 13.5, 28.0, 2.7, true, WCLIP); }
     else if l.full { charge_overlay_cut(&mut hi, l, 10.0, 25.2, 9.0, 14.0, WCLIP); }
     let digits = format!("{}", pct.round() as u32);
     let dcx = if ind > 0.0 { (3.0 + ind + 49.0) / 2.0 } else { 26.0 };
