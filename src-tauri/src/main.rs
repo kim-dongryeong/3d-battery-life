@@ -474,40 +474,33 @@ fn show_main(app: &AppHandle) {
         #[cfg(target_os = "macos")]
         let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
 
-        // Accessory→Regular registers the app with Dock asynchronously. Showing the window before that
-        // finishes exposes a short interval where the viewer is visible but still sits at the far end of
-        // ⌘Tab. Do the activation bounce while the window is hidden, then reveal it only after the real
-        // activation event has put us at the front of Dock's MRU list.
+        // Accessory→Regular 직후의 ⌘Tab MRU 등록 — 3차 수정 (Apple 버그 FB7743313):
+        // 자기 deactivate 바운스(2차)도, 등록 후 첫 objc 활성화(Codex)도 순서를 못 움직였다.
+        // 남은 가설: 앱 스스로의 NSRunningApplication 활성화는 Dock의 전환기 MRU에 반영되지
+        // 않는다(프로그램적 활성화 차별). 그래서 Dock 아이콘 클릭/Spotlight와 같은 경로인
+        // **LaunchServices 경유 활성화(`open -b <bundle id>`)** 로 우리를 활성화시킨다 —
+        // 시스템이 "밖에서" 우리를 여는 모양이라 진짜 사용자 전환처럼 기록되길 기대.
+        // 순서: 등록이 끝날 때까지(250ms) 창을 숨긴 채 대기 → 창 표시(포커스 없이) →
+        // `open -b`가 활성화(이때가 등록 후 첫 활성화 이벤트) → 안전망 set_focus.
+        // (open의 reopen 이벤트가 show_main을 재호출해도 위의 is_visible 분기로 무해.)
         #[cfg(target_os = "macos")]
         {
             let h2 = app.clone();
             std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(220));
+                std::thread::sleep(std::time::Duration::from_millis(250));
                 let h3 = h2.clone();
                 let _ = h2.run_on_main_thread(move || {
-                    unsafe {
-                        use objc::runtime::Object;
-                        use objc::{class, msg_send, sel, sel_impl};
-                        let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-                        let _: () = msg_send![ns_app, deactivate];
+                    if let Some(w) = h3.get_webview_window("main") {
+                        let _ = w.unminimize();
+                        let _ = w.show();   // 포커스 없이 표시 — 활성화는 아래 LaunchServices가 담당
                     }
                 });
-                std::thread::sleep(std::time::Duration::from_millis(90));
-                let h4 = h3.clone();
-                let _ = h3.run_on_main_thread(move || {
-                    if let Some(w) = h4.get_webview_window("main") {
-                        let _ = w.unminimize();
-                        let _ = w.show();
-                        let _ = w.set_focus();
-                    }
-                    unsafe {
-                        use objc::runtime::{Object, YES};
-                        use objc::{class, msg_send, sel, sel_impl};
-                        let ns_app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-                        let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
-                        let cur: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
-                        let _: () = msg_send![cur, activateWithOptions: 3u64];
-                    }
+                // LaunchServices 활성화: 이미 실행 중인 앱이면 활성화만 일으킨다
+                let _ = Sh::new("/usr/bin/open").args(["-b", "com.kdr.battery-life"]).status();
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                let h4 = h2.clone();
+                let _ = h2.run_on_main_thread(move || {
+                    if let Some(w) = h4.get_webview_window("main") { let _ = w.set_focus(); }
                 });
             });
         }
