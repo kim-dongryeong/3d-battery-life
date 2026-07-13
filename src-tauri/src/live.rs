@@ -500,19 +500,22 @@ fn plug_erase(hi: &mut Hi, cx: f32, top: f32, s: f32, r: f32, clip: (f32, f32, f
     erase_rrect(hi, cx - s * 0.32 - r, top + s * 0.22 - r, cx + s * 0.32 + r, top + s * 0.62 + r, s * 0.10, clip);
     erase_rrect(hi, cx - s * 0.05 - r, top + s * 0.60 - r, cx + s * 0.05 + r, top + s + r, s * 0.05, clip);
 }
-// 1px transparent rim under the bolt/plug: knock the enlarged shape out of the fill first, then
-// draw the normal shadow+ink into the hole. `clip` = the battery's inner zone (outline stays intact).
-fn charge_overlay_cut(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, clip: (f32, f32, f32, f32)) {
-    const R: f32 = 1.0;
+// Transparent rim under the bolt/plug: knock the enlarged shape out of the existing drawing first,
+// then draw the normal shadow+ink into the hole. Most glyphs clip this to the battery's inner zone;
+// wstack deliberately includes the outline so its oversized Stats-style bolt can break through it.
+fn charge_overlay_cut_r(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, r: f32, clip: (f32, f32, f32, f32)) {
     if l.charging {
         const P: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.60), (0.45, 0.60), (0.36, 1.0), (0.92, 0.38), (0.50, 0.38)];
-        let (ew, eh) = (w + 2.0 * R, h + 2.0 * R);   // proportional enlarge ≈ the dilation for this convex-ish shape
+        let (ew, eh) = (w + 2.0 * r, h + 2.0 * r);   // proportional enlarge ≈ the dilation for this convex-ish shape
         let pts: Vec<(f32, f32)> = P.iter().map(|&(u, v)| (cx - ew / 2.0 + u * ew, cy - eh / 2.0 + v * eh)).collect();
         erase_poly(hi, &pts, clip);
     } else if l.full {
-        plug_erase(hi, cx, cy - h / 2.0, h, R, clip);
+        plug_erase(hi, cx, cy - h / 2.0, h, r, clip);
     }
     charge_overlay(hi, l, cx, cy, w, h);
+}
+fn charge_overlay_cut(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, clip: (f32, f32, f32, f32)) {
+    charge_overlay_cut_r(hi, l, cx, cy, w, h, 1.0, clip);
 }
 
 // Level → fill color (shared by the icon + bar glyphs). Low Power Mode → yellow, like macOS' own
@@ -641,7 +644,8 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
 // power number already conveys draw), so no bolt clutters the tight cell. `watt` = the resolved
 // power the ticker passes in (sys or battery per w7_src).
 pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool) -> (Vec<u8>, u32, u32) {
-    let (w, h) = (48u32, 36u32);   // a hair wider than stack so the level digits fit inside the battery
+    // Extra width belongs to the larger charge indicator; the power/level type sizes stay unchanged.
+    let (w, h) = (54u32, 36u32);
     let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
     let fill = fill_color(l, colorize, lpm);
@@ -651,26 +655,26 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
         if w_val.abs() < 0.05 { "0W".into() }
         else { format!("{}{:.1}W", if w_val > 0.0 { "+" } else { "−" }, w_val.abs()) }
     } else { format!("{:.1}W", w_val.max(0.0)) };
-    stamp_digits_fit(&mut hi, &wtxt, 15.5, 46.0, 24.0, 6.6, INK, true);
+    stamp_digits_fit(&mut hi, &wtxt, 15.5, 52.0, 27.0, 6.6, INK, true);
     // bottom: mini rounded battery, fill by level, with the level % inside (combo-style)
     let body_sh = (0u8, 0u8, 0u8, 95u8);
-    hi.stroke_rrect(1.0, 15.7, 45.0, 36.0, 5.0, 2.0, body_sh);
-    hi.fill_rrect(45.5, 22.2, 48.0, 28.2, 1.5, body_sh);
-    hi.stroke_rrect(1.0, 15.0, 45.0, 35.3, 5.0, 2.0, INK);
-    hi.fill_rrect(45.5, 21.5, 48.0, 27.5, 1.5, INK);
-    let fw = (40.0 * pct as f32 / 100.0).max(2.5);
+    hi.stroke_rrect(1.0, 15.7, 51.0, 36.0, 5.0, 2.0, body_sh);
+    hi.fill_rrect(51.5, 22.2, 54.0, 28.2, 1.5, body_sh);
+    hi.stroke_rrect(1.0, 15.0, 51.0, 35.3, 5.0, 2.0, INK);
+    hi.fill_rrect(51.5, 21.5, 54.0, 27.5, 1.5, INK);
+    let fw = (46.0 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
-    // 충전 볼트/완충 플러그: 배터리 안 왼쪽에 작게, 잔량 숫자는 오른쪽으로 비킨다 (kdr 2026-07-12
-    // — 종전엔 "전력 숫자가 이미 충전을 말해준다"고 생략했으나 한눈에 보이는 표시를 원함)
-    const WCLIP: (f32, f32, f32, f32) = (3.0, 17.0, 43.0, 33.3);
-    let ind = if l.charging || l.full { 12.0f32 } else { 0.0 };
-    if ind > 0.0 { charge_overlay_cut(&mut hi, l, 9.5, 25.2, 9.0, 14.0, WCLIP); }
+    // Charging: an oversized Stats-style bolt crosses the battery's top/bottom outline. Its 1.35px
+    // transparent cutout includes the fill AND outline, so the white bolt never melts into either.
+    // Full keeps the compact plug. Neither state is allowed to shrink the level digits.
+    const WCLIP: (f32, f32, f32, f32) = (0.0, 13.0, 52.0, 36.0);
+    let ind = if l.charging { 15.5f32 } else if l.full { 12.0 } else { 0.0 };
+    if l.charging { charge_overlay_cut_r(&mut hi, l, 10.5, 25.2, 13.5, 22.5, 1.35, WCLIP); }
+    else if l.full { charge_overlay_cut(&mut hi, l, 10.0, 25.2, 9.0, 14.0, WCLIP); }
     let digits = format!("{}", pct.round() as u32);
-    // 축소는 볼트+세 자리("100")가 겹칠 때만 — 두 자리는 볼트 옆에도 16.2pt가 그대로 들어간다 (kdr)
-    let dsz = if ind > 0.0 && digits.len() >= 3 { 14.5 } else { 16.2 };
-    let dcx = if ind > 0.0 { (3.0 + ind + 43.0) / 2.0 } else { 23.0 };
-    stamp_digits_cut(&mut hi, &digits, dsz, dcx, 25.3, 1.0, WCLIP);   // 1px rim in the fill
-    stamp_digits(&mut hi, &digits, dsz, dcx, 25.3, INK, true);        // level % inside the battery
+    let dcx = if ind > 0.0 { (3.0 + ind + 49.0) / 2.0 } else { 26.0 };
+    stamp_digits_cut(&mut hi, &digits, 16.2, dcx, 25.3, 1.0, WCLIP);   // 1px rim in the fill
+    stamp_digits(&mut hi, &digits, 16.2, dcx, 25.3, INK, true);        // level % inside the battery
     hi.down()
 }
 
