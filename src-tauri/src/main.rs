@@ -401,11 +401,11 @@ fn main() {
                             let w7 = if w7_bat { bat_disp } else { sys_w.unwrap_or(l.watts) };
                             // both sources show one decimal → key at 0.1W so the glyph tracks it
                             let wkey = if c.widget != "wstack" { 0 } else { (w7 * 10.0).round() as i64 };
-                            // redraw the glyph only when something visible changes (level/charge/widget/color/xl/lpm/digit deco/wstack W)
-                            let key = format!("{}-{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco, wkey);
+                            // redraw the glyph only when something visible changes (including bolt style)
+                            let key = format!("{}-{}-{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco, c.bolt_style, wkey);
                             if l.ok && key != last_key {
                                 last_key = key;
-                                match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat) {
+                                match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat, c.bold_bolt()) {
                                     Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
                                     None => { let _ = tray.set_icon(None); }   // text-only widget
                                 }

@@ -16,7 +16,7 @@ let procN = +ls('battProcN', '6');                    // top-processes count · 
 let sparkMode = qs('sm') || ls('battSparkMode', 'pct');   // mini-chart metric: pct | w | 3d
 let sparkH = +(qs('sh') ?? ls('battSparkH', '6'));        // mini-chart window hours: 6 | 24 | 0(all)
 let three = null, t3d = null, t3dLoading = false;     // lazy Three.js + persistent live-3D scene (survives DOM rebuilds)
-let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w_sys: true, text_w_bat: false, w7_src: 'sys', digit_deco: true, text_temp: false, text_adp: false };
+let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w_sys: true, text_w_bat: false, w7_src: 'sys', digit_deco: true, bolt_style: 'classic', text_temp: false, text_adp: false };
 let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
 // menu-bar preview (settings panel): glyph dumps from the Rust tray renderer via /api/tray-preview
 let pvSim = 'cur', pvData = null, pvTimer = 0, pvMeasure = null;
@@ -459,6 +459,7 @@ function menubarHTML() {
     ${cfg.widget === 'icon' ? `<div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>` : ''}
     ${cfg.widget === 'stack' ? `<div class="srow"><span>숫자 색·테두리</span>${tglEl('digit_deco', cfg.digit_deco)}</div>` : ''}
     ${cfg.widget === 'wstack' ? `<div class="srow"><span>위 숫자 전력</span><span class="subseg"><button data-w7="sys" class="${cfg.w7_src !== 'bat' ? 'on' : ''}">시스템</button><button data-w7="bat" class="${cfg.w7_src === 'bat' ? 'on' : ''}">배터리</button></span></div>` : ''}
+    <div class="srow"><span>충전 번개</span><span class="subseg"><button data-bolt="classic" class="${cfg.bolt_style !== 'bold' ? 'on' : ''}">현재</button><button data-bolt="bold" class="${cfg.bolt_style === 'bold' ? 'on' : ''}">새 모양</button></span></div>
     <div class="srow"><span>열기 단축키 <kbd>⌥⌃B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>`;
 }
 
@@ -510,9 +511,10 @@ function composeTrayTitle(st) {
 }
 function glyphCanvas(styleKey, dispH, pixelated) {
   const set = pvData && pvData.glyphs && pvData.glyphs[pvSim];
-  const variant = styleKey === 'icon' && cfg.glyph_xl ? 'icon_xl'
+  const baseVariant = styleKey === 'icon' && cfg.glyph_xl ? 'icon_xl'
     : styleKey === 'stack' && !cfg.digit_deco ? 'stack_plain'
     : styleKey === 'wstack' && cfg.w7_src === 'bat' ? 'wstack_bat' : styleKey;
+  const variant = cfg.bolt_style === 'bold' ? `${baseVariant}_bold` : baseVariant;
   const g = set && set[variant];
   if (!g) return null;
   try {
@@ -702,6 +704,8 @@ $('pop').addEventListener('click', e => {
   if (sim) { pvSim = sim.dataset.sim; render(); return; }
   const w7 = e.target.closest('[data-w7]');            // widget-7 power source (checked before [data-w])
   if (w7) { applyCfg('w7_src', w7.dataset.w7); return; }
+  const bolt = e.target.closest('[data-bolt]');        // charging bolt silhouette
+  if (bolt) { applyCfg('bolt_style', bolt.dataset.bolt); return; }
   const w = e.target.closest('[data-w]');              // widget shape gallery
   if (w) { applyCfg('widget', w.dataset.w); return; }
   const t = e.target.closest('[data-t]');              // text item chips

@@ -105,6 +105,7 @@ pub struct Cfg {
     #[serde(default)] pub text_w_bat: Option<bool>, // append battery-rail power "3.1W" (both may be on)
     #[serde(default)] pub w7_src: Option<String>,   // widget "wstack" power source: "sys" | "bat"
     #[serde(default = "d_true")] pub digit_deco: bool, // stack digits: state color + outline (false = plain white)
+    #[serde(default = "d_bolt_style")] pub bolt_style: String, // charging bolt: "classic" | "bold"
     #[serde(default)] pub text_temp: Option<bool>,  // append battery temperature "31°" (SMC, when known)
     #[serde(default)] pub text_adp: Option<bool>,   // append adapter measured power "60.2W" (AC only)
 }
@@ -137,17 +138,19 @@ impl Cfg {
     pub fn digits_in_icon(&self) -> bool { matches!(self.widget.as_str(), "combo" | "iconpct" | "stack" | "wstack") }
     // widget "wstack": which power feeds the top number
     pub fn w7_battery(&self) -> bool { self.w7_src.as_deref() == Some("bat") }
+    pub fn bold_bolt(&self) -> bool { self.bolt_style == "bold" }
 }
 fn d_info() -> u8 { 4 }
 fn d_true() -> bool { true }
 fn d_low() -> u8 { 20 }
 fn d_high() -> u8 { 80 }
 fn d_widget() -> String { "icon".into() }
+fn d_bolt_style() -> String { "classic".into() }
 impl Default for Cfg {
     fn default() -> Self {
         Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: "icon".into(), glyph_xl: false, shortcut: true,
               text_pct: None, text_time: None, text_w: None, w_src: None,   // None → title_items falls back to `info`
-              text_w_sys: None, text_w_bat: None, w7_src: None, digit_deco: true,
+              text_w_sys: None, text_w_bat: None, w7_src: None, digit_deco: true, bolt_style: d_bolt_style(),
               text_temp: None, text_adp: None }
     }
 }
@@ -160,6 +163,7 @@ pub fn cfg_path() -> std::path::PathBuf {
 pub fn load_cfg() -> Cfg {
     let mut c: Cfg = std::fs::read_to_string(cfg_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     if c.info > 7 { c.info = 4; }   // clamp the menu-bar text mode to a valid variant
+    if !matches!(c.bolt_style.as_str(), "classic" | "bold") { c.bolt_style = d_bolt_style(); }
     c
 }
 fn time_str(l: &Live) -> String {
@@ -441,12 +445,19 @@ fn stamp_digits(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8
 // charge-state overlays: the SF-style bolt + plug, white over a soft dark backing
 const BOLT: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.60), (0.45, 0.60), (0.36, 1.0), (0.92, 0.38), (0.50, 0.38)];
 const BOLT_SLIM: [(f32, f32); 6] = [(0.62, 0.0), (0.08, 0.53), (0.45, 0.53), (0.36, 1.0), (0.92, 0.47), (0.50, 0.47)];
-fn bolt_pts(cx: f32, cy: f32, w: f32, h: f32, slim: bool) -> Vec<(f32, f32)> {
-    let shape = if slim { &BOLT_SLIM } else { &BOLT };
+// Broad comic-style bolt traced from the user-provided reference: wide flat crown, right notch,
+// long lower point. Normalized coordinates keep it reusable at every widget's existing bounds.
+const BOLT_BOLD: [(f32, f32); 7] = [(0.355, 0.0), (1.0, 0.0), (0.545, 0.407), (0.842, 0.371), (0.0, 1.0), (0.391, 0.504), (0.038, 0.563)];
+// The broad silhouette carries more visual mass on its left flank. In layouts where the bolt
+// shares the battery body with digits, nudge only BOLT_BOLD right to restore optical balance.
+const BOLD_BOLT_DIGITS_X_SHIFT: f32 = 2.0;
+fn digits_bolt_x(cx: f32, bold: bool) -> f32 { cx + if bold { BOLD_BOLT_DIGITS_X_SHIFT } else { 0.0 } }
+fn bolt_pts(cx: f32, cy: f32, w: f32, h: f32, slim: bool, bold: bool) -> Vec<(f32, f32)> {
+    let shape: &[(f32, f32)] = if bold { &BOLT_BOLD } else if slim { &BOLT_SLIM } else { &BOLT };
     shape.iter().map(|&(u, v)| (cx - w / 2.0 + u * w, cy - h / 2.0 + v * h)).collect()
 }
-fn bolt_shape(hi: &mut Hi, cx: f32, cy: f32, w: f32, h: f32, slim: bool, c: (u8, u8, u8, u8)) {
-    hi.fill_poly(&bolt_pts(cx, cy, w, h, slim), c);
+fn bolt_shape(hi: &mut Hi, cx: f32, cy: f32, w: f32, h: f32, slim: bool, bold: bool, c: (u8, u8, u8, u8)) {
+    hi.fill_poly(&bolt_pts(cx, cy, w, h, slim, bold), c);
 }
 fn plug(hi: &mut Hi, cx: f32, top: f32, s: f32, c: (u8, u8, u8, u8)) {
     let pw = s * 0.09;
@@ -454,10 +465,10 @@ fn plug(hi: &mut Hi, cx: f32, top: f32, s: f32, c: (u8, u8, u8, u8)) {
     hi.fill_rrect(cx - s * 0.32, top + s * 0.22, cx + s * 0.32, top + s * 0.62, s * 0.10, c);
     hi.fill_rrect(cx - s * 0.05, top + s * 0.60, cx + s * 0.05, top + s, s * 0.05, c);
 }
-fn charge_overlay_shape(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, slim: bool) {
+fn charge_overlay_shape(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, slim: bool, bold: bool) {
     if l.charging {
-        bolt_shape(hi, cx + 0.4, cy + 0.7, w, h, slim, DIGIT_SHADOW);
-        bolt_shape(hi, cx, cy, w, h, slim, INK);
+        bolt_shape(hi, cx + 0.4, cy + 0.7, w, h, slim, bold, DIGIT_SHADOW);
+        bolt_shape(hi, cx, cy, w, h, slim, bold, INK);
     } else if l.full {
         plug(hi, cx + 0.4, cy - h / 2.0 + 0.7, h, DIGIT_SHADOW);
         plug(hi, cx, cy - h / 2.0, h, INK);
@@ -539,16 +550,16 @@ fn plug_erase(hi: &mut Hi, cx: f32, top: f32, s: f32, r: f32, clip: (f32, f32, f
 // Transparent rim under the bolt/plug: knock the enlarged shape out of the existing drawing first,
 // then draw the normal shadow+ink into the hole. Most glyphs clip this to the battery's inner zone;
 // wstack deliberately includes the outline so its oversized Stats-style bolt can break through it.
-fn charge_overlay_cut_r(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, r: f32, slim: bool, clip: (f32, f32, f32, f32)) {
+fn charge_overlay_cut_r(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, r: f32, slim: bool, bold: bool, clip: (f32, f32, f32, f32)) {
     if l.charging {
-        erase_poly_dilated(hi, &bolt_pts(cx, cy, w, h, slim), r, clip);
+        erase_poly_dilated(hi, &bolt_pts(cx, cy, w, h, slim, bold), r, clip);
     } else if l.full {
         plug_erase(hi, cx, cy - h / 2.0, h, r, clip);
     }
-    charge_overlay_shape(hi, l, cx, cy, w, h, slim);
+    charge_overlay_shape(hi, l, cx, cy, w, h, slim, bold);
 }
-fn charge_overlay_cut(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, clip: (f32, f32, f32, f32)) {
-    charge_overlay_cut_r(hi, l, cx, cy, w, h, 1.0, false, clip);
+fn charge_overlay_cut(hi: &mut Hi, l: &Live, cx: f32, cy: f32, w: f32, h: f32, bold: bool, clip: (f32, f32, f32, f32)) {
+    charge_overlay_cut_r(hi, l, cx, cy, w, h, 1.0, false, bold, clip);
 }
 
 // Level → fill color (shared by the icon + bar glyphs). Low Power Mode → yellow, like macOS' own
@@ -572,15 +583,15 @@ fn fill_color(l: &Live, colorize: bool, lpm: bool) -> (u8, u8, u8, u8) {
 //   "combo"   → battery FILLED by % + number overlaid + charge status (max info, min width)
 //   "stack"   → % number stacked ABOVE a mini filled battery (narrowest footprint)
 //   _ (icon)  → filled battery + charge status
-pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool, deco: bool, w_val: f64, w_signed: bool) -> Option<(Vec<u8>, u32, u32)> {
+pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool, deco: bool, w_val: f64, w_signed: bool, bold_bolt: bool) -> Option<(Vec<u8>, u32, u32)> {
     match widget {
         "text" => None,
-        "bar" => Some(bar_glyph(l, colorize, lpm)),
-        "iconpct" => Some(battery_pct_icon(l, colorize, lpm)),
-        "combo" => Some(combo_icon(l, colorize, lpm)),
-        "stack" => Some(stack_icon(l, colorize, lpm, deco)),
-        "wstack" => Some(wstack_icon(l, colorize, lpm, w_val, w_signed)),   // widget 7: power on top, level in battery
-        _ => Some(battery_icon(l, colorize, xl, lpm)),
+        "bar" => Some(bar_glyph(l, colorize, lpm, bold_bolt)),
+        "iconpct" => Some(battery_pct_icon(l, colorize, lpm, bold_bolt)),
+        "combo" => Some(combo_icon(l, colorize, lpm, bold_bolt)),
+        "stack" => Some(stack_icon(l, colorize, lpm, deco, bold_bolt)),
+        "wstack" => Some(wstack_icon(l, colorize, lpm, w_val, w_signed, bold_bolt)),   // widget 7: power on top, level in battery
+        _ => Some(battery_icon(l, colorize, xl, lpm, bold_bolt)),
     }
 }
 
@@ -600,7 +611,7 @@ const DIGITS57: [[u8; 7]; 10] = [
 
 // Battery outline with the % number inside, digits colored by state (macOS "show percentage in
 // icon" style). Compact: the number lives in the icon, so no separate title text is needed.
-pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
+pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool, bold_bolt: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (80u32, 40u32);
     let mut hi = Hi::new(w, h);
     let ink = fill_color(l, colorize, lpm);   // number colored by level / LPM
@@ -612,7 +623,7 @@ pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u
     // left indicator so iconpct still shows charge state: bolt (charging) / plug (full), in ink.
     // 번개를 큼지막하게 → 그만큼 숫자 자리를 오른쪽으로 더 확보(ind)
     let ind = if l.charging || l.full { 15.0f32 } else { 0.0 };
-    if l.charging { bolt_shape(&mut hi, 13.0, 20.0, 12.0, 27.0, false, ink); }
+    if l.charging { bolt_shape(&mut hi, digits_bolt_x(13.0, bold_bolt), 20.0, 12.0, 27.0, false, bold_bolt, ink); }
     else if l.full { plug(&mut hi, 13.0, 9.0, 20.0, ink); }
     let digits = format!("{}", l.pct.clamp(0.0, 100.0).round() as u32);
     stamp_digits(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, ink, true);
@@ -622,7 +633,7 @@ pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u
 // Compact single cell: battery FILLED proportional to % (color by level) + % number overlaid
 // (white with a dark shadow so it reads over both the fill and the empty part) + charge status
 // bolt/plug. Max info in one battery-width slot — no separate title text needed.
-pub fn combo_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
+pub fn combo_icon(l: &Live, colorize: bool, lpm: bool, bold_bolt: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (80u32, 40u32);
     let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
@@ -638,7 +649,7 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     // transparent rim out of the fill first so they stay crisp on the colored bar
     const CLIP: (f32, f32, f32, f32) = (4.0, 6.0, 64.0, 34.0);   // inner zone (outline untouched)
     let ind = if l.charging || l.full { 12.0f32 } else { 0.0 };
-    charge_overlay_cut(&mut hi, l, 12.0, 20.0, 12.0, 26.0, CLIP);   // combo: 큼지막한 번개
+    charge_overlay_cut(&mut hi, l, digits_bolt_x(12.0, bold_bolt), 20.0, 12.0, 26.0, bold_bolt, CLIP);   // combo: 큼지막한 번개
     let digits = format!("{}", pct.round() as u32);
     stamp_digits_cut(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, 1.0, CLIP);
     stamp_digits(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, INK, true);
@@ -648,7 +659,7 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
 // % number stacked ABOVE a mini horizontal battery — narrowest horizontal footprint for a tight
 // menu bar. The number is the hero: sized to leave only ~1px headroom, with the battery body
 // taking the former bottom slack. `deco`=false → plain white digits: no tint, no shadow.
-pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, u32, u32) {
+pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool, bold_bolt: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (44u32, 36u32);
     let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
@@ -668,7 +679,7 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
     // slim air gap (1px) so the visible fill mass carries the body's height
     let fw = (34.0 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(4.0, 18.0, 4.0 + fw, 32.3, 3.0, fill);
-    charge_overlay_cut(&mut hi, l, 21.0, 26.0, 13.0, 18.0, (3.0, 17.0, 39.0, 33.3));   // stack: 미니 배터리를 꽉 채우는 번개
+    charge_overlay_cut(&mut hi, l, 21.0, 26.0, 13.0, 18.0, bold_bolt, (3.0, 17.0, 39.0, 33.3));   // stack: 미니 배터리를 꽉 채우는 번개
     hi.down()
 }
 
@@ -676,7 +687,7 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool) -> (Vec<u8>, 
 // below FILLED by level with the level % drawn inside it. Charging shows as the green fill (the
 // power number already conveys draw), so no bolt clutters the tight cell. `watt` = the resolved
 // power the ticker passes in (sys or battery per w7_src).
-pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool) -> (Vec<u8>, u32, u32) {
+pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool, bold_bolt: bool) -> (Vec<u8>, u32, u32) {
     // Keep the original width: charge-state artwork must not make this menu-bar item grow sideways.
     let (w, h) = (48u32, 39u32);   // extra height only, for the bolt tips beyond the battery outline
     let mut hi = Hi::new(w, h);
@@ -702,8 +713,8 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
     // Full keeps the compact plug. Neither state is allowed to shrink the level digits.
     const WCLIP: (f32, f32, f32, f32) = (0.0, 8.0, 46.0, 39.0);
     let ind = if l.charging { 15.5f32 } else if l.full { 12.0 } else { 0.0 };
-    if l.charging { charge_overlay_cut_r(&mut hi, l, 8.5, 25.2, 13.5, 25.2, 2.0, true, WCLIP); }
-    else if l.full { charge_overlay_cut(&mut hi, l, 10.0, 25.2, 9.0, 14.0, WCLIP); }
+    if l.charging { charge_overlay_cut_r(&mut hi, l, digits_bolt_x(8.5, bold_bolt), 25.2, 13.5, 25.2, 2.0, true, bold_bolt, WCLIP); }
+    else if l.full { charge_overlay_cut(&mut hi, l, 10.0, 25.2, 9.0, 14.0, bold_bolt, WCLIP); }
     let digits = format!("{}", pct.round() as u32);
     let dcx = if ind > 0.0 { (3.0 + ind + 43.0) / 2.0 } else { 23.0 };
     stamp_digits_cut(&mut hi, &digits, 16.2, dcx, 25.3, 1.0, WCLIP);   // 1px rim in the fill
@@ -715,7 +726,7 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
 // teal + bolt while charging, plug while plugged-and-holding. `xl` shrinks the vertical margin so
 // the body fills more of the canvas — since macOS scales the tray image to the menu-bar height,
 // that renders the glyph visibly larger. Returns raw RGBA + dims.
-pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
+pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool, bold_bolt: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (80u32, 40u32);
     let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
@@ -729,7 +740,7 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool) -> (Vec<u8>, 
     // fill with an air gap to the outline (macOS's own battery-icon grammar)
     let fw = (56.0 * pct as f32 / 100.0).max(3.0);
     hi.fill_rrect(6.0, m + 4.0, 6.0 + fw, 36.0 - m, 3.0, fill);
-    charge_overlay_cut(&mut hi, l, 34.0, 20.0, 17.0, 27.0, (4.0, m + 2.0, 64.0, 38.0 - m));   // icon: 몸통 중앙의 큼지막한 번개
+    charge_overlay_cut(&mut hi, l, 34.0, 20.0, 17.0, 27.0, bold_bolt, (4.0, m + 2.0, 64.0, 38.0 - m));   // icon: 몸통 중앙의 큼지막한 번개
     hi.down()
 }
 
@@ -751,17 +762,17 @@ fn b64(data: &[u8]) -> String {
     }
     s
 }
-fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool, sys_w: f64) -> (Vec<u8>, u32, u32) {
+fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool, sys_w: f64, bold_bolt: bool) -> (Vec<u8>, u32, u32) {
     match style {
-        "icon_xl" => battery_icon(l, colorize, true, lpm),
-        "combo" => combo_icon(l, colorize, lpm),
-        "iconpct" => battery_pct_icon(l, colorize, lpm),
-        "stack" => stack_icon(l, colorize, lpm, true),
-        "stack_plain" => stack_icon(l, colorize, lpm, false),  // 민무늬 digits variant
-        "wstack" => wstack_icon(l, colorize, lpm, sys_w, false),            // widget 7 · system power (plain)
-        "wstack_bat" => wstack_icon(l, colorize, lpm, signed_watts(l), true), // widget 7 · battery power (signed)
-        "bar" => bar_glyph(l, colorize, lpm),
-        _ => battery_icon(l, colorize, false, lpm),
+        "icon_xl" => battery_icon(l, colorize, true, lpm, bold_bolt),
+        "combo" => combo_icon(l, colorize, lpm, bold_bolt),
+        "iconpct" => battery_pct_icon(l, colorize, lpm, bold_bolt),
+        "stack" => stack_icon(l, colorize, lpm, true, bold_bolt),
+        "stack_plain" => stack_icon(l, colorize, lpm, false, bold_bolt),  // 민무늬 digits variant
+        "wstack" => wstack_icon(l, colorize, lpm, sys_w, false, bold_bolt),            // widget 7 · system power (plain)
+        "wstack_bat" => wstack_icon(l, colorize, lpm, signed_watts(l), true, bold_bolt), // widget 7 · battery power (signed)
+        "bar" => bar_glyph(l, colorize, lpm, bold_bolt),
+        _ => battery_icon(l, colorize, false, lpm, bold_bolt),
     }
 }
 pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
@@ -781,9 +792,11 @@ pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
     for (name, l, is_lpm, sys_w) in &states {
         let mut styles = serde_json::Map::new();
         for style in ["icon", "icon_xl", "combo", "iconpct", "stack", "stack_plain", "wstack", "wstack_bat", "bar"] {
-            let (col, w, h) = render_style(style, l, true, *is_lpm, *sys_w);
-            let (mono, ..) = render_style(style, l, false, *is_lpm, *sys_w);
-            styles.insert(style.into(), serde_json::json!({ "w": w, "h": h, "c": b64(&col), "m": b64(&mono) }));
+            for (suffix, bold_bolt) in [("", false), ("_bold", true)] {
+                let (col, w, h) = render_style(style, l, true, *is_lpm, *sys_w, bold_bolt);
+                let (mono, ..) = render_style(style, l, false, *is_lpm, *sys_w, bold_bolt);
+                styles.insert(format!("{style}{suffix}"), serde_json::json!({ "w": w, "h": h, "c": b64(&col), "m": b64(&mono) }));
+            }
         }
         glyphs.insert((*name).into(), styles.into());
         // demo temp/adapter for the 온도·어댑터 chips' preview text (adapter only while charging;
@@ -806,7 +819,7 @@ pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
 }
 
 // ---- vertical bar glyph (Stats' "bar_chart"): a thin upright cell filling from the bottom.
-pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
+pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool, bold_bolt: bool) -> (Vec<u8>, u32, u32) {
     let (w, h) = (28u32, 40u32);
     let mut hi = Hi::new(w, h);
     let pct = l.pct.clamp(0.0, 100.0);
@@ -818,7 +831,7 @@ pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool) -> (Vec<u8>, u32, u32) {
     hi.fill_rrect(10.0, 0.0, 18.0, 2.5, 1.2, INK);
     let fh = (27.5f32 * pct as f32 / 100.0).max(2.5);
     hi.fill_rrect(10.0, 34.0 - fh, 18.0, 34.0, 2.0, fill);
-    charge_overlay_cut(&mut hi, l, 14.0, 20.0, 11.0, 27.0, (8.0, 4.5, 20.0, 36.0));   // bar: 셀을 세로로 채우는 큰 번개
+    charge_overlay_cut(&mut hi, l, 14.0, 20.0, 11.0, 27.0, bold_bolt, (8.0, 4.5, 20.0, 36.0));   // bar: 셀을 세로로 채우는 큰 번개
     hi.down()
 }
 
@@ -922,7 +935,8 @@ mod tests {
             for (chg, full) in [(false, false), (true, false), (false, true)] {   // 방전·충전·완충(플러그 컷아웃)
                 let l = Live { ok: true, pct: pct as f64, charging: chg, full, discharging: !chg && !full, watts: 4.3, ..Default::default() };
                 for style in ["icon", "icon_xl", "combo", "iconpct", "stack", "stack_plain", "wstack", "wstack_bat", "bar"] {
-                    let _ = render_style(style, &l, true, false, 6.2);
+                    let _ = render_style(style, &l, true, false, 6.2, false);
+                    let _ = render_style(style, &l, true, false, 6.2, true);
                 }
             }
         }
@@ -946,10 +960,13 @@ mod tests {
         for s in ["cur", "chg", "low", "lpm"] {
             assert!(v["states"][s]["pct"].is_number(), "state {s}");
             for g in ["icon", "icon_xl", "combo", "iconpct", "stack", "stack_plain", "wstack", "wstack_bat", "bar"] {
-                let e = &v["glyphs"][s][g];
-                let n = (e["w"].as_u64().unwrap() * e["h"].as_u64().unwrap() * 4) as usize;
-                for k in ["c", "m"] {
-                    assert_eq!(e[k].as_str().unwrap().len(), n.div_ceil(3) * 4, "{s}/{g}/{k}");
+                for suffix in ["", "_bold"] {
+                    let key = format!("{g}{suffix}");
+                    let e = &v["glyphs"][s][&key];
+                    let n = (e["w"].as_u64().unwrap() * e["h"].as_u64().unwrap() * 4) as usize;
+                    for k in ["c", "m"] {
+                        assert_eq!(e[k].as_str().unwrap().len(), n.div_ceil(3) * 4, "{s}/{key}/{k}");
+                    }
                 }
             }
         }
