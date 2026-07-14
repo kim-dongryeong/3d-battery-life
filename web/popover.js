@@ -698,8 +698,6 @@ $('pop').addEventListener('change', e => {
   else if (t.matches('select[data-c]')) applyCfg(t.dataset.c, coerce(t.dataset.c, t.value));
 });
 $('pop').addEventListener('click', e => {
-  const mb = e.target.closest('[data-m]');             // 전력량 측정 start/stop/reset
-  if (mb) { doMeasure(mb.dataset.m); return; }
   const sim = e.target.closest('[data-sim]');          // preview state simulator (현재/충전/부족/저전력)
   if (sim) { pvSim = sim.dataset.sim; render(); return; }
   const w7 = e.target.closest('[data-w7]');            // widget-7 power source (checked before [data-w])
@@ -712,6 +710,12 @@ $('pop').addEventListener('click', e => {
   if (t) { applyTextChip(t.dataset.t); return; }
   const b = e.target.closest('.tgl'); if (!b) return;  // boolean toggle (settings)
   applyCfg(b.dataset.c, !cfg[b.dataset.c]);
+});
+// the measure section renders into #poptail (a SIBLING of #pop), so it needs its own delegate —
+// the #pop listener above never sees these clicks
+$('poptail').addEventListener('click', e => {
+  const mb = e.target.closest('[data-m]');
+  if (mb) doMeasure(mb.dataset.m);
 });
 // trend preview lives in its own persistent container (#sparkbox) so the live 3D canvas survives
 $('sparkbox').addEventListener('click', e => {
