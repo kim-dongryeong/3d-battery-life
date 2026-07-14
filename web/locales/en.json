@@ -715,5 +715,9 @@
   "■ 정지": "■ Stop",
   "새 측정": "New measurement",
   "결과는 새 측정 시작 전까지 유지돼요": "Result stays until a new measurement starts",
-  "측정 공백은 적산에서 제외돼요 — 게이지 검산은 공백과 무관해요(칩이 계속 적분)": "Gaps are excluded from integration — the gauge check is unaffected (the chip keeps integrating)"
+  "측정 공백은 적산에서 제외돼요 — 게이지 검산은 공백과 무관해요(칩이 계속 적분)": "Gaps are excluded from integration — the gauge check is unaffected (the chip keeps integrating)",
+  "이미 진행 중인 측정이 있어 그 상태를 보여드려요": "A measurement is already running — showing its state",
+  "측정이 이미 정지되어 있어요": "The measurement is already stopped",
+  "요청이 거부됐어요 — 상태를 다시 불러왔어요": "Request rejected — state re-synced",
+  "서버에 연결할 수 없어요": "Can't reach the server"
 }

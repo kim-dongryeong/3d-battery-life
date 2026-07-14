@@ -297,3 +297,4 @@ body.settings-open #foot .vsel { opacity: .4; }
   font-style: normal; font-size: 8.5px; font-weight: 700; color: var(--dim);
   border: 1px solid var(--line); border-radius: 4px; padding: 0 3px; margin-left: 3px; vertical-align: 1px;
 }
+.mnote.mwarn { color: #e8a13c; }

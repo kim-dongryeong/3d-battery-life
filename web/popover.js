@@ -113,7 +113,7 @@ function fitWindow() {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { stop3D(); return; }   // pause the 3D animation loop while hidden (saves CPU)
   lastWinH = 0;
-  pull(); pullProcs(); pullDetail(); pullSpark();
+  pull(); pullProcs(); pullDetail(); pullSpark(); pullMeasure();   // measure state can change while hidden (server resume/other window)
   requestAnimationFrame(fitWindow);
 });
 const hideWindow = () => { fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ do: 'hide' }) }).catch(() => {}); };
@@ -359,12 +359,27 @@ function loop3D() {
 // ── 전력량 측정 세션 ("전력 분석 세션") ─────────────────────────────────────
 // 서버(/api/measure)가 SMC 2초 샘플을 적산 — 여기는 표시와 start/stop 버튼만.
 // 배터리는 두 추정치를 동급 병기: 수지(어댑터−시스템 적분) vs 게이지(잔량 델타) — 차이의 원인은 단정하지 않는다.
-let msr = { state: 'idle' };
+let msr = { state: 'idle' }, msrNote = '', msrNoteT = 0;
 async function pullMeasure() {
   try { const r = await fetch('/api/measure', { cache: 'no-store' }); if (r.ok) msr = await r.json(); } catch { /* keep */ }
 }
+// a rejected request must never look like "nothing happened" (the 409-swallowed bug): show WHY,
+// then resync — the server state (e.g. a session resumed while this window was hidden) wins.
+function msrSay(text) {
+  msrNote = text;
+  clearTimeout(msrNoteT);
+  msrNoteT = setTimeout(() => { msrNote = ''; if (!settingsOpen) render(); }, 5000);
+}
 async function doMeasure(act) {
-  try { await fetch(`/api/measure/${act}`, { method: 'POST' }); } catch { /* server down */ }
+  try {
+    const r = await fetch(`/api/measure/${act}`, { method: 'POST' });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      msrSay(e.error === 'already running' ? '이미 진행 중인 측정이 있어 그 상태를 보여드려요'
+        : e.error === 'not running' ? '측정이 이미 정지되어 있어요'
+        : '요청이 거부됐어요 — 상태를 다시 불러왔어요');
+    }
+  } catch { msrSay('서버에 연결할 수 없어요'); }
   await pullMeasure(); if (!settingsOpen) render();
 }
 const fmtDurS = sec => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), x = sec % 60;
@@ -392,7 +407,7 @@ function measureHTML() {
           ? `<button class="mbtn stop" data-m="stop">■ 정지</button><span class="mhint">피크 시스템 ${m.peakSystemW != null ? m.peakSystemW.toFixed(1) : '–'} W</span>`
           : `<button class="mbtn" data-m="reset">새 측정</button><span class="mhint">결과는 새 측정 시작 전까지 유지돼요</span>`}</div>`;
   }
-  return `<div class="sec">전력량 측정</div>${body}`;
+  return `<div class="sec">전력량 측정</div>${msrNote ? `<div class="mnote mwarn">${msrNote}</div>` : ''}${body}`;
 }
 function tailHTML(s) { return powerCompareHTML(s) + measureHTML() + detailHTML(s) + procsHTML(); }
 
@@ -751,7 +766,7 @@ initI18nPop();   // 언어(팝오버 설정에서 선택, localStorage 공용) �
 render();
 pull(); pullProcs(); pullDetail(); pullConfig(); pullSpark(); pullMeasure();
 setInterval(() => { if (!document.hidden) pull(); }, 2000);
-setInterval(() => { if (!document.hidden && msr.state === 'running') pullMeasure(); }, 2000);   // 측정 중일 때만 폴링
+setInterval(() => { if (!document.hidden) pullMeasure(); }, 2000);   // 상태 무관 상시 폴링 — idle 게이트는 숨김→복귀 시 stale UI를 만들었음(409 유령 세션 사건)
 setInterval(() => { if (!document.hidden) pullProcs(); }, 5000);
 setInterval(() => { if (!document.hidden) pullDetail(); }, 12000);
 setInterval(() => { if (!document.hidden) pullSpark(); }, 30000);

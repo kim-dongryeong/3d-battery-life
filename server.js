@@ -108,7 +108,6 @@ function sanitizeCfg(p) {
 // carrying seq/monoMs); the gauge trace comes from sample()'s coulomb fields every ~60s.
 const measureFile = () => path.join(userDataDir(), 'measure-session.json');
 let mSt = null, mTick = null, mCoul = null;
-try { mSt = JSON.parse(fs.readFileSync(measureFile(), 'utf8')); } catch { mSt = null; }
 function measurePersist() {
   if (!mSt) { try { fs.unlinkSync(measureFile()); } catch { /* absent */ } return; }
   const f = measureFile();
@@ -141,7 +140,14 @@ function measureTimersStart() {
   mCoul = setInterval(coulombTick, 60_000);
 }
 function measureTimersStop() { clearInterval(mTick); clearInterval(mCoul); mTick = mCoul = null; }
-if (mSt && mSt.state === 'running') measureTimersStart();   // resume across a server restart
+// ⚠️ resume lives in startServer(), NEVER at module level: server.js is imported by bin/cli.js for
+// EVERY subcommand — a module-level resume turned the launchd sampler's one-shot `cli.js sample`
+// into an immortal zombie (armed setInterval = event loop never drains) that kept a stale session
+// integrating + re-persisting all night, overwriting stop/reset done on the real server (유령 세션).
+function measureResume() {
+  try { mSt = JSON.parse(fs.readFileSync(measureFile(), 'utf8')); } catch { mSt = null; }
+  if (mSt && mSt.state === 'running') measureTimersStart();
+}
 
 function hostAllowed(req) {
   const h = String(req.headers.host || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
@@ -175,6 +181,7 @@ export function resolveRoot(root) {
 }
 
 export function startServer({ root, port } = {}) {
+  measureResume();   // resume a crash-interrupted measurement — only the real server, never importers
   const base = resolveRoot(root);
   const PORT = port || process.env.PORT || 4317;
   const webDir = fs.realpathSync(path.join(base, 'web'));
@@ -464,7 +471,19 @@ export function startServer({ root, port } = {}) {
     });
   }
 
+  // As a Tauri sidecar (BATTERY_SIDECAR=1): a dying/killed parent can't always kill us (SIGKILL/crash
+  // skips RunEvent::Exit) — an orphaned server then keeps port 4317 + stale in-memory measure state
+  // while re-writing its persist file (the 유령 측정 세션 incident). Orphaned ⇒ ppid becomes 1 ⇒ exit.
+  if (process.env.BATTERY_SIDECAR === '1') {
+    setInterval(() => { if (process.ppid === 1) { measurePersist(); process.exit(0); } }, 5000);
+  }
+  let binds = 0;
   server.on('error', e => {   // EADDRINUSE etc. — say what happened instead of an unhandled crash
+    if (e.code === 'EADDRINUSE' && ++binds <= 6) {   // predecessor may still be releasing the port (reaped orphan)
+      console.error(`port ${PORT} busy — retry ${binds}/6`);
+      setTimeout(() => server.listen(PORT, '127.0.0.1'), 500);
+      return;
+    }
     console.error(e.code === 'EADDRINUSE'
       ? `error: port ${PORT} is already in use — another viewer running? (PORT=<n> to change)`
       : `server error: ${e.message}`);

@@ -187,8 +187,15 @@ fn main() {
             // finish its async registration before showing and focusing that first window.
             #[cfg(target_os = "macos")]
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            // 1) start the local server (bundled single binary) as a sidecar
-            let cmd = app.shell().sidecar("battery-life").expect("sidecar 'battery-life' missing").args(["serve"]);
+            // 1) start the local server (bundled single binary) as a sidecar.
+            // First reap any orphan from a previous run: RunEvent::Exit's kill is skipped on
+            // SIGKILL/crash, and an orphaned server keeps port 4317 + stale measure state alive
+            // (유령 측정 세션). BATTERY_SIDECAR=1 lets the server also self-exit when re-parented
+            // to launchd (ppid 1); the pkill here covers servers too old to know that trick.
+            let _ = Sh::new("/usr/bin/pkill").args(["-f", "battery-life serve"]).status();
+            std::thread::sleep(std::time::Duration::from_millis(200));   // let the port release (server also retries EADDRINUSE)
+            let cmd = app.shell().sidecar("battery-life").expect("sidecar 'battery-life' missing")
+                .args(["serve"]).env("BATTERY_SIDECAR", "1");
             let (mut rx, child) = cmd.spawn().expect("failed to spawn battery-life serve");
             *sidecar.lock().unwrap() = Some(child);
             tauri::async_runtime::spawn(async move {
