@@ -1803,15 +1803,27 @@ function setView(v) {
 // 정면 카메라: FLAT_W가 좌우 오버레이 패널을 뺀 "빈 가로 구간"에 꽉 차게 거리·x를 계산.
 // (종전엔 창 전체 폭 기준이라 원점·세로축이 왼쪽 패널에, 그래프 오른쪽 끝이 #panel에 가려짐)
 let _flatK = 1.17;   // 화면 전체 폭에 보이는 월드 폭 / FLAT_W — px→시간 환산(팬)이 재사용
+// A panel is "shown" if it takes real space. NOTE: these panels are position:fixed, whose
+// offsetParent is ALWAYS null — so the old offsetParent check treated every panel as hidden and
+// never applied the offset (the bug that left the axis/right edge covered). Test computed display +
+// a non-empty rect instead.
+function panelRect(id) {
+  const el = document.getElementById(id);
+  if (!el) return null;
+  const cs = getComputedStyle(el);
+  if (cs.display === 'none' || cs.visibility === 'hidden') return null;
+  const r = el.getBoundingClientRect();
+  return (r.width > 0 && r.height > 0) ? r : null;
+}
 function flatFreeStrip() {
   // 왼쪽(#hud·#buckets)·오른쪽(#panel) 고정 오버레이가 차지하는 폭을 실측 — 숨김(display:none)은 제외
   let L = 0, R = 0;
   for (const id of ['hud', 'buckets']) {
-    const el = document.getElementById(id);
-    if (el && el.offsetParent !== null) L = Math.max(L, el.getBoundingClientRect().right);
+    const r = panelRect(id);
+    if (r) L = Math.max(L, r.right);
   }
-  const p = document.getElementById('panel');
-  if (p && p.offsetParent !== null) R = Math.max(0, innerWidth - p.getBoundingClientRect().left);
+  const p = panelRect('panel');
+  if (p) R = Math.max(0, innerWidth - p.left);
   L = Math.max(0, L);
   // 창이 아주 좁아 패널이 화면 대부분을 덮으면 종전 전체-폭 맞춤으로 후퇴 (그래프가 실처럼 눌리는 것 방지)
   if (innerWidth - L - R < innerWidth * 0.4) return { L: 0, R: 0 };
