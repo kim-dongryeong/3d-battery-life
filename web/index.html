@@ -80,8 +80,8 @@
     </div>
     <div class="grp" id="intervalGrp">
       <span class="lbl nocaps" title="세로축이 '전력 W'일 때, 현재 그래프가 그리는 그 전력을 지정 구간 동안 적분해 전력량(Wh)을 구합니다. 배터리 게이지 검산도 함께 표시. '전력량 측정' 라이브 세션과 정확도가 같습니다.">구간 전력량 (Wh)</span>
-      <div class="ivrow"><label>시작</label><input type="datetime-local" id="ivStart" lang="ko" /></div>
-      <div class="ivrow"><label>끝</label><input type="datetime-local" id="ivEnd" lang="ko" /></div>
+      <div class="ivrow"><label>시작</label><div class="dt"><input type="datetime-local" id="ivStart" /><span class="dtshow empty" id="ivStartShow">시작 시각</span></div></div>
+      <div class="ivrow"><label>끝</label><div class="dt"><input type="datetime-local" id="ivEnd" /><span class="dtshow empty" id="ivEndShow">끝 시각</span></div></div>
       <div class="ivbtns">
         <button id="ivNow" class="btn small" title="현재 2D 보기 창의 시간 범위로 채우기">현재 보기 구간</button>
         <button id="ivCalc" class="btn small primary">계산</button>

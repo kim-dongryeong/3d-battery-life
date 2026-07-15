@@ -1794,10 +1794,18 @@ function ivCalc() {
   renderIvResult(computeIntervalEnergy(t0, t1), t0, t1);
   drawIntervalOverlay();
 }
+// datetime-local의 native 표기는 로케일(월-우선)이라, 그 위에 연도우선 텍스트를 직접 그려 덮는다.
+function ivSyncShow(id) {
+  const inp = document.getElementById(id), show = document.getElementById(id + 'Show'); if (!inp || !show) return;
+  const t = inputToEpoch(inp.value);
+  if (t != null) { show.textContent = epochToText(t); show.classList.remove('empty'); }
+  else { show.textContent = id === 'ivStart' ? '시작 시각' : '끝 시각'; show.classList.add('empty'); }
+}
 function ivFillFromView() {
   const sp = flatSpanNow(); const w = state.flatWin ? state.flatWin : { t0: sp.min, t1: sp.max };
   document.getElementById('ivStart').value = epochToInput(w.t0);
   document.getElementById('ivEnd').value = epochToInput(Math.min(w.t1, sp.max));
+  ivSyncShow('ivStart'); ivSyncShow('ivEnd');
 }
 // 선택 구간에서 현재 계열 곡선과 0선 사이의 '넓이'를 음영으로(= 적분 시각화). 2D·3D 모두 지원.
 // 3D는 가로축이 '하루 중 시각'·깊이축이 '날짜'라, 여러 날에 걸친 구간은 날짜 레이어마다 음영이
@@ -1857,6 +1865,12 @@ function drawIntervalOverlay() {
   document.getElementById('ivClear').addEventListener('click', () => {
     state.intervalSel = null; document.getElementById('ivResult').hidden = true; drawIntervalOverlay();
   });
+  for (const id of ['ivStart', 'ivEnd']) {
+    const inp = document.getElementById(id);
+    inp.addEventListener('input', () => ivSyncShow(id));
+    inp.addEventListener('change', () => ivSyncShow(id));
+    ivSyncShow(id);   // 초기 플레이스홀더
+  }
 }
 
 document.querySelectorAll('.seg').forEach(seg => {
