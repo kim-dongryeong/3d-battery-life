@@ -91,17 +91,17 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 /* 구간 전력량 패널 */
 .ivrow { display: grid; grid-template-columns: 28px 1fr; align-items: center; gap: 6px; }
 .ivrow > label { color: var(--dim); font-size: 11px; cursor: default; }
-/* datetime-local: 네이티브 달력은 유지하되, 월-우선 native 표기를 숨기고 연도우선 텍스트를 오버레이.
-   (WKWebView는 lang 속성을 무시하고 macOS 로케일로 형식을 정하므로 형식을 직접 강제할 수 없다.) */
+/* 날짜·시각: 연도우선 텍스트 입력(키보드 직접 입력 가능) + 📅 버튼(네이티브 달력·시각 피커).
+   WKWebView는 datetime-local의 형식을 macOS 로케일로 강제하므로, 표시는 우리 텍스트 필드가 맡고
+   달력은 숨긴 datetime-local의 showPicker()로 띄운다. */
 .dt { position: relative; width: 100%; }
-.dt input[type="datetime-local"] { width: 100%; font: inherit; font-size: 11px; color: var(--fg);
-  background: var(--btn); border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px; }
-.dt input:focus { outline: none; border-color: var(--accent); }
-.dt input::-webkit-datetime-edit { opacity: 0; }   /* native 텍스트(월-우선) 숨김 — 달력 버튼은 유지 */
-.dt input::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; opacity: 1; }
-.dtshow { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); pointer-events: none;
-  font-size: 11px; color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.dtshow.empty { color: var(--dim); opacity: .7; }
+.dt .dttext { width: 100%; font: inherit; font-size: 11px; color: var(--fg); background: var(--btn);
+  border: 1px solid var(--line); border-radius: 7px; padding: 4px 26px 4px 7px; font-variant-numeric: tabular-nums; }
+.dt .dttext:focus { outline: none; border-color: var(--accent); }
+.dt .dtpick { position: absolute; right: 22px; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; }
+.dt .dtcal { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); border: 0; background: transparent;
+  cursor: pointer; font-size: 12px; padding: 2px 4px; line-height: 1; opacity: .75; }
+.dt .dtcal:hover { opacity: 1; }
 .ivrow input:focus { outline: none; border-color: var(--accent); }
 .ivbtns { display: flex; gap: 5px; flex-wrap: wrap; }
 .btn.small { padding: 4px 8px; font-size: 11px; }

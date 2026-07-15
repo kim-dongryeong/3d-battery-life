@@ -1743,15 +1743,16 @@ function computeIntervalEnergy(t0, t1) {
   };
 }
 const pad2 = n => String(n).padStart(2, '0');
-// datetime-local 입력값 ↔ epoch (달력 피커 유지). value 는 "YYYY-MM-DDTHH:MM"(로컬).
-const epochToInput = t => { const d = new Date(t * 1000);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
-const inputToEpoch = v => { const t = new Date(v).getTime(); return Number.isFinite(t) ? Math.floor(t / 1000) : null; };
-// 결과에 보여줄 연도 우선 표기: "2026/07/12 06:00 PM"
+// 연도우선 표기(텍스트 필드·결과에 공용): "2026/07/13 06:00 PM" — 키보드로 직접 타이핑도 이 형식.
 function epochToText(t) {
   const d = new Date(t * 1000); let h = d.getHours(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
   return `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(h)}:${pad2(d.getMinutes())} ${ap}`;
 }
+const textToEpoch = s => { const t = Date.parse((s || '').trim()); return Number.isFinite(t) ? Math.floor(t / 1000) : null; };
+// 숨은 datetime-local(달력용) value ↔ epoch: "YYYY-MM-DDTHH:MM"(로컬)
+const epochToPick = t => { const d = new Date(t * 1000);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const pickToEpoch = v => { const t = new Date(v).getTime(); return Number.isFinite(t) ? Math.floor(t / 1000) : null; };
 const fmtDurSec = sec => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60);
   return h ? `${h}시간 ${m}분` : `${m}분`; };
 const sgnW = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
@@ -1787,25 +1788,17 @@ function ivRecompute() {
   renderIvResult(computeIntervalEnergy(t0, t1), t0, t1);
 }
 function ivCalc() {
-  const t0 = inputToEpoch(document.getElementById('ivStart').value);
-  const t1 = inputToEpoch(document.getElementById('ivEnd').value);
+  const t0 = textToEpoch(document.getElementById('ivStart').value);
+  const t1 = textToEpoch(document.getElementById('ivEnd').value);
   if (t0 == null || t1 == null || !(t1 > t0)) { state.intervalSel = null; renderIvResult(null); drawIntervalOverlay(); return; }
   state.intervalSel = { t0, t1 };
   renderIvResult(computeIntervalEnergy(t0, t1), t0, t1);
   drawIntervalOverlay();
 }
-// datetime-local의 native 표기는 로케일(월-우선)이라, 그 위에 연도우선 텍스트를 직접 그려 덮는다.
-function ivSyncShow(id) {
-  const inp = document.getElementById(id), show = document.getElementById(id + 'Show'); if (!inp || !show) return;
-  const t = inputToEpoch(inp.value);
-  if (t != null) { show.textContent = epochToText(t); show.classList.remove('empty'); }
-  else { show.textContent = id === 'ivStart' ? '시작 시각' : '끝 시각'; show.classList.add('empty'); }
-}
 function ivFillFromView() {
   const sp = flatSpanNow(); const w = state.flatWin ? state.flatWin : { t0: sp.min, t1: sp.max };
-  document.getElementById('ivStart').value = epochToInput(w.t0);
-  document.getElementById('ivEnd').value = epochToInput(Math.min(w.t1, sp.max));
-  ivSyncShow('ivStart'); ivSyncShow('ivEnd');
+  document.getElementById('ivStart').value = epochToText(w.t0);
+  document.getElementById('ivEnd').value = epochToText(Math.min(w.t1, sp.max));
 }
 // 선택 구간에서 현재 계열 곡선과 0선 사이의 '넓이'를 음영으로(= 적분 시각화). 2D·3D 모두 지원.
 // 3D는 가로축이 '하루 중 시각'·깊이축이 '날짜'라, 여러 날에 걸친 구간은 날짜 레이어마다 음영이
@@ -1865,12 +1858,15 @@ function drawIntervalOverlay() {
   document.getElementById('ivClear').addEventListener('click', () => {
     state.intervalSel = null; document.getElementById('ivResult').hidden = true; drawIntervalOverlay();
   });
-  for (const id of ['ivStart', 'ivEnd']) {
-    const inp = document.getElementById(id);
-    inp.addEventListener('input', () => ivSyncShow(id));
-    inp.addEventListener('change', () => ivSyncShow(id));
-    ivSyncShow(id);   // 초기 플레이스홀더
-  }
+  // 📅 버튼: 텍스트값을 숨은 datetime-local에 넣고 네이티브 달력·시각 피커를 띄운다. 고르면 텍스트로 되씀.
+  document.querySelectorAll('.dtcal').forEach(btn => {
+    const pick = document.getElementById(btn.dataset.pick), text = document.getElementById(btn.dataset.text);
+    btn.addEventListener('click', () => {
+      const t = textToEpoch(text.value); if (t != null) pick.value = epochToPick(t);
+      try { if (pick.showPicker) pick.showPicker(); else { pick.focus(); pick.click(); } } catch { pick.focus(); }
+    });
+    pick.addEventListener('change', () => { const t = pickToEpoch(pick.value); if (t != null) text.value = epochToText(t); });
+  });
 }
 
 document.querySelectorAll('.seg').forEach(seg => {
