@@ -77,6 +77,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #gear.on { color: var(--accent); border-color: var(--accent); }
 .grp.row { flex-direction: row; align-items: center; justify-content: space-between; }
 .lbl { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+.lbl .unit { text-transform: none; }   /* 단위는 대문자화 금지 (Wh ≠ WH) */
 .seg { display: flex; gap: 4px; background: var(--btn); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
 .seg button { flex: 1; border: 0; background: transparent; color: var(--dim); padding: 6px 4px;
   border-radius: 6px; font-size: 12px; cursor: pointer; transition: .12s; }
@@ -88,23 +89,26 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 
 /* 구간 전력량 패널 */
-.ivsel { width: 100%; font: inherit; font-size: 11.5px; color: var(--fg); background: var(--btn);
-  border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; cursor: pointer; }
-.ivsel:focus { outline: none; border-color: var(--accent); }
 .ivrow { display: grid; grid-template-columns: 28px 1fr; align-items: center; gap: 6px; }
 .ivrow > label { color: var(--dim); font-size: 11px; cursor: default; }
-.ivrow input[type="datetime-local"] { width: 100%; font: inherit; font-size: 11px; color: var(--fg);
-  background: var(--btn); border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px; }
+.ivrow input[type="text"] { width: 100%; font: inherit; font-size: 11.5px; color: var(--fg);
+  background: var(--btn); border: 1px solid var(--line); border-radius: 7px; padding: 5px 7px;
+  font-variant-numeric: tabular-nums; }
 .ivrow input:focus { outline: none; border-color: var(--accent); }
 .ivbtns { display: flex; gap: 5px; flex-wrap: wrap; }
 .btn.small { padding: 4px 8px; font-size: 11px; }
 .btn.small.primary { background: var(--accent); color: var(--onfg, #0b1705); border-color: var(--accent); font-weight: 700; }
 .ivresult { margin-top: 2px; padding: 8px 10px; background: var(--btn); border: 1px solid var(--line);
   border-radius: 9px; font-size: 11.5px; line-height: 1.5; }
+.ivresult .range { color: var(--dim); font-size: 10.5px; font-variant-numeric: tabular-nums; margin-bottom: 3px; }
+.ivresult .serieslbl { color: var(--accent); font-size: 11px; font-weight: 650; }
 .ivresult .big { font-size: 20px; font-weight: 800; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
 .ivresult .big small { font-size: 12px; font-weight: 600; color: var(--dim); margin-left: 3px; }
 .ivresult .row { display: flex; justify-content: space-between; gap: 8px; color: var(--dim); }
 .ivresult .row b { color: var(--fg); font-weight: 650; font-variant-numeric: tabular-nums; }
+.ivresult .gauge { display: flex; justify-content: space-between; gap: 8px; color: var(--dim);
+  margin-top: 5px; padding-top: 5px; border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.ivresult .gauge b { color: var(--fg); font-weight: 650; font-variant-numeric: tabular-nums; }
 .ivresult .warn { color: #e8a13c; margin-top: 3px; }
 .ivresult .chg { color: var(--accent); } .ivresult .dis { color: #ff6b5e; }
 

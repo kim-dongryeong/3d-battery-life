@@ -79,19 +79,13 @@
       </div>
     </div>
     <div class="grp" id="intervalGrp">
-      <span class="lbl" title="기록된 1분 평균 전력을 지정 구간 동안 적분해 전력량(Wh)을 구합니다. '전력량 측정' 라이브 세션과 정확도가 같습니다.">구간 전력량 (Wh)</span>
-      <select id="ivSeries" class="ivsel" title="적분할 전력 계열">
-        <option value="balance">배터리 · 수지 (PDTR−PSTR)</option>
-        <option value="hybrid">배터리 · 혼합 (방전 PPBR·충전 수지)</option>
-        <option value="system">시스템 (PSTR)</option>
-        <option value="adapter">어댑터 (PDTR)</option>
-      </select>
-      <div class="ivrow"><label>시작</label><input type="datetime-local" id="ivStart" /></div>
-      <div class="ivrow"><label>끝</label><input type="datetime-local" id="ivEnd" /></div>
+      <span class="lbl" title="세로축이 '전력 W'일 때, 현재 그래프가 그리는 그 전력을 지정 구간 동안 적분해 전력량(Wh)을 구합니다. 배터리 게이지 검산도 함께 표시. '전력량 측정' 라이브 세션과 정확도가 같습니다.">구간 전력량 (<span class="unit">Wh</span>)</span>
+      <div class="ivrow"><label>시작</label><input type="text" id="ivStart" placeholder="2026/07/12 06:00 PM" spellcheck="false" /></div>
+      <div class="ivrow"><label>끝</label><input type="text" id="ivEnd" placeholder="2026/07/12 08:00 PM" spellcheck="false" /></div>
       <div class="ivbtns">
         <button id="ivNow" class="btn small" title="현재 2D 보기 창의 시간 범위로 채우기">현재 보기 구간</button>
         <button id="ivCalc" class="btn small primary">계산</button>
-        <button id="ivClear" class="btn small" title="결과와 그래프 강조 지우기">지우기</button>
+        <button id="ivClear" class="btn small" title="결과와 그래프 음영 지우기">지우기</button>
       </div>
       <div id="ivResult" class="ivresult" hidden></div>
     </div>

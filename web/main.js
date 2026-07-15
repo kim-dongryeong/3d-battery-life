@@ -217,7 +217,8 @@ function buildFlatAxes(valMax, valLabel) {
     const s = makeLabel(state.y === 'pct' ? `${Math.round(v)}%` : state.y === 'rate' ? v.toFixed(2) : `${v.toFixed(0)}W`, { size: 28, color: TH().tickC });
     s.position.set(x0 - 2.2, y, 0); sceneRoot.add(s);
   }
-  const yt = makeLabel(tr(valLabel), { color: TH().titleC }); yt.position.set(x0 - 4.5, Y + 1, 0); sceneRoot.add(yt);
+  // 값축 제목: 종전엔 좌측 끝(x0−4.5)에 두어 좌상단 HUD 패널에 가렸다 → 플롯 위 중앙으로 이동(패널과 충돌 없음)
+  const yt = makeLabel(tr(valLabel), { color: TH().titleC }); yt.position.set(0, Y + 2, 0); sceneRoot.add(yt);
 
   // 시간(세로) 눈금 — flatViewport.calendarTicks: 라벨(≤12) + 세부선(≤64) 2단 사다리,
   // DST에도 로컬 자정/정시 유지. label=null 인 세부선은 선만 긋는다(줌 비례로 개수 변동).
@@ -364,7 +365,7 @@ function buildLines(report) {
       if (flat && (p.t < _fw.w0 - flatPad || p.t > _fw.w1 + flatPad)) { flush(); continue; }   // 창 밖 점 스킵(선분 단절)
       if (flat && flatStride > 1 && (pi % flatStride) !== 0) continue;                          // 넓은 창 다운샘플
       const yv = state.y === 'rate' ? (rates ? rates[pi] : null) : (state.y === 'pct' ? levelPct(p) : wattValueOf(p));   // 배터리 %는 정밀도, 전력은 레일+측정방식 설정
-      if (yv == null || !Number.isFinite(yv)) continue;         // skip null/NaN -> no bad vertices
+      if (yv == null || !Number.isFinite(yv)) { flush(); continue; }   // 값 없는 구간(예: 앱 미실행 시 systemW=null)은 선을 끊는다 — 빈 구간을 직선으로 잇지 않음
       const d = dayOfT(p.t);
       if (!flat && curDay !== null && d !== curDay) flush();    // 3D만 자정 분할 (2D는 시간축이 이어짐)
       curDay = d;
@@ -430,7 +431,8 @@ function rebuild() {
   if (state.view === 'flat') buildFlatAxes(yMax, yLabel()); else buildAxes(yMax, yLabel(), maxDay, r.firstT);
   projYMax = yMax; projMaxDay = maxDay; drawProjection3D();   // 방전 예상선(현재→0%) 겹쳐 그리기
   drawNowMarker(r, yMax, maxDay);   // '현재' 위치 점 — 자다 깬 직후에도 지금 잔량을 찍어줌
-  drawIntervalOverlay();            // 구간 전력량 강조 밴드(2D) — 창 팬/줌마다 다시 그림
+  drawIntervalOverlay();            // 구간 전력량 넓이 음영(2D) — 창 팬/줌마다 다시 그림
+  ivRecompute();                    // 그래프 계열이 바뀌면 구간 전력량 결과도 그 계열로 재계산
   syncFlatUI();                     // 2D 전용 UI(기간 세그·미니맵·힌트 문구) 표시/갱신
 
   const cm = COLOR_META[state.color];
@@ -1685,110 +1687,163 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) wake
 window.addEventListener('focus', wakeRefresh);
 
 // ---- UI wiring ----------------------------------------------------------
-// ── 구간 전력량 (interval energy) — 기록된 1분 평균 전력을 임의 구간에서 적분 ────────────────
-// 라이브 "전력량 측정" 세션과 정확도 동일: 각 1분의 에너지 = 평균전력×60초 = ∫W dt. 따라서
-// 구간의 Σ(평균전력·Δt) = ∫W dt. 끝점은 선형보간으로 클립하고, 기록 공백(run 경계)은 제외한다.
-state.intervalSel = null;   // { t0, t1, key } — 선택된 구간(2D 그래프에 밴드로 강조)
-const INTERVAL_SERIES = {
-  balance: { label: '배터리 · 수지', signed: true,  volt: p => p.voltage, fn: p => p.powerW },
-  hybrid:  { label: '배터리 · 혼합', signed: true,  volt: p => p.voltage,
-             fn: p => { const bal = p.powerW; const chg = bal != null ? bal > 0.05 : !!p.charging;
-                        return (!chg && p.ppbrW != null) ? -Math.abs(p.ppbrW) : bal; } },
-  system:  { label: '시스템',        signed: false, volt: () => null,     fn: p => p.systemW },
-  adapter: { label: '어댑터',        signed: false, volt: p => p.dcInV,   fn: p => p.adapterW },
-};
-// integrate one power series over [t0,t1]; returns Wh (+chg/−dis 분해), mAh, 평균W, 유효/공백 시간
-function computeIntervalEnergy(t0, t1, key) {
-  const S = INTERVAL_SERIES[key]; const r = state.report;
-  if (!S || !r || !r.runs || !(t1 > t0)) return null;
-  let ws = 0, wsChg = 0, wsDis = 0, as = 0, effSec = 0;   // watt-seconds / amp-seconds
+// ── 구간 전력량 (interval energy) ────────────────────────────────────────────────────────────
+// 현재 '전력 W' 그래프가 그리는 바로 그 계열(레일+측정방식 — 수지/ioreg V×I/혼합/시스템/어댑터)을
+// 지정 구간에서 적분한다. 라이브 "전력량 측정"과 정확도 동일(각 1분 에너지 = 평균전력×60초 = ∫W dt).
+// 배터리 게이지 검산(rawCap 쿨롱 델타)도 함께 보여준다. 2D에선 곡선과 0선 사이 '넓이'를 음영으로
+// 칠해 적분을 시각화한다. 끝점은 선형보간으로 클립하고, 값이 없는(예: 앱 미실행) 구간은 제외.
+state.intervalSel = null;   // { t0, t1 } — 선택 구간
+// 현재 그래프의 전력 계열 이름 (Y=watts일 때만 의미). wattValueOf가 실제 적분 대상.
+function ivSeriesLabel() {
+  if (state.y !== 'watts') return null;
+  return state.wattsRail === 'battery' ? `배터리 · ${PM_LABEL[state.powerMethod]}` : WLABEL[state.wattsRail];
+}
+function computeIntervalEnergy(t0, t1) {
+  const r = state.report;
+  if (!r || !r.runs || !(t1 > t0)) return null;
+  const powerOf = state.y === 'watts' ? wattValueOf : null;   // 현재 그래프 계열 (없으면 전력 적분 생략)
+  const signed = isSignedY();
+  let ws = 0, wsChg = 0, wsDis = 0, effSec = 0;               // 전력 적분 (watt-seconds)
+  let gWh = 0, capFirst = null, capLast = null, gEff = 0;     // 게이지 검산 (rawCap 쿨롱)
   for (const run of r.runs) {
     const p = run.points;
     for (let i = 1; i < p.length; i++) {
       const a = p[i - 1], b = p[i];
       const s0 = Math.max(a.t, t0), s1 = Math.min(b.t, t1);
-      if (!(s1 > s0)) continue;                       // pair doesn't overlap the interval
-      const va = S.fn(a), vb = S.fn(b), span = b.t - a.t;
-      if (va == null || vb == null || !(span > 0)) continue;
-      const wAt = tt => va + (vb - va) * ((tt - a.t) / span);   // 전력 선형보간
-      const w0 = wAt(s0), w1 = wAt(s1), dt = s1 - s0;
-      const area = (w0 + w1) / 2 * dt; ws += area;
-      if (area >= 0) wsChg += area; else wsDis += -area;
-      effSec += dt;
-      const Va = S.volt(a), Vb = S.volt(b);           // mAh: ∫(W/V) dt (배터리/어댑터 전압)
-      if (Va > 0 && Vb > 0) {
-        const vAt = tt => Va + (Vb - Va) * ((tt - a.t) / span);
-        as += (w0 / vAt(s0) + w1 / vAt(s1)) / 2 * dt;
+      if (!(s1 > s0)) continue;
+      const span = b.t - a.t; if (!(span > 0)) continue;
+      const f0 = (s0 - a.t) / span, f1 = (s1 - a.t) / span, dt = s1 - s0;
+      const ip = (va, vb) => [va + (vb - va) * f0, va + (vb - va) * f1];
+      if (powerOf) {
+        const va = powerOf(a), vb = powerOf(b);
+        if (va != null && vb != null && Number.isFinite(va) && Number.isFinite(vb)) {
+          const [w0, w1] = ip(va, vb);
+          const area = (w0 + w1) / 2 * dt; ws += area;
+          if (area >= 0) wsChg += area; else wsDis += -area;
+          effSec += dt;
+        }
+      }
+      if (a.rawCap != null && b.rawCap != null && a.voltage > 0 && b.voltage > 0) {
+        const [c0, c1] = ip(a.rawCap, b.rawCap), [v0, v1] = ip(a.voltage, b.voltage);
+        gWh += (c1 - c0) / 1000 * (v0 + v1) / 2;   // Δ전하(Ah)×평균전압 = Wh (방전 시 rawCap↓ → 음수)
+        if (capFirst == null) capFirst = c0;
+        capLast = c1; gEff += dt;
       }
     }
   }
-  return { wh: ws / 3600, whChg: wsChg / 3600, whDis: wsDis / 3600,
-    mah: as ? Math.round(as / 3600 * 1000) : null,
-    avgW: effSec > 0 ? ws / effSec : null, effSec, gapSec: Math.max(0, (t1 - t0) - effSec),
-    signed: S.signed, label: S.label };
+  return {
+    y: state.y, seriesLabel: ivSeriesLabel(), signed,
+    hasPower: !!powerOf && effSec > 0,
+    wh: ws / 3600, whChg: wsChg / 3600, whDis: wsDis / 3600,
+    avgW: effSec > 0 ? ws / effSec : null, effSec,
+    gaugeWh: capFirst != null ? gWh : null,
+    gaugeMah: (capFirst != null && capLast != null) ? Math.round(capLast - capFirst) : null,
+    gaugeSec: gEff,
+    gapSec: Math.max(0, (t1 - t0) - Math.max(effSec, gEff)),
+  };
 }
+// 연도 우선 날짜·시각 (텍스트 입력): "2026/07/12 06:00 PM" — Date.parse가 그대로 해석
 const pad2 = n => String(n).padStart(2, '0');
-const epochToLocalInput = t => { const d = new Date(t * 1000);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
-const localInputToEpoch = s => { const t = Date.parse(s); return Number.isFinite(t) ? Math.floor(t / 1000) : null; };
+function epochToText(t) {
+  const d = new Date(t * 1000); let h = d.getHours(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+  return `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(h)}:${pad2(d.getMinutes())} ${ap}`;
+}
+const textToEpoch = s => { const t = Date.parse((s || '').trim()); return Number.isFinite(t) ? Math.floor(t / 1000) : null; };
 const fmtDurSec = sec => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60);
   return h ? `${h}시간 ${m}분` : `${m}분`; };
-function renderIvResult(res) {
+const sgnW = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
+function renderIvResult(res, t0, t1) {
   const el = document.getElementById('ivResult'); if (!el) return;
-  if (!res) { el.hidden = false; el.innerHTML = `<span class="warn">구간이 올바르지 않거나 데이터가 없어요.</span>`; return; }
-  const sw = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
+  if (!res) { el.hidden = false; el.innerHTML = `<span class="warn">시작/끝 시각이 올바르지 않아요. 예: 2026/07/12 06:00 PM</span>`; return; }
   const rows = [];
-  rows.push(`<div class="big">${res.signed ? sw(res.wh) : res.wh.toFixed(2)}<small>Wh</small></div>`);
-  if (res.mah != null) rows.push(`<div class="row"><span>전하량</span><b>${res.mah.toLocaleString()} mAh</b></div>`);
-  if (res.signed && (res.whChg > 0.005 || res.whDis > 0.005))
-    rows.push(`<div class="row"><span>충전 / 방전</span><b><span class="chg">+${res.whChg.toFixed(2)}</span> / <span class="dis">−${res.whDis.toFixed(2)}</span> Wh</b></div>`);
-  if (res.avgW != null) rows.push(`<div class="row"><span>평균 전력</span><b>${res.signed ? sw(res.avgW) : res.avgW.toFixed(1)} W</b></div>`);
-  rows.push(`<div class="row"><span>유효 시간</span><b>${fmtDurSec(res.effSec)}</b></div>`);
+  rows.push(`<div class="range">${epochToText(t0)} ~ ${epochToText(t1)}</div>`);
+  // 1) 현재 그래프 계열의 전력량
+  if (res.y !== 'watts') {
+    rows.push(`<div class="warn">‘세로축 = 전력 W’로 바꾸면 그 전력의 구간 전력량도 계산해요.</div>`);
+  } else if (res.hasPower) {
+    rows.push(`<div class="serieslbl">${res.seriesLabel}</div>`);
+    rows.push(`<div class="big">${res.signed ? sgnW(res.wh) : res.wh.toFixed(2)}<small>Wh</small></div>`);
+    if (res.signed && (res.whChg > 0.005 || res.whDis > 0.005))
+      rows.push(`<div class="row"><span>충전 / 방전</span><b><span class="chg">+${res.whChg.toFixed(2)}</span> / <span class="dis">−${res.whDis.toFixed(2)}</span> Wh</b></div>`);
+    rows.push(`<div class="row"><span>평균 전력</span><b>${res.signed ? sgnW(res.avgW) : res.avgW.toFixed(1)} W</b></div>`);
+    rows.push(`<div class="row"><span>유효 시간</span><b>${fmtDurSec(res.effSec)}</b></div>`);
+  } else {
+    rows.push(`<div class="warn">이 구간엔 ‘${res.seriesLabel}’ 데이터가 없어요 (앱 미실행 시 시스템·어댑터 전력은 기록되지 않아요).</div>`);
+  }
+  // 2) 배터리 게이지 검산 (항상, 배터리 기록이 있으면)
+  if (res.gaugeMah != null) {
+    rows.push(`<div class="gauge"><span>배터리 게이지 검산</span><b>${sgnW(res.gaugeWh)} Wh · ${res.gaugeMah >= 0 ? '+' : ''}${res.gaugeMah.toLocaleString()} mAh</b></div>`);
+  }
   if (res.gapSec > 90) rows.push(`<div class="warn">이 구간에 기록 공백 ${fmtDurSec(res.gapSec)} — 그 시간은 제외됐어요.</div>`);
-  if (state.view !== 'flat') rows.push(`<div class="warn">2D 시간축 보기로 바꾸면 그래프에 구간이 표시돼요.</div>`);
+  if (state.view !== 'flat') rows.push(`<div class="warn">2D 시간축 보기로 바꾸면 그래프에 넓이가 음영으로 표시돼요.</div>`);
   el.hidden = false; el.innerHTML = rows.join('');
 }
+// 저장된 구간을 현재 그래프 계열로 다시 계산·표시 (rebuild/계열 변경 시 동기화)
+function ivRecompute() {
+  if (!state.intervalSel) return;
+  const { t0, t1 } = state.intervalSel;
+  renderIvResult(computeIntervalEnergy(t0, t1), t0, t1);
+}
 function ivCalc() {
-  const t0 = localInputToEpoch(document.getElementById('ivStart').value);
-  const t1 = localInputToEpoch(document.getElementById('ivEnd').value);
-  const key = document.getElementById('ivSeries').value;
-  const res = (t0 != null && t1 != null && t1 > t0) ? computeIntervalEnergy(t0, t1, key) : null;
-  renderIvResult(res);
-  state.intervalSel = res ? { t0, t1, key } : null;
-  try { localStorage.setItem('battIvSeries', key); } catch { /* ignore */ }
+  const t0 = textToEpoch(document.getElementById('ivStart').value);
+  const t1 = textToEpoch(document.getElementById('ivEnd').value);
+  if (t0 == null || t1 == null || !(t1 > t0)) { state.intervalSel = null; renderIvResult(null); drawIntervalOverlay(); return; }
+  state.intervalSel = { t0, t1 };
+  renderIvResult(computeIntervalEnergy(t0, t1), t0, t1);
   drawIntervalOverlay();
 }
 function ivFillFromView() {
   const sp = flatSpanNow(); const w = state.flatWin ? state.flatWin : { t0: sp.min, t1: sp.max };
-  document.getElementById('ivStart').value = epochToLocalInput(w.t0);
-  document.getElementById('ivEnd').value = epochToLocalInput(Math.min(w.t1, sp.max));
+  document.getElementById('ivStart').value = epochToText(w.t0);
+  document.getElementById('ivEnd').value = epochToText(Math.min(w.t1, sp.max));
 }
-// 2D 시간축에 반투명 밴드 + 양 끝 세로선으로 선택 구간을 표시(창 팬/줌마다 rebuild에서 다시 그림)
+// 2D: 선택 구간에서 현재 계열 곡선과 0선 사이의 '넓이'를 음영으로(= 적분 시각화). 창 팬/줌마다 재렌더.
+function pushArea(pos, x0, y0, x1, y1, base) {
+  pos.push(x0, base, 0.01, x0, y0, 0.01, x1, y1, 0.01);
+  pos.push(x0, base, 0.01, x1, y1, 0.01, x1, base, 0.01);
+}
 function drawIntervalOverlay() {
   disposeGroup(intervalGroup);
-  intervalGroup.visible = state.view === 'flat' && !!state.intervalSel;
+  intervalGroup.visible = state.view === 'flat' && !!state.intervalSel && !!state.report;
   if (!intervalGroup.visible) return;
   const a = Math.max(state.intervalSel.t0, _fw.w0), b = Math.min(state.intervalSel.t1, _fw.w1);
   if (!(b > a)) return;   // 선택 구간이 현재 창 밖
-  const x0 = xFlat(a), x1 = xFlat(b), yBot = -0.5, yTop = Y + 0.5;
-  const plane = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, yTop - yBot),
-    new THREE.MeshBasicMaterial({ color: 0x4dd0c0, transparent: true, opacity: 0.13, depthWrite: false, side: THREE.DoubleSide }));
-  plane.position.set((x0 + x1) / 2, (yBot + yTop) / 2, 0.02); intervalGroup.add(plane);
-  for (const [x, edge] of [[x0, state.intervalSel.t0 >= _fw.w0], [x1, state.intervalSel.t1 <= _fw.w1]]) {
-    if (!edge) continue;   // 창에 의해 잘린 끝은 선을 긋지 않음
-    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, yBot, 0.03), new THREE.Vector3(x, yTop, 0.03)]);
+  const yMax = projYMax || 1;
+  if (state.y === 'watts') {   // 곡선 아래 넓이(적분) 음영
+    const base = yFromVal(0, yMax), pos = [];
+    for (const run of state.report.runs) {
+      const p = run.points;
+      for (let i = 1; i < p.length; i++) {
+        const pa = p[i - 1], pb = p[i];
+        const s0 = Math.max(pa.t, a), s1 = Math.min(pb.t, b);
+        if (!(s1 > s0)) continue;
+        const va = wattValueOf(pa), vb = wattValueOf(pb), span = pb.t - pa.t;
+        if (va == null || vb == null || !Number.isFinite(va) || !Number.isFinite(vb) || !(span > 0)) continue;
+        const f0 = (s0 - pa.t) / span, f1 = (s1 - pa.t) / span;
+        pushArea(pos, xFlat(s0), yFromVal(va + (vb - va) * f0, yMax), xFlat(s1), yFromVal(va + (vb - va) * f1, yMax), base);
+      }
+    }
+    if (pos.length) {
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      intervalGroup.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x4dd0c0, transparent: true, opacity: 0.24, side: THREE.DoubleSide, depthWrite: false })));
+    }
+  } else {   // 비-전력 보기: 선택 구간을 옅은 밴드로만
+    const x0 = xFlat(a), x1 = xFlat(b);
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, Y + 1), new THREE.MeshBasicMaterial({ color: 0x4dd0c0, transparent: true, opacity: 0.10, depthWrite: false, side: THREE.DoubleSide }));
+    plane.position.set((x0 + x1) / 2, Y / 2, 0.02); intervalGroup.add(plane);
+  }
+  for (const [x, edge] of [[xFlat(a), state.intervalSel.t0 >= _fw.w0], [xFlat(b), state.intervalSel.t1 <= _fw.w1]]) {
+    if (!edge) continue;
+    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, -0.4, 0.05), new THREE.Vector3(x, Y + 0.4, 0.05)]);
     intervalGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x4dd0c0 })));
   }
 }
 {
-  const sel = document.getElementById('ivSeries');
-  try { const s = localStorage.getItem('battIvSeries'); if (s && INTERVAL_SERIES[s]) sel.value = s; } catch { /* ignore */ }
   document.getElementById('ivCalc').addEventListener('click', ivCalc);
   document.getElementById('ivNow').addEventListener('click', ivFillFromView);
   document.getElementById('ivClear').addEventListener('click', () => {
     state.intervalSel = null; document.getElementById('ivResult').hidden = true; drawIntervalOverlay();
   });
-  sel.addEventListener('change', () => { if (state.intervalSel) ivCalc(); });   // 계열 바꾸면 즉시 재계산
 }
 
 document.querySelectorAll('.seg').forEach(seg => {
