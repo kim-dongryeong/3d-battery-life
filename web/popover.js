@@ -395,8 +395,8 @@ function measureHTML() {
     const run = m.state === 'running';
     const rows = [
       ['경과', `${fmtDurS(m.durSec)}${m.gapSec ? ` · 공백 ${fmtDurS(m.gapSec)}` : ''}`],
-      ['외부 입력 <em class="mbadge">센서</em>', `${uW(m.adapterWh)}${m.avgAdapterW != null ? ` · ${m.avgAdapterW.toFixed(1)} W` : ''}`],
-      ['시스템 사용 <em class="mbadge">센서</em>', `${uW(m.systemWh)}${m.avgSystemW != null ? ` · ${m.avgSystemW.toFixed(1)} W` : ''}`],
+      ['외부 입력 <em class="mbadge">센서</em>', `${uW(m.adapterWh)}${m.avgAdapterW != null ? ` · 평균 ${m.avgAdapterW.toFixed(1)} W` : ''}`],
+      ['시스템 사용 <em class="mbadge">센서</em>', `${uW(m.systemWh)}${m.avgSystemW != null ? ` · 평균 ${m.avgSystemW.toFixed(1)} W` : ''}`],
       ['배터리 <em class="mbadge">수지 추정</em>', `${sW(m.balanceWh)}${m.balanceChgWh || m.balanceDisWh ? ` (+${uW(m.balanceChgWh)} / −${uW(m.balanceDisWh)})` : ''}`],
       ['배터리 <em class="mbadge">게이지 검산</em>', `${sW(m.gaugeDeltaWh)}${m.gaugeDeltaMah != null ? ` · ${m.gaugeDeltaMah >= 0 ? '+' : ''}${m.gaugeDeltaMah} mAh` : ''}`],
     ];
