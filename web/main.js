@@ -226,7 +226,7 @@ function buildFlatAxes(valMax, valLabel) {
     const x = xFlat(tk.t);
     if (x < x0 - 0.01 || x > x1 + 0.01) continue;
     sceneRoot.add(axisLine([x, 0, 0], [x, tk.label ? Y : Y * 0.985, 0], tk.major ? TH().gMain : TH().gMinor));
-    if (tk.label) { const s = makeLabel(tk.label, { size: 26, color: TH().tickC }); s.position.set(x, baseY - 1, 0); sceneRoot.add(s); }
+    if (tk.label) { const s = makeLabel(tk.label, { size: 26, color: TH().tickC }); s.position.set(x, -1, 0); sceneRoot.add(s); }   // 날짜 라벨은 항상 플롯 하단(부호축이면 baseY=중앙이라 -1로 고정)
   }
   // 주말 음영: 창 안의 토·일 구간을 옅은 판으로 — 달력 연산으로 하루씩 전진(DST 안전)
   const d = new Date(_fw.w0 * 1000); d.setHours(0, 0, 0, 0);
@@ -243,7 +243,7 @@ function buildFlatAxes(valMax, valLabel) {
     m.position.set((xFlat(a) + xFlat(b)) / 2, Y / 2, -0.05);   // 곡선(z=0)보다 살짝 뒤
     sceneRoot.add(m);
   }
-  const xt = makeLabel(tr('날짜/시간 →'), { color: TH().titleC }); xt.position.set(0, baseY - 2.6, 0); sceneRoot.add(xt);
+  const xt = makeLabel(tr('날짜/시간 →'), { color: TH().titleC }); xt.position.set(0, -2.6, 0); sceneRoot.add(xt);   // 시간축 제목도 항상 플롯 하단(부호축 중앙 아님)
 }
 
 // ---- battery curves (continuous runs: charge + discharge, gap-split) ----
@@ -658,6 +658,16 @@ function renderProjection() {
 // 충전 중(또는 비교 셀렉터 사용 중)에만 보인다. 속도의 출처(이 충전기 이력/비슷한 급/전체 평균)를
 // 배지로 정직하게 표기 — docs/plans/charger-aware-charge-projection.md.
 const TECH_KO = { 'usbc-pd': 'USB-C PD', 'usbc-5v': 'USB-C 5V', usb: 'USB(구형)', dedicated: '전용 어댑터', unknown: '미상' };
+// FamilyCode → 충전 기술 (lib/battery.js adapterTech의 클라이언트 판본). PD 여부 판별에 씀.
+function adapterTechOf(fam) {
+  const f = parseInt(fam, 16);
+  if (!Number.isFinite(f) || f === 0) return null;
+  if (f === 0xE000400A) return 'usbc-pd';
+  if (f === 0xE0004008 || f === 0xE0004009) return 'usbc-5v';
+  if (f >= 0xE0004000 && f <= 0xE0004007) return 'usb';
+  if (f >= 0xE0024000 && f <= 0xE0024009) return 'dedicated';
+  return 'unknown';
+}
 const TIER_KO = { profile: '이 충전기 이력 기준', class: '비슷한 급 충전기 기준', global: '전체 충전 이력 평균' };
 function chargerLabel(key, meta) {
   const m = /^(\d+)W@(\S+?)V\//.exec(key || '');
@@ -1575,7 +1585,11 @@ function powerRowsHTML(p) {
   if (p.ppbrW != null) rows.push(['배터리 · PPBR 방전' + tag('ppbr'), charging ? '충전 중 ~0' : sw(-Math.abs(p.ppbrW), V, V ? -Math.abs(p.ppbrW) / V * 1000 : null, true)]);
   if (p.systemW != null) rows.push(['시스템 PSTR', `${p.systemW.toFixed(1)} W`]);
   if (p.adapterName) rows.push(['어댑터 종류', p.adapterName]);
-  if (p.adapterWnom != null) rows.push(['어댑터 · ioreg 공칭', sw(p.adapterWnom, p.adapterVnom, (p.adapterWnom && p.adapterVnom) ? p.adapterWnom / p.adapterVnom * 1000 : null, false)]);
+  // 충전 기술(PD 여부): FamilyCode가 있으면 정확, 없으면(옛 기록) 협상 전압으로 추정
+  const tech = p.familyCode ? adapterTechOf(p.familyCode) : null;
+  if (tech) rows.push(['충전 기술', TECH_KO[tech] + (tech === 'usbc-5v' ? ' · 비-PD(5V 고정)' : tech === 'usbc-pd' ? ' · PD 협상' : '')]);
+  else if (p.ac && p.adapterVnom != null) rows.push(['충전 기술', p.adapterVnom >= 8 ? `USB-C PD 추정 (${p.adapterVnom.toFixed(0)}V 협상)` : 'USB-C 5V 추정 · 비-PD 가능']);
+  if (p.adapterWnom != null) rows.push(['어댑터 · ioreg 공칭(계약)', sw(p.adapterWnom, p.adapterVnom, (p.adapterWnom && p.adapterVnom) ? p.adapterWnom / p.adapterVnom * 1000 : null, false)]);
   if (p.adapterW != null) rows.push(['어댑터 · SMC 실측 PDTR', sw(p.adapterW, p.dcInV, p.dcInA != null ? p.dcInA * 1000 : null, false)]);
   return rows.map(([k, v]) => `<tr><td class="k">${k}</td><td>${v}</td></tr>`).join('');
 }
@@ -1587,12 +1601,14 @@ function showTip(dayIndex, p, x, y, isPinned) {
     <h3>${isPinned ? '📌 ' : ''}${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${dayIndex}일차</h3>
     <div><span class="big">${state.rateLevel === 'pct' ? (p.pct ?? '?') : (p.cap != null ? p.cap.toFixed(1) : (p.pct ?? '?'))}%</span> <span class="tsm">${state.rateLevel === 'pct' ? (p.cap != null ? `정밀 ${p.cap.toFixed(1)}%` : '') : `정수 ${p.pct ?? '?'}%`}</span> &nbsp; ${st}</div>
     <table>
+      ${p.rawCap != null ? `<tr><td class="k">원시 용량 <small class="tsm">rawCap</small></td><td>${p.rawCap.toLocaleString()}${p.rawMax ? ` / ${p.rawMax.toLocaleString()}` : ''} mAh</td></tr>` : ''}
       ${state.y === 'rate' && p._rate != null ? `<tr><td class="k">변화율 <small class="tsm">과거 ${Math.round(state.rateWin / 60)}분 평균</small></td><td>${p._rate >= 0 ? '+' : ''}${p._rate.toFixed(3)} %/min</td></tr>` : ''}
       ${powerRowsHTML(p)}
       <tr><td class="k">배터리 온도</td><td>${p.tempC ?? '?'}°C</td></tr>
       <tr><td class="k">CPU 부하</td><td>${p.loadPct ?? '?'}%</td></tr>
       ${p.lowPower != null ? `<tr><td class="k">저전력</td><td>${p.lowPower ? '🟡 켜짐' : '꺼짐'}</td></tr>` : ''}
-    </table>`;
+    </table>
+    <div class="tipmethod">📐 <b>전력값(SMC PSTR·PDTR·PPBR)</b>은 0.5초 표본을 적분한 <b>지난 1분 평균</b> · <b>잔량(ioreg rawCap·전압·%)</b>은 ~60초 갱신값 <span class="tsm">(자세한 측정 방식은 상단 ?안내)</span></div>`;
   tip.hidden = false;
   positionTip(x, y);
 }

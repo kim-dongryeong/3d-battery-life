@@ -37,6 +37,26 @@
     <p>1분마다 <code>ioreg</code>로 배터리를 기록합니다. 분석은 <b>방전 구간</b>(충전기 분리 <code>ac=false</code>, 잔량 단조 감소, 인접 샘플 간격 ≤ 2분)만 사용합니다. 인접 두 샘플 사이는 <b>직선</b>으로 보고(당신이 제안한 가정), <b>1% 및 날짜 경계</b>로 잘게 잘라 각 <code>(날짜, 10%구간)</code> 칸에 <b>하락(Δ%)·시간·에너지(W·s)</b>를 누적합니다. 이 "잘라서 누적(clipped interval accumulation)"이 모든 계산의 토대입니다.</p>
     <p class="note">보고 게이트: 한 칸을 표시하려면 그 칸에 <b>관측 ≥ 10분 &amp; 총하락 ≥ 2%p &amp; 구간 ≥ 3개</b>. 미달이면 "데이터 부족"으로 비웁니다(적은 데이터가 가짜 추세를 만들지 않도록).</p>
 
+    <h2 id="measure">📐 측정 소스와 갱신 주기 — 왜 이 앱이 더 정확한가</h2>
+    <p>측정값은 성격이 다른 <b>두 소스</b>에서 옵니다. <b>전력</b>은 <code>SMC</code>에서 <b>~1초(≈1Hz)</b>로 실시간 갱신되고, <b>잔량</b>은 <code>ioreg</code>에서 <b>~60초</b>로 갱신됩니다. 이 앱은 SMC를 <b>0.5초마다</b> 표본하여 <b>지난 1분간을 시간가중으로 적분한 평균 전력(∫W dt / 60초)</b>을 기록합니다 — 한순간의 튐이 1분을 왜곡하지 않아, 순간값 하나만 읽는 다른 앱보다 정확합니다. (SMC가 ~1Hz라 2초 폴링은 값을 놓칠 수 있어 0.5초로 촘촘히 표본합니다.)</p>
+    <table>
+      <tr><td><b>값</b></td><td><b>소스</b></td><td><b>단위 / 해상도</b></td><td><b>갱신 주기</b></td></tr>
+      <tr><td><code>systemW</code> (PSTR)</td><td>SMC</td><td>W (~0.01)</td><td><b>~1초</b></td></tr>
+      <tr><td><code>adapterW</code> (PDTR)</td><td>SMC</td><td>W</td><td><b>~1초</b></td></tr>
+      <tr><td><code>batteryW</code> 방전 (PPBR)</td><td>SMC</td><td>W</td><td><b>~1초</b></td></tr>
+      <tr><td><code>dcInV</code> (VD0R)</td><td>SMC</td><td>V</td><td><b>~1초</b></td></tr>
+      <tr><td><code>dcInA</code> (ID0R)</td><td>SMC</td><td>A</td><td><b>~1초</b></td></tr>
+      <tr><td><code>tempC</code> (TB0T/1T/2T)</td><td>SMC</td><td>°C</td><td><b>~1초</b></td></tr>
+      <tr><td><code>voltage</code></td><td>ioreg</td><td>mV→V</td><td>~60초</td></tr>
+      <tr><td><code>amperage</code></td><td>ioreg</td><td>mA (부호)</td><td>~60초</td></tr>
+      <tr><td><code>rawCap</code></td><td>ioreg</td><td>mAh 정수</td><td>~60초</td></tr>
+      <tr><td><code>rawMax</code></td><td>ioreg</td><td>mAh 정수</td><td>~60초 (거의 불변)</td></tr>
+      <tr><td>design (설계용량)</td><td>ioreg</td><td>mAh</td><td>공장 고정값</td></tr>
+      <tr><td><code>pct</code> (표시 %)</td><td>ioreg</td><td>% 정수</td><td>~60초</td></tr>
+      <tr><td>cycles·health·ExternalConnected·<br>IsCharging·TimeRemaining·어댑터 정격W</td><td>ioreg</td><td>—</td><td>~60초</td></tr>
+    </table>
+    <p class="note"><b>전력 W 그래프·툴팁·구간 전력량</b>의 전력값은 모두 이 <b>0.5초 표본의 지난 1분 평균</b>입니다. 잔량·전압·%는 배터리 게이지 IC가 ~60초로 갱신하므로 그 주기로 기록합니다. <code>rawCap</code>은 정수 mAh라 실제 해상도가 <b>1 mAh ≈ 0.022%</b>(rawMax ≈ 4600 기준) — macOS 정수 %(1% 계단)보다 약 46배 촘촘해, 잔량 변화율(%/min) 곡선이 매끈하고 정밀합니다.</p>
+
     <h2>1. 지표: 속도(%/min) vs 노화(Wh/%)</h2>
     <p>둘은 <b>다른 질문</b>에 답합니다.</p>
     <h3>속도 — <code>%/min</code> (음수 = 방전)</h3>
