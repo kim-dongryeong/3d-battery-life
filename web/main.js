@@ -1509,7 +1509,7 @@ renderer.domElement.addEventListener('wheel', e => {
   // (종전엔 deltaY≈0이 "줌 인"으로 처리돼 가로 스크롤이 줌+이동처럼 보였음)
   if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
     const w = state.flatWin ? { ...state.flatWin } : { t0: sp.min, t1: sp.max };
-    const dt = e.deltaX * unit / innerWidth * (w.t1 - w.t0) * 1.17;
+    const dt = e.deltaX * unit / innerWidth * (w.t1 - w.t0) * _flatK;   // _flatK = 화면 폭에 보이는 창 비율
     applyFlatWin(FV.normalizeWindow({ t0: w.t0 + dt, t1: w.t1 + dt }, sp));
     return;
   }
@@ -1529,8 +1529,8 @@ addEventListener('pointermove', e => {
   const dx = e.clientX - flatDrag.x;
   if (Math.abs(dx) > 3) flatDrag.moved = true;
   if (!flatDrag.moved) return;
-  // 1.06 = fitFlatCamera의 가로 여유 — 화면 px → 시간의 환산에 반영
-  const dt = -dx / innerWidth * (flatDrag.t1 - flatDrag.t0) * 1.06;
+  // _flatK = fitFlatCamera가 계산한 화면 폭 대비 가시 월드 비율 — 화면 px → 시간의 환산에 반영
+  const dt = -dx / innerWidth * (flatDrag.t1 - flatDrag.t0) * _flatK;
   applyFlatWin(FV.normalizeWindow({ t0: flatDrag.t0 + dt, t1: flatDrag.t1 + dt }, flatSpanNow()));
 });
 addEventListener('pointerup', () => { flatDrag = null; });
@@ -1800,13 +1800,40 @@ function setView(v) {
   else { controls.enabled = true; camera.position.copy(HOME).multiplyScalar(0.6 + 0.4 * state.xScale); controls.target.copy(LOOK); }
   rebuild();
 }
-// 정면 카메라: FLAT_W가 화면 가로에 (여유 6%로) 꽉 차는 거리를 fov·종횡비로 계산
+// 정면 카메라: FLAT_W가 좌우 오버레이 패널을 뺀 "빈 가로 구간"에 꽉 차게 거리·x를 계산.
+// (종전엔 창 전체 폭 기준이라 원점·세로축이 왼쪽 패널에, 그래프 오른쪽 끝이 #panel에 가려짐)
+let _flatK = 1.17;   // 화면 전체 폭에 보이는 월드 폭 / FLAT_W — px→시간 환산(팬)이 재사용
+function flatFreeStrip() {
+  // 왼쪽(#hud·#buckets)·오른쪽(#panel) 고정 오버레이가 차지하는 폭을 실측 — 숨김(display:none)은 제외
+  let L = 0, R = 0;
+  for (const id of ['hud', 'buckets']) {
+    const el = document.getElementById(id);
+    if (el && el.offsetParent !== null) L = Math.max(L, el.getBoundingClientRect().right);
+  }
+  const p = document.getElementById('panel');
+  if (p && p.offsetParent !== null) R = Math.max(0, innerWidth - p.getBoundingClientRect().left);
+  L = Math.max(0, L);
+  // 창이 아주 좁아 패널이 화면 대부분을 덮으면 종전 전체-폭 맞춤으로 후퇴 (그래프가 실처럼 눌리는 것 방지)
+  if (innerWidth - L - R < innerWidth * 0.4) return { L: 0, R: 0 };
+  return { L, R };
+}
 function fitFlatCamera() {
   const vFov = camera.fov * Math.PI / 180;
   const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-  const D = (FLAT_W / 2 * 1.17) / Math.tan(hFov / 2);   // 여유 17%: 값 라벨(x0−2.2)·축 제목(x0−4.5)까지 프레임 안에
-  camera.position.set(0, Y / 2, D);
-  camera.lookAt(0, Y / 2, 0);
+  const { L, R } = flatFreeStrip();
+  const W = Math.max(1, innerWidth);
+  // 여유 17%: 값 라벨(x0−2.2)·축 제목(x0−4.5)까지 빈 구간 안에 — 빈 구간 기준으로 전체 가시 폭을 역산
+  const Vw = FLAT_W * 1.17 * W / Math.max(1, W - L - R);
+  _flatK = Vw / FLAT_W;
+  const D = (Vw / 2) / Math.tan(hFov / 2);
+  const cx = (R - L) / 2 * Vw / W;   // 월드 x=0(그래프 중앙)이 빈 구간의 중앙에 오도록 카메라를 평행 이동
+  camera.position.set(cx, Y / 2, D);
+  camera.lookAt(cx, Y / 2, 0);
+}
+// 패널 접기/펼치기·내용 변화로 오버레이 폭이 바뀌면 빈 구간이 달라진다 → 카메라만 다시 맞춤
+if (typeof ResizeObserver !== 'undefined') {
+  const ro = new ResizeObserver(() => { if (state.view === 'flat') fitFlatCamera(); });
+  for (const id of ['hud', 'buckets', 'panel']) { const el = document.getElementById(id); if (el) ro.observe(el); }
 }
 function applyFlatRange(v) {
   applyFlatWin(FV.presetWindow(v, state.flatWin, flatSpanNow()));
