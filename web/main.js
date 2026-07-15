@@ -1742,13 +1742,16 @@ function computeIntervalEnergy(t0, t1) {
     gapSec: Math.max(0, (t1 - t0) - Math.max(effSec, gEff)),
   };
 }
-// 연도 우선 날짜·시각 (텍스트 입력): "2026/07/12 06:00 PM" — Date.parse가 그대로 해석
 const pad2 = n => String(n).padStart(2, '0');
+// datetime-local 입력값 ↔ epoch (달력 피커 유지). value 는 "YYYY-MM-DDTHH:MM"(로컬).
+const epochToInput = t => { const d = new Date(t * 1000);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const inputToEpoch = v => { const t = new Date(v).getTime(); return Number.isFinite(t) ? Math.floor(t / 1000) : null; };
+// 결과에 보여줄 연도 우선 표기: "2026/07/12 06:00 PM"
 function epochToText(t) {
   const d = new Date(t * 1000); let h = d.getHours(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
   return `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(h)}:${pad2(d.getMinutes())} ${ap}`;
 }
-const textToEpoch = s => { const t = Date.parse((s || '').trim()); return Number.isFinite(t) ? Math.floor(t / 1000) : null; };
 const fmtDurSec = sec => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60);
   return h ? `${h}시간 ${m}분` : `${m}분`; };
 const sgnW = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
@@ -1775,7 +1778,6 @@ function renderIvResult(res, t0, t1) {
     rows.push(`<div class="gauge"><span>배터리 게이지 검산</span><b>${sgnW(res.gaugeWh)} Wh · ${res.gaugeMah >= 0 ? '+' : ''}${res.gaugeMah.toLocaleString()} mAh</b></div>`);
   }
   if (res.gapSec > 90) rows.push(`<div class="warn">이 구간에 기록 공백 ${fmtDurSec(res.gapSec)} — 그 시간은 제외됐어요.</div>`);
-  if (state.view !== 'flat') rows.push(`<div class="warn">2D 시간축 보기로 바꾸면 그래프에 넓이가 음영으로 표시돼요.</div>`);
   el.hidden = false; el.innerHTML = rows.join('');
 }
 // 저장된 구간을 현재 그래프 계열로 다시 계산·표시 (rebuild/계열 변경 시 동기화)
@@ -1785,8 +1787,8 @@ function ivRecompute() {
   renderIvResult(computeIntervalEnergy(t0, t1), t0, t1);
 }
 function ivCalc() {
-  const t0 = textToEpoch(document.getElementById('ivStart').value);
-  const t1 = textToEpoch(document.getElementById('ivEnd').value);
+  const t0 = inputToEpoch(document.getElementById('ivStart').value);
+  const t1 = inputToEpoch(document.getElementById('ivEnd').value);
   if (t0 == null || t1 == null || !(t1 > t0)) { state.intervalSel = null; renderIvResult(null); drawIntervalOverlay(); return; }
   state.intervalSel = { t0, t1 };
   renderIvResult(computeIntervalEnergy(t0, t1), t0, t1);
@@ -1794,48 +1796,59 @@ function ivCalc() {
 }
 function ivFillFromView() {
   const sp = flatSpanNow(); const w = state.flatWin ? state.flatWin : { t0: sp.min, t1: sp.max };
-  document.getElementById('ivStart').value = epochToText(w.t0);
-  document.getElementById('ivEnd').value = epochToText(Math.min(w.t1, sp.max));
+  document.getElementById('ivStart').value = epochToInput(w.t0);
+  document.getElementById('ivEnd').value = epochToInput(Math.min(w.t1, sp.max));
 }
-// 2D: 선택 구간에서 현재 계열 곡선과 0선 사이의 '넓이'를 음영으로(= 적분 시각화). 창 팬/줌마다 재렌더.
-function pushArea(pos, x0, y0, x1, y1, base) {
-  pos.push(x0, base, 0.01, x0, y0, 0.01, x1, y1, 0.01);
-  pos.push(x0, base, 0.01, x1, y1, 0.01, x1, base, 0.01);
-}
+// 선택 구간에서 현재 계열 곡선과 0선 사이의 '넓이'를 음영으로(= 적분 시각화). 2D·3D 모두 지원.
+// 3D는 가로축이 '하루 중 시각'·깊이축이 '날짜'라, 여러 날에 걸친 구간은 날짜 레이어마다 음영이
+// 나뉘어 그려진다(자정 경계에서 끊음). 계산 자체는 보기와 무관하게 동일하다.
 function drawIntervalOverlay() {
   disposeGroup(intervalGroup);
-  intervalGroup.visible = state.view === 'flat' && !!state.intervalSel && !!state.report;
+  intervalGroup.visible = !!state.intervalSel && !!state.report;
   if (!intervalGroup.visible) return;
-  const a = Math.max(state.intervalSel.t0, _fw.w0), b = Math.min(state.intervalSel.t1, _fw.w1);
-  if (!(b > a)) return;   // 선택 구간이 현재 창 밖
-  const yMax = projYMax || 1;
+  const flat = state.view === 'flat';
+  const t0 = state.intervalSel.t0, t1 = state.intervalSel.t1;
+  const a = flat ? Math.max(t0, _fw.w0) : t0, b = flat ? Math.min(t1, _fw.w1) : t1;
+  if (!(b > a)) return;   // (2D) 선택 구간이 현재 창 밖
+  const yMax = projYMax || 1, base = yFromVal(0, yMax);
+  // 3D 날짜 인덱스: buildLines와 동일하게 report.firstT의 로컬 자정 기준
+  const rf = new Date((state.report.firstT || 0) * 1000); rf.setHours(0, 0, 0, 0);
+  const dayBase = rf.getTime() / 1000, dayOfT = t => Math.floor((t - dayBase) / 86400);
+  const X3 = t => flat ? xFlat(t) : xFromTod(todOf(t));
+  const Z3 = t => flat ? 0 : zFromDay(dayOfT(t), projMaxDay);
   if (state.y === 'watts') {   // 곡선 아래 넓이(적분) 음영
-    const base = yFromVal(0, yMax), pos = [];
+    const pos = [];
     for (const run of state.report.runs) {
       const p = run.points;
       for (let i = 1; i < p.length; i++) {
         const pa = p[i - 1], pb = p[i];
+        if (!flat && dayOfT(pa.t) !== dayOfT(pb.t)) continue;   // 3D: 자정 경계는 잇지 않음
         const s0 = Math.max(pa.t, a), s1 = Math.min(pb.t, b);
         if (!(s1 > s0)) continue;
         const va = wattValueOf(pa), vb = wattValueOf(pb), span = pb.t - pa.t;
         if (va == null || vb == null || !Number.isFinite(va) || !Number.isFinite(vb) || !(span > 0)) continue;
         const f0 = (s0 - pa.t) / span, f1 = (s1 - pa.t) / span;
-        pushArea(pos, xFlat(s0), yFromVal(va + (vb - va) * f0, yMax), xFlat(s1), yFromVal(va + (vb - va) * f1, yMax), base);
+        const y0 = yFromVal(va + (vb - va) * f0, yMax), y1 = yFromVal(va + (vb - va) * f1, yMax);
+        const x0 = X3(s0), x1 = X3(s1), z0 = Z3(s0), z1 = Z3(s1);
+        pos.push(x0, base, z0, x0, y0, z0, x1, y1, z1);   // 곡선과 0선 사이 사각형 → 두 삼각형
+        pos.push(x0, base, z0, x1, y1, z1, x1, base, z1);
       }
     }
     if (pos.length) {
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       intervalGroup.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x4dd0c0, transparent: true, opacity: 0.24, side: THREE.DoubleSide, depthWrite: false })));
     }
-  } else {   // 비-전력 보기: 선택 구간을 옅은 밴드로만
+  } else if (flat) {   // 비-전력 2D 보기: 선택 구간을 옅은 세로 밴드로만
     const x0 = xFlat(a), x1 = xFlat(b);
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, Y + 1), new THREE.MeshBasicMaterial({ color: 0x4dd0c0, transparent: true, opacity: 0.10, depthWrite: false, side: THREE.DoubleSide }));
     plane.position.set((x0 + x1) / 2, Y / 2, 0.02); intervalGroup.add(plane);
   }
-  for (const [x, edge] of [[xFlat(a), state.intervalSel.t0 >= _fw.w0], [xFlat(b), state.intervalSel.t1 <= _fw.w1]]) {
-    if (!edge) continue;
-    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, -0.4, 0.05), new THREE.Vector3(x, Y + 0.4, 0.05)]);
-    intervalGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x4dd0c0 })));
+  if (flat) {   // 2D: 양 끝 세로선 (3D는 자정 wrap이라 단일 세로선이 모호해 생략)
+    for (const [x, edge] of [[xFlat(a), t0 >= _fw.w0], [xFlat(b), t1 <= _fw.w1]]) {
+      if (!edge) continue;
+      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, -0.4, 0.05), new THREE.Vector3(x, Y + 0.4, 0.05)]);
+      intervalGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x4dd0c0 })));
+    }
   }
 }
 {
