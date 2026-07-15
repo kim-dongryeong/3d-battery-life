@@ -129,15 +129,18 @@ function coulombTick() {
 }
 function measureTimersStart() {
   if (mTick) return;
+  // Poll at 250ms so EVERY ~0.5s SMC publish is integrated (dedup by seq), not just one per 2s —
+  // energy must use every 0.5s sample even though the popover UI refreshes on its own slower cadence.
   mTick = setInterval(() => {
     if (!mSt || mSt.state !== 'running') return;
     const smc = readLiveSMC();
     // stale/missing publisher: no acceptSample call — the next unique sample's monoMs delta
     // exceeds GAP_SEC and lib/measure.js records the whole silence as one coalesced gap.
+    // acceptSample dedups by seq, so reading faster than the publish rate is harmless (dups skipped).
     if (smc) measure.acceptSample(mSt, smc);
     const now = Date.now();
     if (now >= (mSt.nextPersistAt || 0)) { mSt.nextPersistAt = now + measure.PERSIST_MS; measurePersist(); }
-  }, 2000);
+  }, 250);
   mCoul = setInterval(coulombTick, 60_000);
 }
 function measureTimersStop() { clearInterval(mTick); clearInterval(mCoul); mTick = mCoul = null; }
