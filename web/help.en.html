@@ -37,6 +37,26 @@
     <p>Every minute the battery is recorded with <code>ioreg</code>. Analysis uses only <b>discharge spans</b> (charger unplugged <code>ac=false</code>, level monotonically decreasing, adjacent-sample gap ≤ 2 min). Between two adjacent samples we assume a <b>straight line</b> (your proposed assumption), and slice finely at <b>1% and date boundaries</b>, accumulating <b>drop (Δ%) · time · energy (W·s)</b> into each <code>(date, 10% band)</code> cell. This "clipped interval accumulation" is the foundation of every calculation.</p>
     <p class="note">Reporting gate: to show a cell it needs <b>observed ≥ 10 min &amp; total drop ≥ 2%p &amp; ≥ 3 bands</b>. Below that it's emptied as "insufficient data" (so little data can't fabricate a fake trend).</p>
 
+    <h2 id="measure">📐 Measurement sources &amp; refresh rates — why this app is more accurate</h2>
+    <p>Values come from <b>two sources</b> of different character. <b>Power</b> updates in real time from the <code>SMC</code> at <b>~1 s (≈1 Hz)</b>; <b>charge level</b> updates from <code>ioreg</code> at <b>~60 s</b>. This app samples the SMC <b>every 0.5 s</b> and records the <b>time-weighted average power over the last minute (∫W dt / 60 s)</b> — so a brief spike can't distort a whole minute, making it more accurate than apps that read a single instantaneous value. (Because the SMC is ~1 Hz, a 2 s poll can miss values, so we sample densely at 0.5 s.)</p>
+    <table>
+      <tr><td><b>Value</b></td><td><b>Source</b></td><td><b>Unit / resolution</b></td><td><b>Refresh</b></td></tr>
+      <tr><td><code>systemW</code> (PSTR)</td><td>SMC</td><td>W (~0.01)</td><td><b>~1 s</b></td></tr>
+      <tr><td><code>adapterW</code> (PDTR)</td><td>SMC</td><td>W</td><td><b>~1 s</b></td></tr>
+      <tr><td><code>batteryW</code> discharge (PPBR)</td><td>SMC</td><td>W</td><td><b>~1 s</b></td></tr>
+      <tr><td><code>dcInV</code> (VD0R)</td><td>SMC</td><td>V</td><td><b>~1 s</b></td></tr>
+      <tr><td><code>dcInA</code> (ID0R)</td><td>SMC</td><td>A</td><td><b>~1 s</b></td></tr>
+      <tr><td><code>tempC</code> (TB0T/1T/2T)</td><td>SMC</td><td>°C</td><td><b>~1 s</b></td></tr>
+      <tr><td><code>voltage</code></td><td>ioreg</td><td>mV→V</td><td>~60 s</td></tr>
+      <tr><td><code>amperage</code></td><td>ioreg</td><td>mA (signed)</td><td>~60 s</td></tr>
+      <tr><td><code>rawCap</code></td><td>ioreg</td><td>mAh integer</td><td>~60 s</td></tr>
+      <tr><td><code>rawMax</code></td><td>ioreg</td><td>mAh integer</td><td>~60 s (nearly constant)</td></tr>
+      <tr><td>design (design capacity)</td><td>ioreg</td><td>mAh</td><td>factory constant</td></tr>
+      <tr><td><code>pct</code> (displayed %)</td><td>ioreg</td><td>% integer</td><td>~60 s</td></tr>
+      <tr><td>cycles·health·ExternalConnected·<br>IsCharging·TimeRemaining·adapter rated W</td><td>ioreg</td><td>—</td><td>~60 s</td></tr>
+    </table>
+    <p class="note">The power values in the <b>power-W graph, tooltip and interval-energy</b> tool are all this <b>0.5 s-sampled, last-minute average</b>. Charge level, voltage and % are refreshed by the battery's gauge IC at ~60 s, so they're recorded at that cadence. <code>rawCap</code> is an integer mAh, so its true resolution is <b>1 mAh ≈ 0.022%</b> (rawMax ≈ 4600) — about 46× finer than macOS's integer % (1% steps), which is what makes the level-change (%/min) curve smooth and precise.</p>
+
     <h2>1. Metrics: speed (%/min) vs aging (Wh/%)</h2>
     <p>They answer <b>different questions</b>.</p>
     <h3>Speed — <code>%/min</code> (negative = discharge)</h3>

@@ -1585,6 +1585,8 @@ function powerRowsHTML(p) {
   if (p.ppbrW != null) rows.push(['배터리 · PPBR 방전' + tag('ppbr'), charging ? '충전 중 ~0' : sw(-Math.abs(p.ppbrW), V, V ? -Math.abs(p.ppbrW) / V * 1000 : null, true)]);
   if (p.systemW != null) rows.push(['시스템 PSTR', `${p.systemW.toFixed(1)} W`]);
   if (p.adapterName) rows.push(['어댑터 종류', p.adapterName]);
+  // 어댑터가 연결됐는데 이름이 없으면(일반 충전기) — macOS는 제조사/모델/시리얼을 안 줌. 그것도 하나의 정보.
+  else if (p.ac && (p.adapterWnom != null || p.adapterW != null)) rows.push(['어댑터 식별', '제조사·모델명·시리얼 없음 · Apple 인증(MFi) 아님']);
   // 충전 기술(PD 여부): FamilyCode가 있으면 정확, 없으면(옛 기록) 협상 전압으로 추정
   const tech = p.familyCode ? adapterTechOf(p.familyCode) : null;
   if (tech) rows.push(['충전 기술', TECH_KO[tech] + (tech === 'usbc-5v' ? ' · 비-PD(5V 고정)' : tech === 'usbc-pd' ? ' · PD 협상' : '')]);
