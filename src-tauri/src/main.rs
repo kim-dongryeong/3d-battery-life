@@ -145,6 +145,49 @@ fn fmt_eta(min: Option<i64>) -> String {
     }
 }
 
+// Read the SMC once, push into the rolling 60s window, and publish live-smc.json with BOTH the
+// instantaneous values AND TIME-WEIGHTED 1-minute averages (∫W dt / span, trapezoidal) for the
+// recorder. Called at ~0.5s cadence so the recorded 1-min average power captures every ~1Hz SMC
+// update (2s used to undersample). Returns the latest instantaneous (sysW, adpW, batW/PPBR, temp).
+fn sample_smc(
+    smc: &Option<smc::Smc>,
+    pwin: &mut Vec<(u64, f64, f64, f64)>,
+    smc_seq: &mut u64,
+    t0: &std::time::Instant,
+) -> (Option<f64>, Option<f64>, Option<f64>, Option<f64>) {
+    let s = match smc { Some(s) => s, None => return (None, None, None, None) };
+    let sys_w = s.system_watts();
+    let adp_w = s.adapter_watts();
+    let bat_w = s.battery_watts();
+    let temp = s.battery_temp_c();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    if let (Some(sw), Some(aw), Some(bw)) = (sys_w, adp_w, bat_w) { pwin.push((now, sw, aw, bw)); }
+    pwin.retain(|(t, ..)| now.saturating_sub(*t) <= 60);
+    // trapezoidal ∫W dt / span over the window — a true time-weighted 1-min mean (was a plain sum/n).
+    let (mut asys, mut aadp, mut abat, mut span) = (0.0, 0.0, 0.0, 0.0);
+    for w in pwin.windows(2) {
+        let dt = w[1].0.saturating_sub(w[0].0) as f64;
+        if dt <= 0.0 { continue; }
+        asys += (w[0].1 + w[1].1) / 2.0 * dt;
+        aadp += (w[0].2 + w[1].2) / 2.0 * dt;
+        abat += (w[0].3 + w[1].3) / 2.0 * dt;
+        span += dt;
+    }
+    let last = pwin.last().copied();
+    let av_sys = if span > 0.0 { Some(asys / span) } else { last.map(|x| x.1) };
+    let av_adp = if span > 0.0 { Some(aadp / span) } else { last.map(|x| x.2) };
+    let av_bat = if span > 0.0 { Some(abat / span) } else { last.map(|x| x.3) };
+    let f = |o: Option<f64>| o.map(|v| format!("{:.3}", v)).unwrap_or_else(|| "null".into());
+    *smc_seq += 1;
+    let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+    let mono_ms = t0.elapsed().as_millis() as u64;
+    let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"batteryW\":{},\"systemWAvg\":{},\"adapterWAvg\":{},\"batteryWAvg\":{},\"dcInV\":{},\"dcInA\":{},\"at\":{},\"seq\":{},\"sampleAtMs\":{},\"monoMs\":{}}}",
+        f(temp), f(sys_w), f(adp_w), f(bat_w), f(av_sys), f(av_adp), f(av_bat), f(s.dc_in_volts()), f(s.dc_in_amps()), now, *smc_seq, now_ms, mono_ms);
+    let (tmp, fin) = (data_dir().join("live-smc.json.tmp"), data_dir().join("live-smc.json"));
+    if std::fs::write(&tmp, j).is_ok() { let _ = std::fs::rename(&tmp, &fin); }
+    (sys_w, adp_w, bat_w, temp)
+}
+
 fn notify_check(l: &live::Live, cfg: &live::Cfg, low: &mut bool, crit: &mut bool, high: &mut bool) {
     let pct = l.pct.round() as i64;
     let eta = fmt_eta(l.time_min);
@@ -353,32 +396,9 @@ fn main() {
                             }
                             sc_on = c.shortcut;
                         }
-                        // read SMC once per tick: feeds both the live-smc.json bridge and the menu-bar W.
-                        let (mut sys_w, mut adp_smc, mut ppbr_smc, mut temp_smc) = (None, None, None, None);
-                        if let Some(ref s) = smc {
-                            sys_w = s.system_watts();
-                            temp_smc = s.battery_temp_c();
-                            let (adp_w, bat_w) = (s.adapter_watts(), s.battery_watts());
-                            adp_smc = adp_w; ppbr_smc = bat_w;
-                            let f = |o: Option<f64>| o.map(|v| format!("{:.3}", v)).unwrap_or_else(|| "null".into());
-                            let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-                            // accumulate a rolling 60s window so the recorder can log the minute's AVERAGE power
-                            // (∫W dt / 60s) instead of a single instant — a 0.1s spike no longer skews a whole minute.
-                            if let (Some(sw), Some(aw), Some(bw)) = (sys_w, adp_w, bat_w) { pwin.push((now, sw, aw, bw)); }
-                            pwin.retain(|(t, ..)| now.saturating_sub(*t) <= 60);
-                            let (mut ss, mut sa, mut sb) = (0.0, 0.0, 0.0);
-                            for (_, sw, aw, bw) in &pwin { ss += sw; sa += aw; sb += bw; }
-                            let n = pwin.len() as f64;
-                            let av = |sum: f64| if n > 0.0 { Some(sum / n) } else { None };
-                            smc_seq += 1;
-                            let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-                            let mono_ms = t0.elapsed().as_millis() as u64;
-                            let j = format!("{{\"tempC\":{},\"systemW\":{},\"adapterW\":{},\"batteryW\":{},\"systemWAvg\":{},\"adapterWAvg\":{},\"batteryWAvg\":{},\"dcInV\":{},\"dcInA\":{},\"at\":{},\"seq\":{},\"sampleAtMs\":{},\"monoMs\":{}}}",
-                                f(s.battery_temp_c()), f(sys_w), f(adp_w), f(bat_w), f(av(ss)), f(av(sa)), f(av(sb)), f(s.dc_in_volts()), f(s.dc_in_amps()), now, smc_seq, now_ms, mono_ms);
-                            // atomic publish (tmp+rename): a reader must never see a torn/partial JSON
-                            let (tmp, fin) = (data_dir().join("live-smc.json.tmp"), data_dir().join("live-smc.json"));
-                            if std::fs::write(&tmp, j).is_ok() { let _ = std::fs::rename(&tmp, &fin); }
-                        }
+                        // Sample the SMC (also sampled at ~0.5s in the inner poll loop below): seeds the
+                        // menu-bar W and the 60s window; publishes the bridge with time-weighted 1-min avgs.
+                        let (sys_w, adp_smc, ppbr_smc, temp_smc) = sample_smc(&smc, &mut pwin, &mut smc_seq, &t0);
                         // battery W for the WIDGET/title — 혼합 method (viewer의 '혼합'): 방전 → SMC PPBR
                         // 실측(매 틱 갱신, 음수), 그 외 → 수지(어댑터−시스템, 충전 시 양수). ioreg 셀 실측
                         // (l.watts)은 ~60초 양자화라 SMC가 없을 때의 폴백으로만 쓴다.
@@ -424,11 +444,13 @@ fn main() {
                             last_pv_key = pv_key;
                             live::write_preview(&data_dir(), &l, lpm);
                         }
-                        // ~2s cadence for the continuously-changing values (W/temp), but break early
-                        // when IOKit signals a power-source change so plug/unplug reflects near-instantly.
-                        // Also poll for popover overflow actions here so they respond within ~250ms.
-                        for _ in 0..8 {
+                        // ~2s tray-redraw cadence, but SAMPLE THE SMC every ~0.5s (i%2==1 → +500/1000/1500/2000ms;
+                        // combined with the tick-top sample = 0.5s) so the 60s window — and thus the recorded
+                        // 1-min average power — captures every ~1Hz SMC update. Also poll popover actions each
+                        // 250ms for fast response, and break early on a power-source change (plug/unplug).
+                        for i in 0..8 {
                             std::thread::sleep(std::time::Duration::from_millis(250));
+                            if i % 2 == 1 { let _ = sample_smc(&smc, &mut pwin, &mut smc_seq, &t0); }
                             let af = data_dir().join("action");
                             if let Ok(a) = std::fs::read_to_string(&af) {
                                 let _ = std::fs::remove_file(&af);
