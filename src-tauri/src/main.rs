@@ -425,7 +425,7 @@ fn main() {
                             let key = format!("{}-{}-{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco, c.bolt_style, wkey);
                             if l.ok && key != last_key {
                                 last_key = key;
-                                match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat, c.bold_bolt()) {
+                                match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat, c.bold_bolt(), c.chg_mode(), c.small_unit) {
                                     Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
                                     None => { let _ = tray.set_icon(None); }   // text-only widget
                                 }
@@ -439,10 +439,10 @@ fn main() {
                         // settings-panel preview bridge: dump the real glyph renders (all styles ×
                         // color/mono × normal/XL) when their inputs change (~every 1% of battery).
                         // cfg toggles need no re-dump — the popover picks the matching variant itself.
-                        let pv_key = format!("{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, lpm);
+                        let pv_key = format!("{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, lpm, c.chg_fill, c.small_unit);
                         if l.ok && pv_key != last_pv_key {
                             last_pv_key = pv_key;
-                            live::write_preview(&data_dir(), &l, lpm);
+                            live::write_preview(&data_dir(), &l, lpm, c.chg_mode(), c.small_unit);
                         }
                         // ~2s tray-redraw cadence, but SAMPLE THE SMC every ~0.5s (i%2==1 → +500/1000/1500/2000ms;
                         // combined with the tick-top sample = 0.5s) so the 60s window — and thus the recorded

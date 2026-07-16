@@ -108,6 +108,11 @@ pub struct Cfg {
     #[serde(default = "d_bolt_style")] pub bolt_style: String, // charging bolt: "classic" | "bold"
     #[serde(default)] pub text_temp: Option<bool>,  // append battery temperature "31°" (SMC, when known)
     #[serde(default)] pub text_adp: Option<bool>,   // append adapter measured power "60.2W" (AC only)
+    // 충전 중 저잔량에서 채움이 번개에 가리는 문제의 표시 방식 (wstack 계열):
+    // "current" 기존 | "waterline" 수위선 | "thermo" 온도계 번개 | "swap" 사이드 스왑
+    // | "outline" 윤곽선 번개(컷아웃 없음) | "badge" 미니 배지 | "hybrid" 윤곽선+온도계
+    #[serde(default = "d_chg_fill")] pub chg_fill: String,
+    #[serde(default)] pub small_unit: bool,         // 전력 단위 W를 작게(아이콘: 실제 축소, 텍스트: ᵂ) — 메뉴바 폭 절약
 }
 
 impl Cfg {
@@ -139,6 +144,13 @@ impl Cfg {
     // widget "wstack": which power feeds the top number
     pub fn w7_battery(&self) -> bool { self.w7_src.as_deref() == Some("bat") }
     pub fn bold_bolt(&self) -> bool { self.bolt_style == "bold" }
+    // chg_fill 문자열 → 렌더 모드 번호 (아이디어 시트의 0~6과 일치)
+    pub fn chg_mode(&self) -> u8 {
+        match self.chg_fill.as_str() {
+            "waterline" => 1, "thermo" => 2, "swap" => 3, "outline" => 4, "badge" => 5, "hybrid" => 6,
+            _ => 0,   // "current"/미지정 → 기존 렌더
+        }
+    }
 }
 fn d_info() -> u8 { 4 }
 fn d_true() -> bool { true }
@@ -146,12 +158,13 @@ fn d_low() -> u8 { 20 }
 fn d_high() -> u8 { 80 }
 fn d_widget() -> String { "icon".into() }
 fn d_bolt_style() -> String { "classic".into() }
+fn d_chg_fill() -> String { "current".into() }
 impl Default for Cfg {
     fn default() -> Self {
         Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: "icon".into(), glyph_xl: false, shortcut: true,
               text_pct: None, text_time: None, text_w: None, w_src: None,   // None → title_items falls back to `info`
               text_w_sys: None, text_w_bat: None, w7_src: None, digit_deco: true, bolt_style: d_bolt_style(),
-              text_temp: None, text_adp: None }
+              text_temp: None, text_adp: None, chg_fill: d_chg_fill(), small_unit: false }
     }
 }
 pub fn cfg_path() -> std::path::PathBuf {
@@ -419,6 +432,24 @@ fn stamp_digits_fit(hi: &mut Hi, text: &str, size: f32, max_w: f32, cx: f32, cy:
     }
     stamp_digits(hi, text, size, cx, cy, c, shadow);
 }
+// Power readout with an optional SMALL trailing unit: "8.4W" → value at full size + "W" at ~58%
+// riding low (subscript-ish). Saves menu-bar width and de-emphasizes the unit. Falls back to the
+// plain one-string stamp when small_unit is off, the text has no W, or no system font is loaded.
+fn stamp_power_fit(hi: &mut Hi, text: &str, size: f32, max_w: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8), shadow: bool, small_unit: bool) {
+    if !small_unit || !text.ends_with('W') { stamp_digits_fit(hi, text, size, max_w, cx, cy, c, shadow); return; }
+    let Some(f) = sys_font() else { stamp_digits_fit(hi, text, size, max_w, cx, cy, c, shadow); return; };
+    let val = &text[..text.len() - 1];
+    let s = hi.s;
+    let wof = |t: &str, sz: f32| t.chars().map(|ch| f.metrics(ch, sz * s).advance_width).sum::<f32>() / s;
+    let (mut vs, mut us, gap) = (size, size * 0.58, 0.5f32);
+    let mut total = wof(val, vs) + gap + wof("W", us);
+    if total > max_w { let k = max_w / total; vs *= k; us *= k; total = max_w; }
+    let vx = cx - total / 2.0 + wof(val, vs) / 2.0;
+    let ux = cx + total / 2.0 - wof("W", us) / 2.0;
+    let ucy = cy + (vs - us) * 0.42;   // 아래 첨자 느낌: 단위가 베이스라인 쪽에 낮게 붙음
+    stamp_digits(hi, val, vs, vx, cy, c, shadow);
+    stamp_digits(hi, "W", us, ux, ucy, c, shadow);
+}
 fn stamp_digits(hi: &mut Hi, text: &str, size: f32, cx: f32, cy: f32, c: (u8, u8, u8, u8), shadow: bool) {
     if sys_font().is_some() {
         if shadow { let _ = stamp_text(hi, text, size, cx, cy + 0.7, DIGIT_SHADOW); }
@@ -530,6 +561,58 @@ fn erase_poly_dilated(hi: &mut Hi, pts: &[(f32, f32)], r: f32, clip: (f32, f32, 
     }
     erase_poly(hi, pts, clip);
 }
+// PAINT a polygon but only inside `clip` — the "온도계 번개": the bolt repainted in the fill color
+// left of the fill edge, so the bolt itself reads as a level gauge while charging.
+fn fill_poly_clip(hi: &mut Hi, pts: &[(f32, f32)], c: (u8, u8, u8, u8), clip: (f32, f32, f32, f32)) {
+    let s = hi.s;
+    let inside_clip = clip_test(s, clip);
+    let p: Vec<(f32, f32)> = pts.iter().map(|&(x, y)| (x * s, y * s)).collect();
+    let (x0, x1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.0), a.1.max(q.0)));
+    let (y0, y1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.1), a.1.max(q.1)));
+    for y in (y0.floor() as i32).max(0)..(y1.ceil() as i32).min(hi.h) {
+        for x in (x0.floor() as i32).max(0)..(x1.ceil() as i32).min(hi.w) {
+            if !inside_clip(x, y) { continue; }
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let mut hit = false;
+            let mut j = p.len() - 1;
+            for i in 0..p.len() {
+                let (xi, yi) = p[i];
+                let (xj, yj) = p[j];
+                if (yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi { hit = !hit; }
+                j = i;
+            }
+            if hit { hi.blend(x, y, c, 1.0); }
+        }
+    }
+}
+// PAINT the round-dilated silhouette of a polygon (same Euclidean-distance math as
+// erase_poly_dilated, but drawing) — a uniform dark OUTLINE ring for the cutout-less bolt modes.
+fn fill_poly_dilated(hi: &mut Hi, pts: &[(f32, f32)], r: f32, c: (u8, u8, u8, u8)) {
+    let s = hi.s;
+    let p: Vec<(f32, f32)> = pts.iter().map(|&(x, y)| (x * s, y * s)).collect();
+    let rr = (r * s).max(0.0);
+    let rr2 = rr * rr;
+    let (x0, x1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.0), a.1.max(q.0)));
+    let (y0, y1) = p.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.1), a.1.max(q.1)));
+    for y in ((y0 - rr).floor() as i32).max(0)..((y1 + rr).ceil() as i32).min(hi.h) {
+        for x in ((x0 - rr).floor() as i32).max(0)..((x1 + rr).ceil() as i32).min(hi.w) {
+            let q = (x as f32 + 0.5, y as f32 + 0.5);
+            let mut within = false;
+            let mut j = p.len() - 1;
+            for i in 0..p.len() {
+                let (a, b) = (p[j], p[i]);
+                let (vx, vy) = (b.0 - a.0, b.1 - a.1);
+                let len2 = vx * vx + vy * vy;
+                let t = if len2 > 0.0 { ((q.0 - a.0) * vx + (q.1 - a.1) * vy) / len2 } else { 0.0 }.clamp(0.0, 1.0);
+                let (dx, dy) = (q.0 - (a.0 + t * vx), q.1 - (a.1 + t * vy));
+                if dx * dx + dy * dy <= rr2 { within = true; break; }
+                j = i;
+            }
+            if within { hi.blend(x, y, c, 1.0); }
+        }
+    }
+    hi.fill_poly(pts, c);   // interior too (the white bolt is drawn over it, leaving only the ring)
+}
 fn erase_rrect(hi: &mut Hi, x0: f32, y0: f32, x1: f32, y1: f32, r: f32, clip: (f32, f32, f32, f32)) {
     let s = hi.s;
     let inside = clip_test(s, clip);
@@ -583,14 +666,14 @@ fn fill_color(l: &Live, colorize: bool, lpm: bool) -> (u8, u8, u8, u8) {
 //   "combo"   → battery FILLED by % + number overlaid + charge status (max info, min width)
 //   "stack"   → % number stacked ABOVE a mini filled battery (narrowest footprint)
 //   _ (icon)  → filled battery + charge status
-pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool, deco: bool, w_val: f64, w_signed: bool, bold_bolt: bool) -> Option<(Vec<u8>, u32, u32)> {
+pub fn menu_icon(l: &Live, colorize: bool, widget: &str, xl: bool, lpm: bool, deco: bool, w_val: f64, w_signed: bool, bold_bolt: bool, chg_mode: u8, small_unit: bool) -> Option<(Vec<u8>, u32, u32)> {
     match widget {
         "text" => None,
         "bar" => Some(bar_glyph(l, colorize, lpm, bold_bolt)),
         "iconpct" => Some(battery_pct_icon(l, colorize, lpm, bold_bolt)),
         "combo" => Some(combo_icon(l, colorize, lpm, bold_bolt)),
         "stack" => Some(stack_icon(l, colorize, lpm, deco, bold_bolt)),
-        "wstack" => Some(wstack_icon(l, colorize, lpm, w_val, w_signed, bold_bolt)),   // widget 7: power on top, level in battery
+        "wstack" => Some(wstack_icon(l, colorize, lpm, w_val, w_signed, bold_bolt, chg_mode, small_unit)),   // widget 7: power on top, level in battery
         _ => Some(battery_icon(l, colorize, xl, lpm, bold_bolt)),
     }
 }
@@ -687,7 +770,7 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool, bold_bolt: bo
 // below FILLED by level with the level % drawn inside it. Charging shows as the green fill (the
 // power number already conveys draw), so no bolt clutters the tight cell. `watt` = the resolved
 // power the ticker passes in (sys or battery per w7_src).
-pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool, bold_bolt: bool) -> (Vec<u8>, u32, u32) {
+pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool, bold_bolt: bool, chg_mode: u8, small_unit: bool) -> (Vec<u8>, u32, u32) {
     // Keep the original width: charge-state artwork must not make this menu-bar item grow sideways.
     let (w, h) = (48u32, 39u32);   // extra height only, for the bolt tips beyond the battery outline
     let mut hi = Hi::new(w, h);
@@ -699,7 +782,7 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
         if w_val.abs() < 0.05 { "0W".into() }
         else { format!("{}{:.1}W", if w_val > 0.0 { "+" } else { "−" }, w_val.abs()) }
     } else { format!("{:.1}W", w_val.max(0.0)) };
-    stamp_digits_fit(&mut hi, &wtxt, 15.5, 46.0, 24.0, 6.6, INK, true);
+    stamp_power_fit(&mut hi, &wtxt, 15.5, 46.0, 24.0, 6.6, INK, true, small_unit);
     // bottom: mini rounded battery, fill by level, with the level % inside (combo-style).
     // Pushed 1px toward the canvas floor so the bolt's tip (and its transparent cutout)
     // clears the power digits above; the clip top guards the digits explicitly.
@@ -709,16 +792,68 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
     hi.stroke_rrect(1.0, 16.0, 45.0, 36.3, 5.0, 2.0, INK);
     hi.fill_rrect(45.5, 22.5, 48.0, 28.5, 1.5, INK);
     let fw = (40.0 * pct as f32 / 100.0).max(2.5);
-    hi.fill_rrect(4.0, 19.0, 4.0 + fw, 33.3, 3.0, fill);
+    let fx = 4.0 + fw;   // fill edge x — 저잔량 가시성 모드들이 참조
+    hi.fill_rrect(4.0, 19.0, fx, 33.3, 3.0, fill);
     // Charging: a tall, slim Stats-style bolt crosses the battery's top/bottom outline. Its 2px
     // transparent cutout includes the fill AND outline, so the white bolt never melts into either.
+    // chg_mode(설정 '충전 표시')가 저잔량에서 채움이 번개에 가리는 문제의 해법을 고른다:
+    // 0 기존 · 1 수위선 · 2 온도계 번개 · 3 사이드 스왑 · 4 윤곽선 · 5 미니 배지 · 6 윤곽선+온도계.
     // Full keeps the compact plug. Neither state is allowed to shrink the level digits.
     const WCLIP: (f32, f32, f32, f32) = (0.0, 13.4, 46.0, 39.0);
-    let ind = if l.charging { 15.5f32 } else if l.full { 12.0 } else { 0.0 };
-    if l.charging { charge_overlay_cut_r(&mut hi, l, digits_bolt_x(8.5, bold_bolt), 26.2, 13.5, 25.2, 2.0, true, bold_bolt, WCLIP); }
-    else if l.full { charge_overlay_cut(&mut hi, l, 10.0, 26.2, 9.0, 14.0, bold_bolt, WCLIP); }
+    const OUTLINE: (u8, u8, u8, u8) = (10, 22, 4, 235);   // 윤곽선 모드의 얇은 어두운 테 (연두 대비)
+    let mut dcx = 23.0f32;   // 잔량 % 중심 — 모드가 번개 배치에 맞춰 조정
+    if l.charging {
+        let cx = digits_bolt_x(8.5, bold_bolt);
+        let pts = bolt_pts(cx, 26.2, 13.5, 25.2, true, bold_bolt);
+        match chg_mode {
+            1 => {   // 수위선: 기존 그대로 + 채움 오른쪽 끝을 밝은 세로선으로 맨 위에 재표시
+                charge_overlay_cut_r(&mut hi, l, cx, 26.2, 13.5, 25.2, 2.0, true, bold_bolt, WCLIP);
+                hi.fill_rrect(fx - 1.4, 18.2, fx + 1.4, 34.1, 1.4, (0, 0, 0, 115));   // 어두운 테
+                hi.fill_rrect(fx - 0.8, 18.8, fx + 0.8, 33.5, 0.8, fill);
+                dcx = (3.0 + 15.5 + 43.0) / 2.0;
+            }
+            2 => {   // 온도계 번개: 컷아웃 유지, 채움 경계 왼쪽의 번개를 채움색으로 재도색
+                charge_overlay_cut_r(&mut hi, l, cx, 26.2, 13.5, 25.2, 2.0, true, bold_bolt, WCLIP);
+                fill_poly_clip(&mut hi, &pts, fill, (0.0, 13.4, fx, 39.0));
+                dcx = (3.0 + 15.5 + 43.0) / 2.0;
+            }
+            3 => {   // 사이드 스왑: 잔량 <50%면 번개가 빈(오른쪽) 영역으로, 숫자는 왼쪽으로
+                if pct < 50.0 {
+                    charge_overlay_cut_r(&mut hi, l, 36.5, 26.2, 13.5, 25.2, 2.0, true, bold_bolt, WCLIP);
+                    dcx = 14.0;
+                } else {
+                    charge_overlay_cut_r(&mut hi, l, cx, 26.2, 13.5, 25.2, 2.0, true, bold_bolt, WCLIP);
+                    dcx = (3.0 + 15.5 + 43.0) / 2.0;
+                }
+            }
+            4 => {   // 윤곽선 번개: 컷아웃 없음 — 얇은 어두운 테두리만, 채움 손실은 실루엣뿐
+                bolt_shape(&mut hi, cx + 0.4, 26.9, 13.5, 25.2, true, bold_bolt, DIGIT_SHADOW);
+                fill_poly_dilated(&mut hi, &pts, 0.9, OUTLINE);
+                hi.fill_poly(&pts, INK);
+                dcx = (3.0 + 15.5 + 43.0) / 2.0;
+            }
+            5 => {   // 미니 배지: 작은 번개(10.5×16.5)를 우상단 모서리에 — 채움·숫자 불간섭
+                // cy 21.0: 배지 상단(12.75)이 전력 숫자 바닥(~12.7) 아래 — 위 텍스트와 겹치지 않게
+                charge_overlay_cut_r(&mut hi, l, 40.0, 21.0, 10.5, 16.5, 1.5, true, bold_bolt, (0.0, 13.4, 48.0, 39.0));
+                dcx = 21.0;   // 숫자는 중앙 근처(배지와 겹치지 않게 살짝 왼쪽)
+            }
+            6 => {   // 하이브리드: 윤곽선(컷아웃 없음) + 온도계 채색
+                bolt_shape(&mut hi, cx + 0.4, 26.9, 13.5, 25.2, true, bold_bolt, DIGIT_SHADOW);
+                fill_poly_dilated(&mut hi, &pts, 0.9, OUTLINE);
+                hi.fill_poly(&pts, INK);
+                fill_poly_clip(&mut hi, &pts, fill, (0.0, 13.4, fx, 39.0));
+                dcx = (3.0 + 15.5 + 43.0) / 2.0;
+            }
+            _ => {   // 기존
+                charge_overlay_cut_r(&mut hi, l, cx, 26.2, 13.5, 25.2, 2.0, true, bold_bolt, WCLIP);
+                dcx = (3.0 + 15.5 + 43.0) / 2.0;
+            }
+        }
+    } else if l.full {
+        charge_overlay_cut(&mut hi, l, 10.0, 26.2, 9.0, 14.0, bold_bolt, WCLIP);
+        dcx = (3.0 + 12.0 + 43.0) / 2.0;
+    }
     let digits = format!("{}", pct.round() as u32);
-    let dcx = if ind > 0.0 { (3.0 + ind + 43.0) / 2.0 } else { 23.0 };
     stamp_digits_cut(&mut hi, &digits, 16.2, dcx, 26.3, 1.0, WCLIP);   // 1px rim in the fill
     stamp_digits(&mut hi, &digits, 16.2, dcx, 26.3, INK, true);        // level % inside the battery
     hi.down()
@@ -764,20 +899,20 @@ fn b64(data: &[u8]) -> String {
     }
     s
 }
-fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool, sys_w: f64, bold_bolt: bool) -> (Vec<u8>, u32, u32) {
+fn render_style(style: &str, l: &Live, colorize: bool, lpm: bool, sys_w: f64, bold_bolt: bool, chg_mode: u8, small_unit: bool) -> (Vec<u8>, u32, u32) {
     match style {
         "icon_xl" => battery_icon(l, colorize, true, lpm, bold_bolt),
         "combo" => combo_icon(l, colorize, lpm, bold_bolt),
         "iconpct" => battery_pct_icon(l, colorize, lpm, bold_bolt),
         "stack" => stack_icon(l, colorize, lpm, true, bold_bolt),
         "stack_plain" => stack_icon(l, colorize, lpm, false, bold_bolt),  // 민무늬 digits variant
-        "wstack" => wstack_icon(l, colorize, lpm, sys_w, false, bold_bolt),            // widget 7 · system power (plain)
-        "wstack_bat" => wstack_icon(l, colorize, lpm, signed_watts(l), true, bold_bolt), // widget 7 · battery power (signed)
+        "wstack" => wstack_icon(l, colorize, lpm, sys_w, false, bold_bolt, chg_mode, small_unit),            // widget 7 · system power (plain)
+        "wstack_bat" => wstack_icon(l, colorize, lpm, signed_watts(l), true, bold_bolt, chg_mode, small_unit), // widget 7 · battery power (signed)
         "bar" => bar_glyph(l, colorize, lpm, bold_bolt),
         _ => battery_icon(l, colorize, false, lpm, bold_bolt),
     }
 }
-pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
+pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool, chg_mode: u8, small_unit: bool) {
     let mk = |pct: f64, charging: bool, min: i64, w: f64| Live {
         ok: true, pct, charging, discharging: !charging, time_min: Some(min), watts: w, ..Default::default()
     };
@@ -795,8 +930,8 @@ pub fn write_preview(dir: &std::path::Path, cur: &Live, lpm: bool) {
         let mut styles = serde_json::Map::new();
         for style in ["icon", "icon_xl", "combo", "iconpct", "stack", "stack_plain", "wstack", "wstack_bat", "bar"] {
             for (suffix, bold_bolt) in [("", false), ("_bold", true)] {
-                let (col, w, h) = render_style(style, l, true, *is_lpm, *sys_w, bold_bolt);
-                let (mono, ..) = render_style(style, l, false, *is_lpm, *sys_w, bold_bolt);
+                let (col, w, h) = render_style(style, l, true, *is_lpm, *sys_w, bold_bolt, chg_mode, small_unit);
+                let (mono, ..) = render_style(style, l, false, *is_lpm, *sys_w, bold_bolt, chg_mode, small_unit);
                 styles.insert(format!("{style}{suffix}"), serde_json::json!({ "w": w, "h": h, "c": b64(&col), "m": b64(&mono) }));
             }
         }
@@ -853,9 +988,10 @@ pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64, bat_w: f64, adp_w: Option<f64>,
     let mut parts: Vec<String> = Vec::new();
     if pct_on && !c.digits_in_icon() { parts.push(format!("{pct}%")); }
     if time_on && matches!(l.time_min, Some(m) if m > 0) { parts.push(time_str(l)); }
-    if wsys_on { parts.push(format!("{sys_w:.1}W")); }   // system draw (SMC) — always ≥0
-    if wbat_on { parts.push(fmt_signed_w(bat_w)); }      // battery — SIGNED, 혼합(방전 PPBR·충전 수지) from the ticker
-    if adp_on { if let Some(a) = adp_w { parts.push(format!("{a:.1}W")); } }   // adapter measured (PDTR) — AC only
+    let uw = if c.small_unit { "\u{1D42}" } else { "W" };   // 작은 단위: 수정자 대문자 W (ᵂ)
+    if wsys_on { parts.push(format!("{sys_w:.1}{uw}")); }   // system draw (SMC) — always ≥0
+    if wbat_on { let mut t = fmt_signed_w(bat_w); if c.small_unit { t = t.replace('W', "\u{1D42}"); } parts.push(t); }      // battery — SIGNED, 혼합(방전 PPBR·충전 수지) from the ticker
+    if adp_on { if let Some(a) = adp_w { parts.push(format!("{a:.1}{uw}")); } }   // adapter measured (PDTR) — AC only
     if temp_on { if let Some(t) = temp_c { parts.push(format!("{}°", t.round() as i64)); } }   // battery temp (SMC, °C)
     if c.widget == "text" && parts.is_empty() { parts.push(format!("{pct}%")); }   // no glyph to fall back on
     parts.join(" ")
@@ -937,8 +1073,10 @@ mod tests {
             for (chg, full) in [(false, false), (true, false), (false, true)] {   // 방전·충전·완충(플러그 컷아웃)
                 let l = Live { ok: true, pct: pct as f64, charging: chg, full, discharging: !chg && !full, watts: 4.3, ..Default::default() };
                 for style in ["icon", "icon_xl", "combo", "iconpct", "stack", "stack_plain", "wstack", "wstack_bat", "bar"] {
-                    let _ = render_style(style, &l, true, false, 6.2, false);
-                    let _ = render_style(style, &l, true, false, 6.2, true);
+                    for m in 0u8..=6 {
+                        let _ = render_style(style, &l, true, false, 6.2, false, m, false);
+                        let _ = render_style(style, &l, true, false, 6.2, true, m, true);
+                    }
                 }
             }
         }
@@ -957,7 +1095,7 @@ mod tests {
     fn preview_dump_shape() {
         let dir = std::env::temp_dir().join("bl-preview-test");
         let _ = std::fs::create_dir_all(&dir);
-        write_preview(&dir, &live(67.0, Some(312), 7.4), false);
+        write_preview(&dir, &live(67.0, Some(312), 7.4), false, 0, false);
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("tray-preview.json")).unwrap()).unwrap();
         for s in ["cur", "chg", "low", "lpm"] {
             assert!(v["states"][s]["pct"].is_number(), "state {s}");

@@ -102,6 +102,8 @@ function sanitizeCfg(p) {
   if (['classic', 'bold'].includes(p.bolt_style)) o.bolt_style = p.bolt_style;
   if (typeof p.text_temp === 'boolean') o.text_temp = p.text_temp;
   if (typeof p.text_adp === 'boolean') o.text_adp = p.text_adp;
+  if (['current', 'waterline', 'thermo', 'swap', 'outline', 'badge', 'hybrid'].includes(p.chg_fill)) o.chg_fill = p.chg_fill;   // 충전 표시(저잔량) 모드
+  if (typeof p.small_unit === 'boolean') o.small_unit = p.small_unit;   // 단위 W 작게 (아이콘 축소 + 텍스트 ᵂ)
   return o;
 }
 
