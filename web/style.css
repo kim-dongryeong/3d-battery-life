@@ -110,6 +110,12 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   border-radius: 9px; font-size: 11.5px; line-height: 1.5; }
 .ivresult .range { color: var(--dim); font-size: 10.5px; font-variant-numeric: tabular-nums; margin-bottom: 3px; }
 .ivresult .serieslbl { color: var(--accent); font-size: 11px; font-weight: 650; }
+.ivresult .ivmah { margin: 1px 0 2px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.ivresult .ivmahtoggle { border: 1px solid var(--line); background: transparent; color: var(--dim);
+  font: inherit; font-size: 10px; font-weight: 600; padding: 1px 8px; border-radius: 20px; cursor: pointer; }
+.ivresult .ivmahtoggle:hover { border-color: var(--accent); color: var(--fg); }
+.ivresult .ivmahval { font-size: 11.5px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.ivresult .ivmahval .tsm { font-weight: 500; }
 .ivresult .big { font-size: 20px; font-weight: 800; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
 .ivresult .big small { font-size: 12px; font-weight: 600; color: var(--dim); margin-left: 3px; }
 .ivresult .row { display: flex; justify-content: space-between; gap: 8px; color: var(--dim); }

@@ -1717,6 +1717,7 @@ window.addEventListener('focus', wakeRefresh);
 // 배터리 게이지 검산(rawCap 쿨롱 델타)도 함께 보여준다. 2D에선 곡선과 0선 사이 '넓이'를 음영으로
 // 칠해 적분을 시각화한다. 끝점은 선형보간으로 클립하고, 값이 없는(예: 앱 미실행) 구간은 제외.
 state.intervalSel = null;   // { t0, t1 } — 선택 구간
+let ivMahOpen = false; try { ivMahOpen = localStorage.getItem('battIvMah') === '1'; } catch { /* ignore */ }   // 3.7V 환산 mAh 펼침(라벨 비교용, 기본 숨김)
 // 현재 그래프의 전력 계열 이름 (Y=watts일 때만 의미). wattValueOf가 실제 적분 대상.
 function ivSeriesLabel() {
   if (state.y !== 'watts') return null;
@@ -1791,6 +1792,13 @@ function renderIvResult(res, t0, t1) {
   } else if (res.hasPower) {
     rows.push(`<div class="serieslbl">${res.seriesLabel}</div>`);
     rows.push(`<div class="big">${res.signed ? sgnW(res.wh) : res.wh.toFixed(2)}<small>Wh</small></div>`);
+    // 3.7V 환산 mAh = 보조배터리(단일 3.7V 셀) 라벨 비교용. 시스템·어댑터 계열에서만 제공(기본 숨김,
+    // 클릭해 펼치기·상태 기억). 배터리 계열은 Mac 배터리가 ~11.2V(3셀)라 3.7V 환산이 오해를 주므로
+    // 대신 아래 '게이지 검산'(실측 mAh)을 쓴다.
+    if (state.wattsRail !== 'battery') {
+      const ivMah = Math.round(Math.abs(res.wh) / 3.7 * 1000);
+      rows.push(`<div class="ivmah"><button class="ivmahtoggle">≈ mAh 환산 ${ivMahOpen ? '▴' : '▾'}</button>${ivMahOpen ? ` <span class="ivmahval">≈ ${ivMah.toLocaleString()} mAh <span class="tsm">· 3.7V 환산 · 라벨 비교용</span></span>` : ''}</div>`);
+    }
     if (res.signed && (res.whChg > 0.005 || res.whDis > 0.005))
       rows.push(`<div class="row"><span>충전 / 방전</span><b><span class="chg">+${res.whChg.toFixed(2)}</span> / <span class="dis">−${res.whDis.toFixed(2)}</span> Wh</b></div>`);
     rows.push(`<div class="row"><span>평균 전력</span><b>${res.signed ? sgnW(res.avgW) : res.avgW.toFixed(1)} W</b></div>`);
@@ -1881,6 +1889,12 @@ function drawIntervalOverlay() {
   document.getElementById('ivNow').addEventListener('click', ivFillFromView);
   document.getElementById('ivClear').addEventListener('click', () => {
     state.intervalSel = null; document.getElementById('ivResult').hidden = true; drawIntervalOverlay();
+  });
+  // 3.7V 환산 mAh 펼치기 토글 (#ivResult는 innerHTML이 매번 바뀌므로 위임)
+  document.getElementById('ivResult').addEventListener('click', e => {
+    if (!e.target.closest('.ivmahtoggle')) return;
+    ivMahOpen = !ivMahOpen; try { localStorage.setItem('battIvMah', ivMahOpen ? '1' : '0'); } catch { /* ignore */ }
+    ivRecompute();
   });
   // 📅 버튼: 텍스트값을 숨은 datetime-local에 넣고 네이티브 달력·시각 피커를 띄운다. 고르면 텍스트로 되씀.
   document.querySelectorAll('.dtcal').forEach(btn => {
