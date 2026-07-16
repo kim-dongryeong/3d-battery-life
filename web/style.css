@@ -125,6 +125,8 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .ivresult .gauge { display: flex; justify-content: space-between; gap: 8px; color: var(--dim);
   margin-top: 5px; padding-top: 5px; border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
 .ivresult .gauge b { color: var(--fg); font-weight: 650; font-variant-numeric: tabular-nums; }
+.ivresult .avgw { color: #e8a13c !important; }               /* 그래프의 평균 전력 점선과 같은 색 */
+.ivresult .avgdash { color: #e8a13c; font-size: 9px; letter-spacing: 1px; font-weight: 800; }
 .ivresult .warn { color: #e8a13c; margin-top: 3px; }
 .ivresult .chg { color: var(--accent); } .ivresult .dis { color: #ff6b5e; }
 

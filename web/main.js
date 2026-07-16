@@ -1718,6 +1718,7 @@ window.addEventListener('focus', wakeRefresh);
 // 칠해 적분을 시각화한다. 끝점은 선형보간으로 클립하고, 값이 없는(예: 앱 미실행) 구간은 제외.
 state.intervalSel = null;   // { t0, t1 } — 선택 구간
 let ivMahOpen = false; try { ivMahOpen = localStorage.getItem('battIvMah') === '1'; } catch { /* ignore */ }   // 3.7V 환산 mAh 펼침(라벨 비교용, 기본 숨김)
+let _ivAvgW = null;   // 마지막 계산의 평균 전력(W) — 그래프의 수평 점선 참조선용
 // 현재 그래프의 전력 계열 이름 (Y=watts일 때만 의미). wattValueOf가 실제 적분 대상.
 function ivSeriesLabel() {
   if (state.y !== 'watts') return null;
@@ -1783,6 +1784,7 @@ const fmtDurSec = sec => { sec = Math.max(0, Math.round(sec)); const h = Math.fl
 const sgnW = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
 function renderIvResult(res, t0, t1) {
   const el = document.getElementById('ivResult'); if (!el) return;
+  _ivAvgW = (res && res.y === 'watts' && res.hasPower) ? res.avgW : null;   // 평균 전력 점선용
   if (!res) { el.hidden = false; el.innerHTML = `<span class="warn">시작/끝 시각이 올바르지 않아요. 예: 2026/07/12 06:00 PM</span>`; return; }
   const rows = [];
   rows.push(`<div class="range">${epochToText(t0)} ~ ${epochToText(t1)}</div>`);
@@ -1801,7 +1803,7 @@ function renderIvResult(res, t0, t1) {
     }
     if (res.signed && (res.whChg > 0.005 || res.whDis > 0.005))
       rows.push(`<div class="row"><span>충전 / 방전</span><b><span class="chg">+${res.whChg.toFixed(2)}</span> / <span class="dis">−${res.whDis.toFixed(2)}</span> Wh</b></div>`);
-    rows.push(`<div class="row"><span>평균 전력</span><b>${res.signed ? sgnW(res.avgW) : res.avgW.toFixed(1)} W</b></div>`);
+    rows.push(`<div class="row"><span>평균 전력 <span class="avgdash">- - -</span></span><b class="avgw">${res.signed ? sgnW(res.avgW) : res.avgW.toFixed(1)} W</b></div>`);
     rows.push(`<div class="row"><span>유효 시간</span><b>${fmtDurSec(res.effSec)}</b></div>`);
   } else {
     rows.push(`<div class="warn">이 구간엔 ‘${res.seriesLabel}’ 데이터가 없어요 (앱 미실행 시 시스템·어댑터 전력은 기록되지 않아요).</div>`);
@@ -1848,10 +1850,14 @@ function drawIntervalOverlay() {
   intervalGroup.visible = !!(state.intervalSel || ivPreview) && !!state.report;
   if (!intervalGroup.visible) return;
   const flat = state.view === 'flat';
+  // 2D 클리핑은 '창(_fw)'이 아니라 '실제 화면에 보이는 시간 범위' 기준 — 카메라가 창보다 17% 넓게
+  // 보여주므로(fitFlatCamera 여유), 창 기준으로 자르면 화면 좌우 끝 못 미쳐 음영·경계선이 잘린다.
+  const visLo = flat ? flatTimeAtScreen(0) : -Infinity;
+  const visHi = flat ? flatTimeAtScreen(innerWidth) : Infinity;
   // 점선 미리보기('현재 보기 구간'): 양 끝 경계만 점선으로 — 계산 전 확인용 (2D 전용)
   if (ivPreview && flat) {
     for (const tt of [ivPreview.t0, ivPreview.t1]) {
-      if (tt < _fw.w0 || tt > _fw.w1) continue;
+      if (tt < visLo || tt > visHi) continue;
       const x = xFlat(tt);
       const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, -0.4, 0.06), new THREE.Vector3(x, Y + 0.4, 0.06)]);
       const ln = new THREE.Line(g, new THREE.LineDashedMaterial({ color: 0x4dd0c0, dashSize: 0.55, gapSize: 0.4 }));
@@ -1861,8 +1867,8 @@ function drawIntervalOverlay() {
   }
   if (!state.intervalSel) return;
   const t0 = state.intervalSel.t0, t1 = state.intervalSel.t1;
-  const a = flat ? Math.max(t0, _fw.w0) : t0, b = flat ? Math.min(t1, _fw.w1) : t1;
-  if (!(b > a)) return;   // (2D) 선택 구간이 현재 창 밖
+  const a = flat ? Math.max(t0, visLo) : t0, b = flat ? Math.min(t1, visHi) : t1;
+  if (!(b > a)) return;   // (2D) 선택 구간이 화면 밖
   const yMax = projYMax || 1, base = yFromVal(0, yMax);
   // 3D 날짜 인덱스: buildLines와 동일하게 report.firstT의 로컬 자정 기준
   const rf = new Date((state.report.firstT || 0) * 1000); rf.setHours(0, 0, 0, 0);
@@ -1908,10 +1914,19 @@ function drawIntervalOverlay() {
     plane.position.set((x0 + x1) / 2, Y / 2, 0.02); intervalGroup.add(plane);
   }
   if (flat) {   // 2D: 양 끝 세로선 (3D는 자정 wrap이라 단일 세로선이 모호해 생략)
-    for (const [x, edge] of [[xFlat(a), t0 >= _fw.w0], [xFlat(b), t1 <= _fw.w1]]) {
-      if (!edge) continue;
+    for (const [tt, edge] of [[t0, t0 >= visLo], [t1, t1 <= visHi]]) {
+      if (!edge) continue;   // 화면에 의해 잘린 끝은 선을 긋지 않음 — 세로선은 항상 '진짜' 경계 시각(t0/t1)에
+      const x = xFlat(tt);
       const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, -0.4, 0.05), new THREE.Vector3(x, Y + 0.4, 0.05)]);
       intervalGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x4dd0c0 })));
+    }
+    // 구간 평균 전력선: 계산 결과의 평균 W 높이에 수평 '점선' (실측 곡선=실선과 구분되는 파생 참조선)
+    if (state.y === 'watts' && _ivAvgW != null) {
+      const yAvg = yFromVal(_ivAvgW, yMax);
+      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(xFlat(a), yAvg, 0.05), new THREE.Vector3(xFlat(b), yAvg, 0.05)]);
+      const ln = new THREE.Line(g, new THREE.LineDashedMaterial({ color: 0xe8a13c, dashSize: 0.7, gapSize: 0.45 }));
+      ln.computeLineDistances();
+      intervalGroup.add(ln);
     }
   }
 }
