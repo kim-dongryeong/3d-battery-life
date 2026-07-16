@@ -414,12 +414,14 @@ fn main() {
                             let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts), bat_disp, adp_smc, temp_smc);
                             // ALWAYS Some(…): set_title(None) leaves the previous text in place on
                             // macOS, so turning the last 텍스트 chip off left a zombie "9.8W" behind
-                            // '단위 W 작게'가 켜지면 attributed 타이틀 ONLY — 평문 set_title을 먼저 쓰면
-                            // 큰 W(넓음)→작은 W(좁음) 두 상태가 프레임 사이에 번갈아 보여 메뉴바가 깜빡인다.
+                            // 타이틀은 항상 attributed 단일 쓰기: 등폭 숫자(tabular) 폰트로 값이 바뀌어도
+                            // 폭이 안 출렁이고, small_unit이면 숫자 뒤 W를 아래첨자로. 평문 set_title을
+                            // 함께 쓰면 두 상태가 프레임 사이에 번갈아 보여 깜빡인다(이중 쓰기 금지).
                             // 버튼 탐색이 3회 연속 실패하면(비정상 상황) 평문 set_title로 폴백.
-                            if c.small_unit && ATTR_MISS.load(Ordering::Relaxed) < 3 {
+                            if ATTR_MISS.load(Ordering::Relaxed) < 3 {
                                 let t2 = title.clone();
-                                let _ = handle.run_on_main_thread(move || apply_small_unit_title(&t2));
+                                let su = c.small_unit;
+                                let _ = handle.run_on_main_thread(move || apply_tray_title(&t2, su));
                             } else {
                                 // ALWAYS Some(…): set_title(None)은 이전 텍스트를 남긴다(좀비 "9.8W")
                                 let _ = tray.set_title(Some(title.clone()));
@@ -630,7 +632,7 @@ fn grow_menu_glyph() {
 // NSStatusBarButton을 찾아 setAttributedTitle을 덧씌운다(매 틱 재적용 — set_title이 되돌려도 다음
 // 틱에 복구). 버튼을 못 찾으면 일반 W 그대로 — 동작은 절대 깨지지 않는다. Must run on main thread.
 static ATTR_MISS: AtomicU8 = AtomicU8::new(0);   // 버튼 탐색 연속 실패 수 — 3회면 ticker가 평문 폴백
-fn apply_small_unit_title(title: &str) {
+fn apply_tray_title(title: &str, small_unit: bool) {
     use objc2_app_kit::{NSApplication, NSStatusBarButton, NSView, NSFont, NSFontAttributeName, NSBaselineOffsetAttributeName};
     use objc2_foundation::{MainThreadMarker, NSMutableAttributedString, NSNumber, NSRange, NSString};
     let Some(mtm) = MainThreadMarker::new() else { return };
@@ -638,20 +640,25 @@ fn apply_small_unit_title(title: &str) {
     // W가 없거나 빈 문자열이어도 attributed로 항상 세팅한다 — 이 경로가 유일한 타이틀 쓰기라서
     // (평문 set_title과 이중 쓰기하면 폭이 다른 두 상태가 번갈아 렌더돼 깜빡였다).
     let mut ranges: Vec<usize> = Vec::new();
-    let mut prev_digit = false;
-    for (i, ch) in title.chars().enumerate() {
-        if ch == 'W' && prev_digit { ranges.push(i); }
-        prev_digit = ch.is_ascii_digit();
+    if small_unit {
+        let mut prev_digit = false;
+        for (i, ch) in title.chars().enumerate() {
+            if ch == 'W' && prev_digit { ranges.push(i); }
+            prev_digit = ch.is_ascii_digit();
+        }
     }
     fn apply(view: &NSView, title: &str, ranges: &[usize]) -> bool {
         if let Some(btn) = view.downcast_ref::<NSStatusBarButton>() {
             unsafe {
-                let base = btn.font().unwrap_or_else(|| NSFont::menuBarFontOfSize(0.0));
+                // 등폭 숫자(tabular figures) 시스템 폰트: 생김새는 메뉴바 기본과 동일, 숫자 폭만
+                // 균일 — 값이 바뀔 때 항목 폭이 출렁이지 않는다 (시계·Stats와 같은 방식).
+                let sz = btn.font().map(|f| f.pointSize()).unwrap_or_else(|| NSFont::menuBarFontOfSize(0.0).pointSize());
+                let base = NSFont::monospacedDigitSystemFontOfSize_weight(sz, objc2_app_kit::NSFontWeightRegular);
                 let attr = NSMutableAttributedString::from_nsstring(&NSString::from_str(title));
                 let n = title.chars().count();
                 if n > 0 {
                     attr.addAttribute_value_range(NSFontAttributeName, &*base, NSRange::new(0, n));
-                    let small = NSFont::menuBarFontOfSize((base.pointSize() * 0.62).max(7.0));
+                    let small = NSFont::monospacedDigitSystemFontOfSize_weight((base.pointSize() * 0.62).max(7.0), objc2_app_kit::NSFontWeightRegular);
                     let drop = NSNumber::new_f64(-(base.pointSize() * 0.10));   // 살짝 내려 붙는 아래첨자
                     for &at in ranges {
                         let r = NSRange::new(at, 1);
