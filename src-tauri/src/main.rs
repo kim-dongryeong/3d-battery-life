@@ -414,18 +414,6 @@ fn main() {
                             let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts), bat_disp, adp_smc, temp_smc);
                             // ALWAYS Some(…): set_title(None) leaves the previous text in place on
                             // macOS, so turning the last 텍스트 chip off left a zombie "9.8W" behind
-                            // 타이틀은 항상 attributed 단일 쓰기: 등폭 숫자(tabular) 폰트로 값이 바뀌어도
-                            // 폭이 안 출렁이고, small_unit이면 숫자 뒤 W를 아래첨자로. 평문 set_title을
-                            // 함께 쓰면 두 상태가 프레임 사이에 번갈아 보여 깜빡인다(이중 쓰기 금지).
-                            // 버튼 탐색이 3회 연속 실패하면(비정상 상황) 평문 set_title로 폴백.
-                            if ATTR_MISS.load(Ordering::Relaxed) < 3 {
-                                let t2 = title.clone();
-                                let su = c.small_unit;
-                                let _ = handle.run_on_main_thread(move || apply_tray_title(&t2, su));
-                            } else {
-                                // ALWAYS Some(…): set_title(None)은 이전 텍스트를 남긴다(좀비 "9.8W")
-                                let _ = tray.set_title(Some(title.clone()));
-                            }
                             // widget "wstack" draws a live power number → resolve it (sys plain, battery
                             // SIGNED +charge/−discharge per w7_src) and fold it (rounded) into the redraw key
                             let w7_bat = c.w7_battery();
@@ -434,18 +422,29 @@ fn main() {
                             let wkey = if c.widget != "wstack" { 0 } else { (w7 * 10.0).round() as i64 };
                             // redraw the glyph only when something visible changes (including bolt style)
                             let key = format!("{}-{}-{}-{}-{}-{}-{}-{}-{}-{}", l.pct.round() as i64, l.charging, l.full, c.colorize, c.widget, c.glyph_xl, lpm, c.digit_deco, c.bolt_style, wkey);
-                            if l.ok && key != last_key {
-                                last_key = key;
-                                match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat, c.bold_bolt(), c.chg_mode(), c.small_unit) {
-                                    Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
-                                    None => { let _ = tray.set_icon(None); }   // text-only widget
+                            let icon_changed = l.ok && key != last_key;
+                            if icon_changed { last_key = key.clone(); }
+                            // 아이콘+타이틀을 ONE 메인스레드 작업으로 원자 갱신 — set_icon(18pt 리셋)→
+                            // grow(23pt)→타이틀의 다단계 사이에 프레임이 끼며 항목이 '살짝 흔들리던' 문제 제거.
+                            // 버튼 탐색 3회 연속 실패 시(비정상) 기존 tray API 폴백.
+                            if ATTR_MISS.load(Ordering::Relaxed) < 3 {
+                                let icon = if icon_changed {
+                                    Some(live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat, c.bold_bolt(), c.chg_mode(), c.small_unit))
+                                } else { None };   // None = 아이콘 유지 (타이틀만 갱신)
+                                let t2 = title.clone();
+                                let su = c.small_unit;
+                                let _ = handle.run_on_main_thread(move || set_tray_visuals(icon, &t2, su));
+                            } else {
+                                // ALWAYS Some(…): set_title(None)은 이전 텍스트를 남긴다(좀비 "9.8W")
+                                let _ = tray.set_title(Some(title.clone()));
+                                if icon_changed {
+                                    match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat, c.bold_bolt(), c.chg_mode(), c.small_unit) {
+                                        Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
+                                        None => { let _ = tray.set_icon(None); }   // text-only widget
+                                    }
                                 }
+                                let _ = handle.run_on_main_thread(grow_menu_glyph);
                             }
-                            // enlarge past tray-icon's 18pt cap on the main thread — runs after the
-                            // set_icon above re-applied the 18pt image (both marshal to the main thread,
-                            // FIFO). Idempotent (skips if already at target), so a plain title-only tick
-                            // keeps the size too. No-op/graceful if the status button can't be located.
-                            let _ = handle.run_on_main_thread(grow_menu_glyph);
                         }
                         // settings-panel preview bridge: dump the real glyph renders (all styles ×
                         // color/mono × normal/XL) when their inputs change (~every 1% of battery).
@@ -632,12 +631,64 @@ fn grow_menu_glyph() {
 // NSStatusBarButton을 찾아 setAttributedTitle을 덧씌운다(매 틱 재적용 — set_title이 되돌려도 다음
 // 틱에 복구). 버튼을 못 찾으면 일반 W 그대로 — 동작은 절대 깨지지 않는다. Must run on main thread.
 static ATTR_MISS: AtomicU8 = AtomicU8::new(0);   // 버튼 탐색 연속 실패 수 — 3회면 ticker가 평문 폴백
-fn apply_tray_title(title: &str, small_unit: bool) {
-    use objc2_app_kit::{NSApplication, NSStatusBarButton, NSView, NSFont, NSFontAttributeName, NSBaselineOffsetAttributeName};
-    use objc2_foundation::{MainThreadMarker, NSMutableAttributedString, NSNumber, NSRange, NSString};
+
+// 트레이 아이콘+타이틀을 ONE 메인스레드 작업으로 원자적으로 갱신 — tray.set_icon(18pt로 리셋)
+// → grow(23pt) → attributed title의 3단계 사이에 프레임이 끼면 아이콘 폭이 잠깐 좁아졌다 넓어져
+// 항목 전체가 '살짝 흔들리는' 문제의 근본 해결. RGBA를 NSBitmapImageRep(비승산 알파)로 직접
+// NSImage화해 처음부터 목표 크기(메뉴바 높이-1pt)로 세팅한다. icon: None=아이콘 유지,
+// Some(None)=아이콘 제거(텍스트 전용), Some(Some(rgba,w,h))=교체.
+fn set_tray_visuals(icon: Option<Option<(Vec<u8>, u32, u32)>>, title: &str, small_unit: bool) {
+    use objc2::{AnyThread, Message};
+    use objc2_app_kit::{NSApplication, NSStatusBar, NSStatusBarButton, NSView, NSBitmapImageRep, NSImage, NSDeviceRGBColorSpace, NSBitmapFormat};
+    use objc2_foundation::{MainThreadMarker, NSSize};
     let Some(mtm) = MainThreadMarker::new() else { return };
+    fn find_btn(view: &NSView) -> Option<objc2::rc::Retained<NSStatusBarButton>> {
+        if let Some(btn) = view.downcast_ref::<NSStatusBarButton>() { return Some(btn.retain()); }
+        for sub in view.subviews().iter() { if let Some(b) = find_btn(&sub) { return Some(b); } }
+        None
+    }
+    let app = NSApplication::sharedApplication(mtm);
+    let mut btn = None;
+    for win in app.windows().iter() {
+        if let Some(cv) = win.contentView() { if let Some(b) = find_btn(&cv) { btn = Some(b); break; } }
+    }
+    let Some(btn) = btn else {
+        let _ = ATTR_MISS.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v.saturating_add(1)));
+        return;
+    };
+    ATTR_MISS.store(0, Ordering::Relaxed);
+    if let Some(icon) = icon {
+        match icon {
+            Some((rgba, w, h)) => unsafe {
+                // 비승산(straight) 알파 RGBA → NSBitmapImageRep. planes=null이면 rep이 버퍼를 소유.
+                let rep = NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bitmapFormat_bytesPerRow_bitsPerPixel(
+                    NSBitmapImageRep::alloc(), std::ptr::null_mut(), w as isize, h as isize,
+                    8, 4, true, false, NSDeviceRGBColorSpace, NSBitmapFormat::AlphaNonpremultiplied,
+                    (w * 4) as isize, 32);
+                if let Some(rep) = rep {
+                    let dst = rep.bitmapData();
+                    if !dst.is_null() {
+                        std::ptr::copy_nonoverlapping(rgba.as_ptr(), dst, rgba.len());
+                        // 처음부터 목표 포인트 크기 — 18pt 중간 상태 없음
+                        let target_h = (NSStatusBar::systemStatusBar().thickness() - 1.0).clamp(18.0, 30.0);
+                        let size = NSSize::new(w as f64 * target_h / h as f64, target_h);
+                        let img = NSImage::initWithSize(NSImage::alloc(), size);
+                        img.addRepresentation(&rep);
+                        btn.setImage(Some(&img));
+                    }
+                }
+            },
+            None => unsafe { btn.setImage(None); },   // 텍스트 전용 위젯
+        }
+    }
+    apply_title_to_btn(&btn, title, small_unit);
+}
+
+fn apply_title_to_btn(btn: &objc2_app_kit::NSStatusBarButton, title: &str, small_unit: bool) {
+    use objc2_app_kit::{NSFont, NSFontAttributeName, NSBaselineOffsetAttributeName};
+    use objc2_foundation::{NSMutableAttributedString, NSNumber, NSRange, NSString};
     // 숫자 바로 뒤의 'W'들의 UTF-16 위치 (타이틀은 BMP 문자뿐 → 1글자=1유닛).
-    // W가 없거나 빈 문자열이어도 attributed로 항상 세팅한다 — 이 경로가 유일한 타이틀 쓰기라서
+    // W가 없거나 빈 문자열이어도 attributed로 항상 세팅 — 이 경로가 유일한 타이틀 쓰기
     // (평문 set_title과 이중 쓰기하면 폭이 다른 두 상태가 번갈아 렌더돼 깜빡였다).
     let mut ranges: Vec<usize> = Vec::new();
     if small_unit {
@@ -647,39 +698,25 @@ fn apply_tray_title(title: &str, small_unit: bool) {
             prev_digit = ch.is_ascii_digit();
         }
     }
-    fn apply(view: &NSView, title: &str, ranges: &[usize]) -> bool {
-        if let Some(btn) = view.downcast_ref::<NSStatusBarButton>() {
-            unsafe {
-                // 등폭 숫자(tabular figures) 시스템 폰트: 생김새는 메뉴바 기본과 동일, 숫자 폭만
-                // 균일 — 값이 바뀔 때 항목 폭이 출렁이지 않는다 (시계·Stats와 같은 방식).
-                let sz = btn.font().map(|f| f.pointSize()).unwrap_or_else(|| NSFont::menuBarFontOfSize(0.0).pointSize());
-                let base = NSFont::monospacedDigitSystemFontOfSize_weight(sz, objc2_app_kit::NSFontWeightRegular);
-                let attr = NSMutableAttributedString::from_nsstring(&NSString::from_str(title));
-                let n = title.chars().count();
-                if n > 0 {
-                    attr.addAttribute_value_range(NSFontAttributeName, &*base, NSRange::new(0, n));
-                    let small = NSFont::monospacedDigitSystemFontOfSize_weight((base.pointSize() * 0.62).max(7.0), objc2_app_kit::NSFontWeightRegular);
-                    let drop = NSNumber::new_f64(-(base.pointSize() * 0.10));   // 살짝 내려 붙는 아래첨자
-                    for &at in ranges {
-                        let r = NSRange::new(at, 1);
-                        attr.addAttribute_value_range(NSFontAttributeName, &*small, r);
-                        attr.addAttribute_value_range(NSBaselineOffsetAttributeName, &*drop, r);
-                    }
-                }
-                btn.setAttributedTitle(&attr);
+    unsafe {
+        // 등폭 숫자(tabular figures) 시스템 폰트: 생김새는 메뉴바 기본과 동일, 숫자 폭만
+        // 균일 — 값이 바뀔 때 항목 폭이 출렁이지 않는다 (시계·Stats와 같은 방식).
+        let sz = btn.font().map(|f| f.pointSize()).unwrap_or_else(|| NSFont::menuBarFontOfSize(0.0).pointSize());
+        let base = NSFont::monospacedDigitSystemFontOfSize_weight(sz, objc2_app_kit::NSFontWeightRegular);
+        let attr = NSMutableAttributedString::from_nsstring(&NSString::from_str(title));
+        let n = title.chars().count();
+        if n > 0 {
+            attr.addAttribute_value_range(NSFontAttributeName, &*base, NSRange::new(0, n));
+            let small = NSFont::monospacedDigitSystemFontOfSize_weight((base.pointSize() * 0.62).max(7.0), objc2_app_kit::NSFontWeightRegular);
+            let drop = NSNumber::new_f64(-(base.pointSize() * 0.10));   // 살짝 내려 붙는 아래첨자
+            for at in ranges {
+                let r = NSRange::new(at, 1);
+                attr.addAttribute_value_range(NSFontAttributeName, &*small, r);
+                attr.addAttribute_value_range(NSBaselineOffsetAttributeName, &*drop, r);
             }
-            return true;
         }
-        for sub in view.subviews().iter() { if apply(&sub, title, ranges) { return true; } }
-        false
+        btn.setAttributedTitle(&attr);
     }
-    let app = NSApplication::sharedApplication(mtm);
-    for win in app.windows().iter() {
-        if let Some(cv) = win.contentView() {
-            if apply(&cv, title, &ranges) { ATTR_MISS.store(0, Ordering::Relaxed); return; }
-        }
-    }
-    let _ = ATTR_MISS.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v.saturating_add(1)));
 }
 
 // The popover: a small borderless window loading the node server's /popover.html (pure web,
