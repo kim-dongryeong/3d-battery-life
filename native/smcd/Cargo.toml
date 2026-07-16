@@ -1,0 +1,15 @@
+[package]
+name = "battery-life-smcd"
+version = "0.1.0"
+edition = "2021"
+description = "Standalone SMC publisher daemon — keeps live-smc.json (0.5s samples, 1-min trapezoidal averages) and per-minute records alive when the tray app is not running"
+
+[[bin]]
+name = "battery-life-smcd"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

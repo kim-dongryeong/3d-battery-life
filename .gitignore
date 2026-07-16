@@ -17,6 +17,7 @@ dist/
 
 # Tauri (Rust) build artifacts
 src-tauri/target/
+native/smcd/target/
 src-tauri/gen/
 src-tauri/binaries/
 src-tauri/icons/

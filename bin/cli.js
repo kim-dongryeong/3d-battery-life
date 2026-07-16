@@ -115,6 +115,64 @@ function recordStatus() {
   console.log(`collected:  ${n} samples${last ? `  (last ${last})` : ''}`);
 }
 
+// ── smcd: 앱 없이도 SMC 전력 발행 + 분당 기록을 유지하는 상주 데몬 (launchd KeepAlive) ──────
+const SMCD_LABEL = 'com.kdr.3d-battery-life.smcd';
+const SMCD_AGENT = path.join(os.homedir(), 'Library', 'LaunchAgents', `${SMCD_LABEL}.plist`);
+function smcdBin() {
+  if (COMPILED) return path.join(path.dirname(process.execPath), 'battery-life-smcd');   // 번들: battery-life 옆
+  return path.join(pkgRoot, 'native', 'smcd', 'target', 'release', 'battery-life-smcd'); // dev: cargo 산출물
+}
+function smcdOn() {
+  const bin = smcdBin();
+  if (!fs.existsSync(bin)) { console.error(`❌ smcd 바이너리 없음: ${bin}\n   빌드: cd native/smcd && cargo build --release`); process.exitCode = 1; return; }
+  const data = userDataDir();
+  fs.mkdirSync(data, { recursive: true });
+  fs.mkdirSync(path.dirname(SMCD_AGENT), { recursive: true });
+  // KeepAlive 상주 프로세스 — StartInterval(Background 타이머 지연) 문제와 무관하게 자체 0.5초 루프
+  fs.writeFileSync(SMCD_AGENT, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${SMCD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${xml(bin)}</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict><key>BATTERY_DATA</key><string>${xml(data)}</string></dict>
+  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>${xml(path.join(data, 'smcd.log'))}</string>
+  <key>StandardErrorPath</key><string>${xml(path.join(data, 'smcd.err.log'))}</string>
+</dict>
+</plist>
+`);
+  const uid = process.getuid();
+  spawnSync('launchctl', ['bootout', `gui/${uid}/${SMCD_LABEL}`], { stdio: 'ignore' });
+  const r = spawnSync('launchctl', ['bootstrap', `gui/${uid}`, SMCD_AGENT], { stdio: 'ignore' });
+  const r2 = r.status !== 0 ? spawnSync('launchctl', ['load', '-w', SMCD_AGENT], { stdio: 'ignore' }) : null;
+  if (r.status !== 0 && (!r2 || r2.status !== 0)) {
+    console.error(`❌ smcd launchd 등록 실패 — plist는 ${SMCD_AGENT}에 생성됨`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`✅ smcd ON — 앱이 꺼져 있어도 0.5초 SMC 표본·1분 평균 발행 + 분당 기록 유지 (로그인 시 자동 시작)`);
+}
+function smcdOff() {
+  const uid = process.getuid();
+  spawnSync('launchctl', ['bootout', `gui/${uid}/${SMCD_LABEL}`], { stdio: 'ignore' });
+  const had = fs.existsSync(SMCD_AGENT);
+  if (had) fs.rmSync(SMCD_AGENT);
+  console.log(`🛑 smcd OFF${had ? '' : ' (was not installed)'}`);
+}
+function smcdStatus() {
+  const uid = process.getuid();
+  const loaded = spawnSync('launchctl', ['print', `gui/${uid}/${SMCD_LABEL}`], { stdio: 'ignore' }).status === 0;
+  console.log(`smcd:  ${loaded ? 'ON (loaded)' : fs.existsSync(SMCD_AGENT) ? 'installed but not loaded' : 'OFF'}`);
+  console.log(`plist: ${SMCD_AGENT}${fs.existsSync(SMCD_AGENT) ? '' : '  (absent)'}`);
+  console.log(`bin:   ${smcdBin()}${fs.existsSync(smcdBin()) ? '' : '  (absent!)'}`);
+}
+
 switch (cmd) {
   case 'serve':
     startServer({ root });
@@ -136,6 +194,13 @@ switch (cmd) {
   }
   case 'install': recordOn(parseInt(process.argv[3] || '60', 10) || 60); break;   // aliases
   case 'uninstall': recordOff(); break;
+  case 'smcd': {
+    const sub = (process.argv[3] || 'status').replace(/^-+/, '');
+    if (sub === 'on') smcdOn();
+    else if (sub === 'off') smcdOff();
+    else smcdStatus();
+    break;
+  }
   case 'demo':
   case 'demo2': {
     const l = cmd === 'demo2' ? generateDemo2Lines() : generateDemoLines();
@@ -156,6 +221,7 @@ switch (cmd) {
   record on [sec]   start auto-recording every [sec]s (default 60), auto-starts at login
   record off        stop auto-recording (collected data kept)
   record status     show whether recording is on + sample count
+  smcd on|off       앱이 꺼져 있어도 SMC 전력(0.5초 표본·1분 평균)+분당 기록을 유지하는 상주 데몬
   demo | demo2      generate demo data (data/demo*.jsonl)                 [Node]
 
   data (real samples): ${samplesFile()}

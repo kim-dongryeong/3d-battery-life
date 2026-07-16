@@ -20,6 +20,10 @@ build_one() { # <triple> <bun-target>
   echo "▶ [$triple] sidecar"
   bun build "$DIR/bin/cli.js" --compile --minify --target="$bt" --outfile "$BINDIR/battery-life-$triple"
   chmod +x "$BINDIR/battery-life-$triple"
+  echo "▶ [$triple] smcd (앱 없이도 SMC 발행·분당 기록 유지하는 상주 데몬)"
+  ( cd "$DIR/native/smcd" && cargo build --release --target "$triple" )
+  cp "$DIR/native/smcd/target/$triple/release/battery-life-smcd" "$BINDIR/battery-life-smcd-$triple"
+  chmod +x "$BINDIR/battery-life-smcd-$triple"
   echo "▶ [$triple] Tauri bundle"
   ( cd "$DIR" && tauri build --target "$triple" )
   echo "✅ [$triple] → src-tauri/target/$triple/release/bundle/"
