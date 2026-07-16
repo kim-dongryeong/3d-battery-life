@@ -795,5 +795,9 @@
   "은 ~60초 갱신값": "refresh every ~60 s",
   "(자세한 측정 방식은 상단 ?안내)": "(see the ? guide above for measurement details)",
   "비-PD(5V 고정)": "non-PD (fixed 5 V)",
-  "PD 협상": "PD negotiated"
+  "PD 협상": "PD negotiated",
+  "기본": "Classic",
+  "굵게": "Bold",
+  "가늘고 긴 Stats식 번개": "Slim, tall Stats-style bolt",
+  "넓적한 만화체 번개": "Broad comic-style bolt"
 }
