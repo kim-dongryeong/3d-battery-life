@@ -186,10 +186,6 @@
       "observed"
     ],
     [
-      "평균",
-      "avg"
-    ],
-    [
       "만충",
       "full"
     ],
@@ -360,6 +356,42 @@
     [
       "방금",
       "just now"
+    ],
+    [
+      "평균",
+      "avg"
+    ],
+    [
+      "계약",
+      "contract"
+    ],
+    [
+      "이 구간에 기록 공백",
+      "Recording gap of"
+    ],
+    [
+      "— 그 시간은 제외됐어요\\.",
+      "— excluded from the totals."
+    ],
+    [
+      "이 구간엔 ‘",
+      "No ‘"
+    ],
+    [
+      "’ 데이터가 없어요 \\(앱 미실행 시 시스템·어댑터 전력은 기록되지 않아요\\)\\.",
+      "’ data in this range (system/adapter power is recorded only while the app runs)."
+    ],
+    [
+      "USB-C PD 추정 \\(",
+      "likely USB-C PD ("
+    ],
+    [
+      "V 협상\\)",
+      "V negotiated)"
+    ],
+    [
+      "USB-C 5V 추정 · 비-PD 가능",
+      "likely USB-C 5V · possibly non-PD"
     ]
   ],
   "3D 분석 리포트": "3D Analysis Report",
@@ -719,5 +751,49 @@
   "이미 진행 중인 측정이 있어 그 상태를 보여드려요": "A measurement is already running — showing its state",
   "측정이 이미 정지되어 있어요": "The measurement is already stopped",
   "요청이 거부됐어요 — 상태를 다시 불러왔어요": "Request rejected — state re-synced",
-  "서버에 연결할 수 없어요": "Can't reach the server"
+  "서버에 연결할 수 없어요": "Can't reach the server",
+  "충전 번개": "Charging bolt",
+  "새 모양": "New shape",
+  "충전 표시 (저잔량)": "Charging display (low level)",
+  "기존 (번개가 채움 위)": "Current (bolt over fill)",
+  "1 · 수위선": "1 · Waterline",
+  "2 · 온도계 번개": "2 · Thermometer bolt",
+  "3 · 사이드 스왑": "3 · Side swap",
+  "4 · 윤곽선 번개": "4 · Outlined bolt",
+  "5 · 미니 배지": "5 · Mini badge",
+  "6 · 윤곽선+온도계": "6 · Outline + thermometer",
+  "단위 W 작게": "Small W unit",
+  "충전 중 잔량이 낮으면 채움이 번개에 가려요 — 이때의 표시 방식": "When charging at a low level, the fill hides behind the bolt — choose how to display it",
+  "아이콘 위 전력과 옆 텍스트의 W를 작은 아래 첨자로 — 메뉴바 폭 절약": "Render the W of the icon power and side text as a small subscript — saves menu-bar width",
+  "구간 전력량 (Wh)": "Interval energy (Wh)",
+  "시작": "Start",
+  "끝": "End",
+  "현재 보기 구간": "Current view range",
+  "계산": "Compute",
+  "지우기": "Clear",
+  "배터리 게이지 검산": "Battery gauge check",
+  "평균 전력": "Average power",
+  "충전 / 방전": "Charge / discharge",
+  "전하량": "Charge",
+  "≈ mAh 환산 ▾": "≈ mAh equivalent ▾",
+  "≈ mAh 환산 ▴": "≈ mAh equivalent ▴",
+  "· 3.7V 환산 · 라벨 비교용": "· at 3.7 V · for label comparison",
+  "‘세로축 = 전력 W’로 바꾸면 그 전력의 구간 전력량도 계산해요.": "Switch the Y axis to ‘Power W’ to also compute that power's interval energy.",
+  "시작/끝 시각이 올바르지 않아요. 예: 2026/07/12 06:00 PM": "Invalid start/end time. e.g. 2026/07/12 06:00 PM",
+  "세로축이 '전력 W'일 때, 현재 그래프가 그리는 그 전력을 지정 구간 동안 적분해 전력량(Wh)을 구합니다. 배터리 게이지 검산도 함께 표시. '전력량 측정' 라이브 세션과 정확도가 같습니다.": "With the Y axis on ‘Power W’, integrates the currently graphed power over the chosen range to get energy (Wh), alongside the battery gauge check. Same accuracy as the live energy-measurement session.",
+  "달력에서 선택": "Pick from calendar",
+  "원시 용량": "Raw capacity",
+  "어댑터 표기": "Adapter label",
+  "(일반 표기)": "(generic label)",
+  "어댑터 식별": "Adapter identity",
+  "제조사·모델명·시리얼 없음 · Apple 인증(MFi) 아님": "No manufacturer/model/serial · not Apple-certified (MFi)",
+  "어댑터 · ioreg 공칭(계약)": "Adapter · ioreg nominal (contract)",
+  "전력값(SMC PSTR·PDTR·PPBR)": "Power values (SMC PSTR·PDTR·PPBR)",
+  "은 0.5초 표본을 적분한": "are integrated from 0.5 s samples into a",
+  "지난 1분 평균": "last-minute average",
+  "잔량(ioreg rawCap·전압·%)": "level values (ioreg rawCap·voltage·%)",
+  "은 ~60초 갱신값": "refresh every ~60 s",
+  "(자세한 측정 방식은 상단 ?안내)": "(see the ? guide above for measurement details)",
+  "비-PD(5V 고정)": "non-PD (fixed 5 V)",
+  "PD 협상": "PD negotiated"
 }
