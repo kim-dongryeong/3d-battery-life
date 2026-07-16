@@ -414,12 +414,15 @@ fn main() {
                             let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts), bat_disp, adp_smc, temp_smc);
                             // ALWAYS Some(…): set_title(None) leaves the previous text in place on
                             // macOS, so turning the last 텍스트 chip off left a zombie "9.8W" behind
-                            let _ = tray.set_title(Some(title.clone()));
-                            // '단위 W 작게': set_title(일반 문자열) 뒤에 attributed로 덧씌워 진짜 아래첨자 W.
-                            // (둘 다 메인 스레드 큐 FIFO — set_title이 먼저 적용된 뒤 우리가 이긴다. 매 틱 재적용.)
-                            if c.small_unit && !title.is_empty() {
+                            // '단위 W 작게'가 켜지면 attributed 타이틀 ONLY — 평문 set_title을 먼저 쓰면
+                            // 큰 W(넓음)→작은 W(좁음) 두 상태가 프레임 사이에 번갈아 보여 메뉴바가 깜빡인다.
+                            // 버튼 탐색이 3회 연속 실패하면(비정상 상황) 평문 set_title로 폴백.
+                            if c.small_unit && ATTR_MISS.load(Ordering::Relaxed) < 3 {
                                 let t2 = title.clone();
                                 let _ = handle.run_on_main_thread(move || apply_small_unit_title(&t2));
+                            } else {
+                                // ALWAYS Some(…): set_title(None)은 이전 텍스트를 남긴다(좀비 "9.8W")
+                                let _ = tray.set_title(Some(title.clone()));
                             }
                             // widget "wstack" draws a live power number → resolve it (sys plain, battery
                             // SIGNED +charge/−discharge per w7_src) and fold it (rounded) into the redraw key
@@ -626,32 +629,35 @@ fn grow_menu_glyph() {
 // (작은 폰트 + 음수 baselineOffset)로. Tauri set_title은 일반 문자열만 받으므로, 같은 트리 탐색으로
 // NSStatusBarButton을 찾아 setAttributedTitle을 덧씌운다(매 틱 재적용 — set_title이 되돌려도 다음
 // 틱에 복구). 버튼을 못 찾으면 일반 W 그대로 — 동작은 절대 깨지지 않는다. Must run on main thread.
+static ATTR_MISS: AtomicU8 = AtomicU8::new(0);   // 버튼 탐색 연속 실패 수 — 3회면 ticker가 평문 폴백
 fn apply_small_unit_title(title: &str) {
     use objc2_app_kit::{NSApplication, NSStatusBarButton, NSView, NSFont, NSFontAttributeName, NSBaselineOffsetAttributeName};
     use objc2_foundation::{MainThreadMarker, NSMutableAttributedString, NSNumber, NSRange, NSString};
     let Some(mtm) = MainThreadMarker::new() else { return };
-    if title.is_empty() { return; }
-    // 숫자 바로 뒤의 'W'들의 UTF-16 위치 (타이틀은 BMP 문자뿐 → 1글자=1유닛)
+    // 숫자 바로 뒤의 'W'들의 UTF-16 위치 (타이틀은 BMP 문자뿐 → 1글자=1유닛).
+    // W가 없거나 빈 문자열이어도 attributed로 항상 세팅한다 — 이 경로가 유일한 타이틀 쓰기라서
+    // (평문 set_title과 이중 쓰기하면 폭이 다른 두 상태가 번갈아 렌더돼 깜빡였다).
     let mut ranges: Vec<usize> = Vec::new();
     let mut prev_digit = false;
     for (i, ch) in title.chars().enumerate() {
         if ch == 'W' && prev_digit { ranges.push(i); }
         prev_digit = ch.is_ascii_digit();
     }
-    if ranges.is_empty() { return; }
     fn apply(view: &NSView, title: &str, ranges: &[usize]) -> bool {
         if let Some(btn) = view.downcast_ref::<NSStatusBarButton>() {
             unsafe {
                 let base = btn.font().unwrap_or_else(|| NSFont::menuBarFontOfSize(0.0));
                 let attr = NSMutableAttributedString::from_nsstring(&NSString::from_str(title));
-                let full = NSRange::new(0, title.chars().count());
-                attr.addAttribute_value_range(NSFontAttributeName, &*base, full);
-                let small = NSFont::menuBarFontOfSize((base.pointSize() * 0.62).max(7.0));
-                let drop = NSNumber::new_f64(-(base.pointSize() * 0.10));   // 살짝 내려 붙는 아래첨자
-                for &at in ranges {
-                    let r = NSRange::new(at, 1);
-                    attr.addAttribute_value_range(NSFontAttributeName, &*small, r);
-                    attr.addAttribute_value_range(NSBaselineOffsetAttributeName, &*drop, r);
+                let n = title.chars().count();
+                if n > 0 {
+                    attr.addAttribute_value_range(NSFontAttributeName, &*base, NSRange::new(0, n));
+                    let small = NSFont::menuBarFontOfSize((base.pointSize() * 0.62).max(7.0));
+                    let drop = NSNumber::new_f64(-(base.pointSize() * 0.10));   // 살짝 내려 붙는 아래첨자
+                    for &at in ranges {
+                        let r = NSRange::new(at, 1);
+                        attr.addAttribute_value_range(NSFontAttributeName, &*small, r);
+                        attr.addAttribute_value_range(NSBaselineOffsetAttributeName, &*drop, r);
+                    }
                 }
                 btn.setAttributedTitle(&attr);
             }
@@ -662,8 +668,11 @@ fn apply_small_unit_title(title: &str) {
     }
     let app = NSApplication::sharedApplication(mtm);
     for win in app.windows().iter() {
-        if let Some(cv) = win.contentView() { if apply(&cv, title, &ranges) { return; } }
+        if let Some(cv) = win.contentView() {
+            if apply(&cv, title, &ranges) { ATTR_MISS.store(0, Ordering::Relaxed); return; }
+        }
     }
+    let _ = ATTR_MISS.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v.saturating_add(1)));
 }
 
 // The popover: a small borderless window loading the node server's /popover.html (pure web,
