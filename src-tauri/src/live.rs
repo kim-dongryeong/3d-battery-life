@@ -988,10 +988,9 @@ pub fn tray_title(l: &Live, c: &Cfg, sys_w: f64, bat_w: f64, adp_w: Option<f64>,
     let mut parts: Vec<String> = Vec::new();
     if pct_on && !c.digits_in_icon() { parts.push(format!("{pct}%")); }
     if time_on && matches!(l.time_min, Some(m) if m > 0) { parts.push(time_str(l)); }
-    let uw = if c.small_unit { "\u{1D42}" } else { "W" };   // 작은 단위: 수정자 대문자 W (ᵂ)
-    if wsys_on { parts.push(format!("{sys_w:.1}{uw}")); }   // system draw (SMC) — always ≥0
-    if wbat_on { let mut t = fmt_signed_w(bat_w); if c.small_unit { t = t.replace('W', "\u{1D42}"); } parts.push(t); }      // battery — SIGNED, 혼합(방전 PPBR·충전 수지) from the ticker
-    if adp_on { if let Some(a) = adp_w { parts.push(format!("{a:.1}{uw}")); } }   // adapter measured (PDTR) — AC only
+    if wsys_on { parts.push(format!("{sys_w:.1}W")); }   // system draw (SMC) — always ≥0  (small_unit은 main.rs가 attributed 아래첨자로 처리)
+    if wbat_on { parts.push(fmt_signed_w(bat_w)); }      // battery — SIGNED, 혼합(방전 PPBR·충전 수지) from the ticker
+    if adp_on { if let Some(a) = adp_w { parts.push(format!("{a:.1}W")); } }   // adapter measured (PDTR) — AC only
     if temp_on { if let Some(t) = temp_c { parts.push(format!("{}°", t.round() as i64)); } }   // battery temp (SMC, °C)
     if c.widget == "text" && parts.is_empty() { parts.push(format!("{pct}%")); }   // no glyph to fall back on
     parts.join(" ")

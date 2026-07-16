@@ -469,7 +469,7 @@ function menubarHTML() {
       ['badge', '5 · 미니 배지'],
       ['hybrid', '6 · 윤곽선+온도계'],
     ])}</div>` : ''}
-    <div class="srow"><span title="아이콘 위 전력의 W를 작게(아래 첨자), 옆 텍스트의 W는 ᵂ로 — 메뉴바 폭 절약">단위 W 작게</span>${tglEl('small_unit', !!cfg.small_unit)}</div>
+    <div class="srow"><span title="아이콘 위 전력과 옆 텍스트의 W를 작은 아래 첨자로 — 메뉴바 폭 절약">단위 W 작게</span>${tglEl('small_unit', !!cfg.small_unit)}</div>
     <div class="srow"><span>열기 단축키 <kbd>⌥⌃B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>`;
 }
 
@@ -510,12 +510,11 @@ function pvState() {
 const fmtSignedW = n => Math.abs(n) < 0.05 ? '0.0W' : `${n > 0 ? '+' : '−'}${Math.abs(n).toFixed(1)}W`;
 function composeTrayTitle(st) {
   const parts = [];
-  const UW = cfg.small_unit ? 'ᵂ' : 'W';   // 단위 W 작게 → 수정자 대문자 ᵂ (tray_title 미러)
   if (cfg.text_pct && !widgetHasDigits(cfg.widget)) parts.push(`${Math.round(st.pct)}%`);
   if (cfg.text_time && st.min != null) parts.push(`${Math.floor(st.min / 60)}:${String(st.min % 60).padStart(2, '0')}`);
-  if (cfg.text_w_sys) parts.push(`${(+st.sysW || 0).toFixed(1)}${UW}`);   // system draw — always ≥0
-  if (cfg.text_w_bat) parts.push(fmtSignedW(+st.batW || 0).replace('W', UW));   // battery rail — signed
-  if (cfg.text_adp && st.adpW != null) parts.push(`${(+st.adpW).toFixed(1)}${UW}`);   // adapter measured — AC only
+  if (cfg.text_w_sys) parts.push(`${(+st.sysW || 0).toFixed(1)}W`);   // system draw — always ≥0
+  if (cfg.text_w_bat) parts.push(fmtSignedW(+st.batW || 0));           // battery rail — signed
+  if (cfg.text_adp && st.adpW != null) parts.push(`${(+st.adpW).toFixed(1)}W`);   // adapter measured — AC only
   if (cfg.text_temp && st.tempC != null) parts.push(`${Math.round(st.tempC)}°`);  // battery temp (°C)
   if (cfg.widget === 'text' && !parts.length) parts.push(`${Math.round(st.pct)}%`);
   return parts.join(' ');   // 공백 구분 — " · "를 빼서 메뉴바 폭 절약 (tray_title과 동일)
@@ -547,7 +546,10 @@ function renderPreviewZone() {
   const g = cfg.widget === 'text' ? null : glyphCanvas(cfg.widget, 17, false);
   if (g) strip.appendChild(g);
   else if (cfg.widget !== 'text' && !pvData) { const ph = document.createElement('span'); ph.className = 'pvph'; ph.textContent = '미리보기 준비 중…'; strip.appendChild(ph); }
-  if (title) { const t = document.createElement('span'); t.className = 'pvtxt'; t.textContent = title; strip.appendChild(t); }
+  if (title) { const t = document.createElement('span'); t.className = 'pvtxt';
+    if (cfg.small_unit) t.innerHTML = title.replace(/</g, '&lt;').replace(/(\d)W/g, '$1<span class="subW">W</span>');   // 숫자 뒤 W만 아래첨자 (트레이 attributed 미러)
+    else t.textContent = title;
+    strip.appendChild(t); }
   // 점유 폭 추정: 글리프(메뉴바 높이 스케일) + 텍스트(시스템 13px) + 트레이 항목 좌우 패딩
   if (!pvMeasure) pvMeasure = document.createElement('canvas').getContext('2d');
   pvMeasure.font = '500 13px -apple-system, system-ui, sans-serif';

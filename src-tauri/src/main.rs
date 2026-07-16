@@ -414,7 +414,13 @@ fn main() {
                             let title = live::tray_title(&l, &c, sys_w.unwrap_or(l.watts), bat_disp, adp_smc, temp_smc);
                             // ALWAYS Some(…): set_title(None) leaves the previous text in place on
                             // macOS, so turning the last 텍스트 chip off left a zombie "9.8W" behind
-                            let _ = tray.set_title(Some(title));
+                            let _ = tray.set_title(Some(title.clone()));
+                            // '단위 W 작게': set_title(일반 문자열) 뒤에 attributed로 덧씌워 진짜 아래첨자 W.
+                            // (둘 다 메인 스레드 큐 FIFO — set_title이 먼저 적용된 뒤 우리가 이긴다. 매 틱 재적용.)
+                            if c.small_unit && !title.is_empty() {
+                                let t2 = title.clone();
+                                let _ = handle.run_on_main_thread(move || apply_small_unit_title(&t2));
+                            }
                             // widget "wstack" draws a live power number → resolve it (sys plain, battery
                             // SIGNED +charge/−discharge per w7_src) and fold it (rounded) into the redraw key
                             let w7_bat = c.w7_battery();
@@ -613,6 +619,50 @@ fn grow_menu_glyph() {
     let app = NSApplication::sharedApplication(mtm);
     for win in app.windows().iter() {
         if let Some(cv) = win.contentView() { if resize(&cv, target_h) { return; } }
+    }
+}
+
+// '단위 W 작게': 트레이 타이틀을 NSAttributedString으로 다시 그려 숫자 뒤의 W를 REAL 아래첨자
+// (작은 폰트 + 음수 baselineOffset)로. Tauri set_title은 일반 문자열만 받으므로, 같은 트리 탐색으로
+// NSStatusBarButton을 찾아 setAttributedTitle을 덧씌운다(매 틱 재적용 — set_title이 되돌려도 다음
+// 틱에 복구). 버튼을 못 찾으면 일반 W 그대로 — 동작은 절대 깨지지 않는다. Must run on main thread.
+fn apply_small_unit_title(title: &str) {
+    use objc2_app_kit::{NSApplication, NSStatusBarButton, NSView, NSFont, NSFontAttributeName, NSBaselineOffsetAttributeName};
+    use objc2_foundation::{MainThreadMarker, NSMutableAttributedString, NSNumber, NSRange, NSString};
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    if title.is_empty() { return; }
+    // 숫자 바로 뒤의 'W'들의 UTF-16 위치 (타이틀은 BMP 문자뿐 → 1글자=1유닛)
+    let mut ranges: Vec<usize> = Vec::new();
+    let mut prev_digit = false;
+    for (i, ch) in title.chars().enumerate() {
+        if ch == 'W' && prev_digit { ranges.push(i); }
+        prev_digit = ch.is_ascii_digit();
+    }
+    if ranges.is_empty() { return; }
+    fn apply(view: &NSView, title: &str, ranges: &[usize]) -> bool {
+        if let Some(btn) = view.downcast_ref::<NSStatusBarButton>() {
+            unsafe {
+                let base = btn.font().unwrap_or_else(|| NSFont::menuBarFontOfSize(0.0));
+                let attr = NSMutableAttributedString::from_nsstring(&NSString::from_str(title));
+                let full = NSRange::new(0, title.chars().count());
+                attr.addAttribute_value_range(NSFontAttributeName, &*base, full);
+                let small = NSFont::menuBarFontOfSize((base.pointSize() * 0.62).max(7.0));
+                let drop = NSNumber::new_f64(-(base.pointSize() * 0.10));   // 살짝 내려 붙는 아래첨자
+                for &at in ranges {
+                    let r = NSRange::new(at, 1);
+                    attr.addAttribute_value_range(NSFontAttributeName, &*small, r);
+                    attr.addAttribute_value_range(NSBaselineOffsetAttributeName, &*drop, r);
+                }
+                btn.setAttributedTitle(&attr);
+            }
+            return true;
+        }
+        for sub in view.subviews().iter() { if apply(&sub, title, ranges) { return true; } }
+        false
+    }
+    let app = NSApplication::sharedApplication(mtm);
+    for win in app.windows().iter() {
+        if let Some(cv) = win.contentView() { if apply(&cv, title, &ranges) { return; } }
     }
 }
 
