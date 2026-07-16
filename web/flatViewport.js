@@ -77,7 +77,7 @@ export function followEnd(win, newSp, oldMax, minDur = MIN_DUR, futurePad = FUTU
 // 이상 촘촘하면서 ≤64개 — 줌 정도에 따라 개수가 다이나믹하게 바뀌고, 라벨이 붙기 전에도
 // 시각을 가늠할 세부선이 먼저 나타난다 (kdr: "시각이 나타나는 줌이 늦다").
 // 반환: [{t, label|null, major}] — major=자정(날짜), label=null 은 선만 긋는 세부선.
-const LADDER_MIN = [30, 60, 180, 360, 720, 1440, 2880, 4320, 10080, 21600, 43200, 129600];   // 30분…90일
+const LADDER_MIN = [1, 2, 5, 10, 15, 30, 60, 180, 360, 720, 1440, 2880, 4320, 10080, 21600, 43200, 129600];   // 1분…90일 (깊은 줌은 분 단위 라벨)
 export function calendarTicks(win, sp, locale = 'ko') {
   const { t0: w0, t1: w1 } = resolve(win, sp);
   const spanMin = (w1 - w0) / 60;
@@ -86,19 +86,22 @@ export function calendarTicks(win, sp, locale = 'ko') {
   const step = finer.length ? finer[finer.length - 1] : labeled;   // 세부선 단계 (없으면 라벨 단계)
   const dayFmt = new Intl.DateTimeFormat(locale, { month: 'numeric', day: 'numeric' });
   const hourFmt = new Intl.DateTimeFormat(locale, { hour: 'numeric' });
+  const hmFmt = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' });   // 분 단위 줌: "오전 8:25"
   const ticks = [];
   if (step < 1440) {
-    // 하루 미만 단계: 로컬 자정 기준 "분 오프셋"이 step 배수인 지점 — 30분 격자로 달력 전진
+    // 하루 미만 단계: 로컬 자정 기준 "분 오프셋"이 step 배수인 지점 — step 격자로 달력 전진
+    const grid = Math.min(step, 30);   // 분 단위 step(<30)이면 그 간격으로 전진해야 눈금이 안 빠짐
     const d = new Date(w0 * 1000); d.setSeconds(0, 0);
-    d.setMinutes(Math.floor(d.getMinutes() / 30) * 30);
+    d.setMinutes(Math.floor(d.getMinutes() / grid) * grid);
     while (d.getTime() / 1000 <= w1) {
       const t = d.getTime() / 1000, mo = d.getHours() * 60 + d.getMinutes();
       if (t >= w0 && mo % step === 0) {
         const isLab = labeled >= 1440 ? mo === 0 : mo % labeled === 0;
         const mid = mo === 0;
-        ticks.push({ t, label: isLab ? (mid ? dayFmt.format(d) : hourFmt.format(d)) : null, major: mid });
+        const lbl = mid ? dayFmt.format(d) : (labeled < 60 ? hmFmt.format(d) : hourFmt.format(d));
+        ticks.push({ t, label: isLab ? lbl : null, major: mid });
       }
-      d.setMinutes(d.getMinutes() + 30);
+      d.setMinutes(d.getMinutes() + grid);
     }
   } else {
     // 일 단위: 자정을 하루씩 전진, 고정 일번호(dayNo) 모듈로로 골라 팬해도 눈금이 안 튄다

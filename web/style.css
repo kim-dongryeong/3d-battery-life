@@ -98,7 +98,9 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .dt .dttext { width: 100%; font: inherit; font-size: 11px; color: var(--fg); background: var(--btn);
   border: 1px solid var(--line); border-radius: 7px; padding: 4px 26px 4px 7px; font-variant-numeric: tabular-nums; }
 .dt .dttext:focus { outline: none; border-color: var(--accent); }
-.dt .dtpick { position: absolute; right: 22px; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; }
+/* 숨은 피커를 입력칸 '왼쪽 끝'에 anchor — 오른쪽 가장자리 패널에서 showPicker() 팝업이
+   화면 오른쪽 경계를 넘어 반이 잘리던 문제(팝업은 anchor 기준 오른쪽으로 펼쳐짐) */
+.dt .dtpick { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; }
 .dt .dtcal { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); border: 0; background: transparent;
   cursor: pointer; font-size: 12px; padding: 2px 4px; line-height: 1; opacity: .75; }
 .dt .dtcal:hover { opacity: 1; }

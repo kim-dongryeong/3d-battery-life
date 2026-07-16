@@ -11,7 +11,8 @@ import { analyzeRates } from './lib/bucketRates.js';
 import { sample, detail } from './lib/battery.js';
 import { chargerKey, readAdapters, upsertAdapter } from './lib/adapters.js';
 import { chargeStats, ratesWithFallback, classKey, energyBalanceETA } from './lib/chargeRates.js';
-import { userDataDir, cacheDir } from './lib/paths.js';
+import { userDataDir, cacheDir, appendSample } from './lib/paths.js';
+import { applyLiveSMC } from './lib/battery.js';
 import * as measure from './lib/measure.js';
 import { generateDemoLines } from './scripts/gen-demo.js';
 import { generateDemo2Lines } from './scripts/gen-demo2.js';
@@ -186,6 +187,17 @@ export function resolveRoot(root) {
 
 export function startServer({ root, port } = {}) {
   measureResume();   // resume a crash-interrupted measurement — only the real server, never importers
+  // Resident backup recorder: launchd's StartInterval job is ProcessType=Background, which macOS
+  // timer-coalesces on battery/low-power — observed minutes-long holes (e.g. 08:20, 08:22–24 on
+  // 2026-07-16 while fully awake). While this server is running, append a record each minute too;
+  // appendSample's lock + 55s recency guard makes the two writers race-safe (never a double record).
+  setInterval(() => {
+    try {
+      const s = sample();
+      applyLiveSMC(s, true);   // 1-minute AVERAGE power, same as bin/sampler.js
+      if (appendSample(s) && s.ac) upsertAdapter(s);
+    } catch { /* ioreg hiccup → launchd sampler or next minute covers it */ }
+  }, 60_000);
   const base = resolveRoot(root);
   const PORT = port || process.env.PORT || 4317;
   const webDir = fs.realpathSync(path.join(base, 'web'));

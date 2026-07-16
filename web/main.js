@@ -1820,6 +1820,7 @@ function ivRecompute() {
   renderIvResult(computeIntervalEnergy(t0, t1), t0, t1);
 }
 function ivCalc() {
+  ivPreview = null;   // 계산하면 점선 미리보기 → 실선 확정으로 대체
   const t0 = textToEpoch(document.getElementById('ivStart').value);
   const t1 = textToEpoch(document.getElementById('ivEnd').value);
   if (t0 == null || t1 == null || !(t1 > t0)) { state.intervalSel = null; renderIvResult(null); drawIntervalOverlay(); return; }
@@ -1827,19 +1828,38 @@ function ivCalc() {
   renderIvResult(computeIntervalEnergy(t0, t1), t0, t1);
   drawIntervalOverlay();
 }
+// '현재 보기 구간' — 토글: 켜면 입력 채우기 + 그래프에 양 끝 '점선' 미리보기, 다시 누르면 점선 제거.
+// 시작은 보기 왼쪽 끝에서 살짝 안쪽(3%)으로 — 정확히 끝이면 왼쪽 경계선이 화면 밖이라 안 보임.
+let ivPreview = null;   // { t0, t1 } — 점선 미리보기 (계산 전)
 function ivFillFromView() {
+  if (ivPreview) { ivPreview = null; drawIntervalOverlay(); return; }   // 두 번째 클릭: 점선 제거
   const sp = flatSpanNow(); const w = state.flatWin ? state.flatWin : { t0: sp.min, t1: sp.max };
-  document.getElementById('ivStart').value = epochToText(w.t0);
-  document.getElementById('ivEnd').value = epochToText(Math.min(w.t1, sp.max));
+  const t0 = w.t0 + (w.t1 - w.t0) * 0.03, t1 = Math.min(w.t1, sp.max);
+  document.getElementById('ivStart').value = epochToText(t0);
+  document.getElementById('ivEnd').value = epochToText(t1);
+  ivPreview = { t0, t1 };
+  drawIntervalOverlay();
 }
 // 선택 구간에서 현재 계열 곡선과 0선 사이의 '넓이'를 음영으로(= 적분 시각화). 2D·3D 모두 지원.
 // 3D는 가로축이 '하루 중 시각'·깊이축이 '날짜'라, 여러 날에 걸친 구간은 날짜 레이어마다 음영이
 // 나뉘어 그려진다(자정 경계에서 끊음). 계산 자체는 보기와 무관하게 동일하다.
 function drawIntervalOverlay() {
   disposeGroup(intervalGroup);
-  intervalGroup.visible = !!state.intervalSel && !!state.report;
+  intervalGroup.visible = !!(state.intervalSel || ivPreview) && !!state.report;
   if (!intervalGroup.visible) return;
   const flat = state.view === 'flat';
+  // 점선 미리보기('현재 보기 구간'): 양 끝 경계만 점선으로 — 계산 전 확인용 (2D 전용)
+  if (ivPreview && flat) {
+    for (const tt of [ivPreview.t0, ivPreview.t1]) {
+      if (tt < _fw.w0 || tt > _fw.w1) continue;
+      const x = xFlat(tt);
+      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, -0.4, 0.06), new THREE.Vector3(x, Y + 0.4, 0.06)]);
+      const ln = new THREE.Line(g, new THREE.LineDashedMaterial({ color: 0x4dd0c0, dashSize: 0.55, gapSize: 0.4 }));
+      ln.computeLineDistances();
+      intervalGroup.add(ln);
+    }
+  }
+  if (!state.intervalSel) return;
   const t0 = state.intervalSel.t0, t1 = state.intervalSel.t1;
   const a = flat ? Math.max(t0, _fw.w0) : t0, b = flat ? Math.min(t1, _fw.w1) : t1;
   if (!(b > a)) return;   // (2D) 선택 구간이 현재 창 밖
@@ -1861,10 +1881,21 @@ function drawIntervalOverlay() {
         const va = wattValueOf(pa), vb = wattValueOf(pb), span = pb.t - pa.t;
         if (va == null || vb == null || !Number.isFinite(va) || !Number.isFinite(vb) || !(span > 0)) continue;
         const f0 = (s0 - pa.t) / span, f1 = (s1 - pa.t) / span;
-        const y0 = yFromVal(va + (vb - va) * f0, yMax), y1 = yFromVal(va + (vb - va) * f1, yMax);
-        const x0 = X3(s0), x1 = X3(s1), z0 = Z3(s0), z1 = Z3(s1);
-        pos.push(x0, base, z0, x0, y0, z0, x1, y1, z1);   // 곡선과 0선 사이 사각형 → 두 삼각형
-        pos.push(x0, base, z0, x1, y1, z1, x1, base, z1);
+        const w0 = va + (vb - va) * f0, w1 = va + (vb - va) * f1;
+        // 부호가 바뀌는 쌍(충전↔방전)은 0선 교차점에서 쪼갠다 — 한 사각형으로 이으면 0선을
+        // 가로지르는 나비넥타이(꼬인) 모양의 이상한 음영이 생긴다.
+        const segs = [];
+        if (w0 !== 0 && w1 !== 0 && (w0 > 0) !== (w1 > 0)) {
+          const fc = w0 / (w0 - w1);                       // w=0이 되는 지점 (s0→s1 비율)
+          const sc = s0 + (s1 - s0) * fc;
+          segs.push([s0, w0, sc, 0], [sc, 0, s1, w1]);
+        } else segs.push([s0, w0, s1, w1]);
+        for (const [sa, wa, sb, wb] of segs) {
+          const xa = X3(sa), xb = X3(sb), za = Z3(sa), zb = Z3(sb);
+          const ya = yFromVal(wa, yMax), yb = yFromVal(wb, yMax);
+          pos.push(xa, base, za, xa, ya, za, xb, yb, zb);   // 곡선과 0선 사이 사각형 → 두 삼각형
+          pos.push(xa, base, za, xb, yb, zb, xb, base, zb);
+        }
       }
     }
     if (pos.length) {
