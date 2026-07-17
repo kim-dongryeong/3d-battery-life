@@ -724,9 +724,9 @@ pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool, bolt: u8, chg_mode:
                 fill_poly_dilated(&mut hi, &pts, 0.9, (10, 22, 4, 235));
                 hi.fill_poly(&pts, ink);
             }
-            5 => {   // 미니 배지: 작은 번개를 좌상단에 — 숫자 자리를 넓게 유지
-                ind = 6.0;
-                bolt_shape(&mut hi, 10.0, 13.0, 8.0, 15.0, false, bolt, ink);
+            5 => {   // 미니 배지: 몸통 비례 크기(최소 = wstack 배지) — 기본보다 약간 넓은 번개
+                ind = 15.0;
+                bolt_shape(&mut hi, 13.0, 20.0, 16.5, 26.0, false, bolt, ink);
             }
             _ => bolt_shape(&mut hi, digits_bolt_x(13.0, bolt), 20.0, 12.0, 27.0, false, bolt, ink),
         }
@@ -785,9 +785,9 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool, bolt: u8, chg_mode: u8) -
                 fill_poly_dilated(&mut hi, &pts, 0.9, OUTLINE);
                 hi.fill_poly(&pts, INK);
             }
-            5 => {   // 미니 배지: 작은 번개를 좌상단 모서리에 — 채움·숫자 불간섭
+            5 => {   // 미니 배지: 오른쪽에 몸통 비례 크기(최소 = wstack 배지) — 숫자는 중앙 유지
                 ind = 0.0;
-                charge_overlay_cut_r(&mut hi, l, 11.0, 12.5, 8.5, 13.5, 1.0, false, bolt, CLIP);
+                charge_overlay_cut_r(&mut hi, l, 55.0, 20.0, 16.5, 26.0, 1.2, false, bolt, CLIP);
             }
             6 => {   // 하이브리드: 윤곽선 + 온도계 채색
                 bolt_shape(&mut hi, cx + 0.4, 20.7, 12.0, 26.0, false, bolt, DIGIT_SHADOW);
@@ -854,8 +854,8 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool, bolt: u8, chg
                 fill_poly_dilated(&mut hi, &pts, 0.8, OUTLINE);
                 hi.fill_poly(&pts, INK);
             }
-            5 => {   // 미니 배지: 작은 번개를 오른쪽 끝에
-                charge_overlay_cut_r(&mut hi, l, 35.0, 25.5, 8.0, 12.5, 1.0, false, bolt, SCLIP);
+            5 => {   // 미니 배지: 오른쪽 끝, 크기는 wstack 배지와 동일(몸통 높이가 같음)
+                charge_overlay_cut_r(&mut hi, l, 33.0, 26.0, 11.55, 18.15, 1.5, false, bolt, SCLIP);
             }
             6 => {   // 하이브리드
                 bolt_shape(&mut hi, 21.4, 26.7, 13.0, 18.0, false, bolt, DIGIT_SHADOW);
@@ -937,9 +937,9 @@ pub fn wstack_icon(l: &Live, colorize: bool, lpm: bool, w_val: f64, signed: bool
                 hi.fill_poly(&pts, INK);
                 dcx = (3.0 + 15.5 + 43.0) / 2.0;
             }
-            5 => {   // 미니 배지: 작은 번개(10.5×16.5)를 우상단 모서리에 — 채움·숫자 불간섭
-                // cy 21.0: 배지 상단(12.75)이 전력 숫자 바닥(~12.7) 아래 — 위 텍스트와 겹치지 않게
-                charge_overlay_cut_r(&mut hi, l, 40.0, 21.0, 10.5, 16.5, 1.5, true, bolt, (0.0, 13.4, 48.0, 39.0));
+            5 => {   // 미니 배지: 작은 번개를 우상단 모서리에 — 채움·숫자 불간섭
+                // 상단(≈12.75)은 전력 숫자 바닥 바로 아래로 고정, 크기만 아래로 10% 확대(16.5→18.15)
+                charge_overlay_cut_r(&mut hi, l, 40.0, 21.8, 11.55, 18.15, 1.5, true, bolt, (0.0, 13.4, 48.0, 39.0));
                 dcx = 21.0;   // 숫자는 중앙 근처(배지와 겹치지 않게 살짝 왼쪽)
             }
             6 => {   // 하이브리드: 윤곽선(컷아웃 없음) + 온도계 채색
@@ -1007,8 +1007,10 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool, bolt: u8, chg
                 fill_poly_dilated(&mut hi, &pts, 0.9, OUTLINE);
                 hi.fill_poly(&pts, INK);
             }
-            5 => {   // 미니 배지: 작은 번개를 우상단에
-                charge_overlay_cut_r(&mut hi, l, 55.0, m + 9.5, 10.0, 15.5, 1.2, false, bolt, clip);
+            5 => {   // 미니 배지: 오른쪽에, 몸통 높이에 비례(최소 = wstack 배지 18.15)
+                let bh = (40.0 - 2.0 * m) / 20.3 * 18.15;
+                let bw = bh * 0.636;
+                charge_overlay_cut_r(&mut hi, l, 62.5 - bw / 2.0, 20.0, bw, bh, 1.5, false, bolt, clip);
             }
             6 => {   // 하이브리드
                 bolt_shape(&mut hi, 34.4, 20.7, 17.0, 27.0, false, bolt, DIGIT_SHADOW);
@@ -1134,8 +1136,8 @@ pub fn bar_glyph(l: &Live, colorize: bool, lpm: bool, bolt: u8, chg_mode: u8) ->
                 fill_poly_dilated(&mut hi, &pts, 0.9, OUTLINE);
                 hi.fill_poly(&pts, INK);
             }
-            5 => {   // 미니 배지: 작은 번개를 위쪽(빈 영역)에
-                charge_overlay_cut_r(&mut hi, l, 14.0, 11.0, 7.5, 12.0, 1.0, false, bolt, BCLIP);
+            5 => {   // 미니 배지: 위쪽(빈 영역)에, 최소 크기 = wstack 배지 (폭 제약으로 비례 확대는 생략)
+                charge_overlay_cut_r(&mut hi, l, 14.0, 13.0, 11.8, 18.5, 1.2, false, bolt, BCLIP);
             }
             6 => {   // 하이브리드
                 bolt_shape(&mut hi, 14.4, 20.7, 11.0, 27.0, false, bolt, DIGIT_SHADOW);
