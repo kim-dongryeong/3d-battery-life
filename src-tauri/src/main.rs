@@ -682,6 +682,15 @@ fn set_tray_visuals(icon: Option<Option<(Vec<u8>, u32, u32)>>, title: &str, smal
         }
     }
     apply_title_to_btn(&btn, title, small_unit);
+    // tray-icon은 버튼 위에 '클릭 가로채기 오버레이'(TrayTarget subview)를 얹어 왼클릭=팝오버/
+    // 우클릭=메뉴를 분기한다(메뉴는 status item에 상시 attach — 오버레이 밖 클릭은 macOS 기본
+    // 동작이라 왼클릭에도 메뉴가 뜬다!). 원래는 tray.set_icon()이 내부에서 update_dimensions()로
+    // 오버레이를 버튼 크기에 맞췄지만, 우리는 set_icon을 우회하므로 여기서 직접 맞춰준다
+    // (upstream update_dimensions와 동일: overlay.setFrame(button.frame())).
+    unsafe {
+        let f = btn.frame();
+        for sub in btn.subviews().iter() { sub.setFrame(f); }
+    }
 }
 
 fn apply_title_to_btn(btn: &objc2_app_kit::NSStatusBarButton, title: &str, small_unit: bool) {
