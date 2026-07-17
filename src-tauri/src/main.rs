@@ -288,7 +288,7 @@ fn main() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)   // left-click = popover; right-click = menu
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = event {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Down, rect, .. } = event {   // Down에 즉시(Stats처럼) — Up까지 기다리면 클릭 시간만큼 늦게 느껴짐
                         // rect is the icon's screen box in PHYSICAL px, top-left origin (tray-icon flips
                         // macOS' bottom-left coords for us). Position/Size are dpi enums → already the
                         // Physical variant here, so to_physical just casts (scale arg ignored).
@@ -767,20 +767,38 @@ fn icon_anchor(app: &AppHandle) -> Option<(f64, f64, f64, f64)> {
 
 // Left-click a tray icon: toggle the popover, anchored under the clicked icon. A fresh show always
 // lands on the dashboard (closeSettings), so re-opening never gets stuck in the settings panel.
+
+// 팝오버용 초경량 활성화: Regular 승격(300ms Dock 등록 대기) 없이 앱만 활성화해 팝오버가
+// key window가 되게 한다 — key가 아니면 바깥 클릭의 Focused(false)가 안 와 자동숨김이 죽는다.
+#[cfg(target_os = "macos")]
+fn activate_for_popover() {
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::MainThreadMarker;
+    if let Some(mtm) = MainThreadMarker::new() {
+        #[allow(deprecated)]
+        NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
+    }
+}
+#[cfg(not(target_os = "macos"))]
+fn activate_for_popover() {}
+
 fn toggle_popover(app: &AppHandle, anchor: Option<(f64, f64, f64, f64)>) {
     if let Some(w) = app.get_webview_window("popover") {
         if w.is_visible().unwrap_or(false) { let _ = w.hide(); demote_if_no_visible_ui(app); return; }
         if hidden_just_now() { return; }   // this same click may have just hidden it via focus-loss
     }
-    with_regular_app(app, move |app| {
-        if let Some(w) = ensure_popover(&app) {
-            fit_popover(&w);
-            place_popover(&w, anchor.or_else(|| icon_anchor(&app)));
-            let _ = w.eval("window.closeSettings&&closeSettings()");
-            let _ = w.show();
-            let _ = w.set_focus();
-        }
-    });
+    // Stats처럼 즉시 표시: with_regular_app(Accessory→Regular 승격 + 300ms 대기)을 팝오버엔 쓰지
+    // 않는다 — 승격은 Cmd+Tab 순서 갱신용이라 transient 팝오버엔 불필요하고, 닫힐 때마다
+    // Accessory로 내려가 매 클릭 300ms 지연을 만들었다. Accessory 앱도 set_focus(activate+makeKey)로
+    // 키 윈도우가 되므로 포커스-이탈 자동 숨김은 그대로 동작한다.
+    if let Some(w) = ensure_popover(app) {
+        fit_popover(&w);
+        place_popover(&w, anchor.or_else(|| icon_anchor(app)));
+        let _ = w.eval("window.closeSettings&&closeSettings()");
+        let _ = w.show();
+        activate_for_popover();
+        let _ = w.set_focus();
+    }
 }
 
 // Size the popover to the height its web content last reported, so a fresh show is already
@@ -795,19 +813,18 @@ fn fit_popover(w: &tauri::WebviewWindow) {
 // opens it straight in the settings panel via the page's window.openSettings() hook — retried
 // briefly in case the page is still loading.
 fn open_popover(app: &AppHandle, settings: bool) {
-    with_regular_app(app, move |app| {
-        if let Some(w) = ensure_popover(&app) {
-            fit_popover(&w);
-            place_popover(&w, icon_anchor(&app));
-            let _ = w.show();
-            let _ = w.set_focus();
-            let _ = w.eval(if settings {
-                "(function r(n){if(window.openSettings){openSettings()}else if(n<40){setTimeout(function(){r(n+1)},50)}})(0)"
-            } else {
-                "window.closeSettings&&closeSettings()"
-            });
-        }
-    });
+    if let Some(w) = ensure_popover(app) {
+        fit_popover(&w);
+        place_popover(&w, icon_anchor(app));
+        let _ = w.show();
+        activate_for_popover();
+        let _ = w.set_focus();
+        let _ = w.eval(if settings {
+            "(function r(n){if(window.openSettings){openSettings()}else if(n<40){setTimeout(function(){r(n+1)},50)}})(0)"
+        } else {
+            "window.closeSettings&&closeSettings()"
+        });
+    }
 }
 
 // Anchor the popover just below the clicked menu-bar icon, horizontally centered under it and
