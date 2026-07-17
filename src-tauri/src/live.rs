@@ -724,9 +724,9 @@ pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool, bolt: u8, chg_mode:
                 fill_poly_dilated(&mut hi, &pts, 0.9, (10, 22, 4, 235));
                 hi.fill_poly(&pts, ink);
             }
-            5 => {   // 미니 배지: 몸통 비례 크기(최소 = wstack 배지) — 기본보다 약간 넓은 번개
-                ind = 15.0;
-                bolt_shape(&mut hi, 13.0, 20.0, 16.5, 26.0, false, bolt, ink);
+            5 => {   // 미니 배지: 좌상단 — 기본 번개(27)의 72% = 19.4, 숫자 자리 넓게 유지
+                ind = 12.0;
+                bolt_shape(&mut hi, 11.5, 15.0, 12.3, 19.4, false, bolt, ink);
             }
             _ => bolt_shape(&mut hi, digits_bolt_x(13.0, bolt), 20.0, 12.0, 27.0, false, bolt, ink),
         }
@@ -785,9 +785,9 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool, bolt: u8, chg_mode: u8) -
                 fill_poly_dilated(&mut hi, &pts, 0.9, OUTLINE);
                 hi.fill_poly(&pts, INK);
             }
-            5 => {   // 미니 배지: 오른쪽에 몸통 비례 크기(최소 = wstack 배지) — 숫자는 중앙 유지
+            5 => {   // 미니 배지: 좌상단 — 기본 번개(26)의 72% = 18.7, 숫자는 중앙 유지
                 ind = 0.0;
-                charge_overlay_cut_r(&mut hi, l, 55.0, 20.0, 16.5, 26.0, 1.2, false, bolt, CLIP);
+                charge_overlay_cut_r(&mut hi, l, 12.0, 14.0, 11.9, 18.7, 1.2, false, bolt, CLIP);
             }
             6 => {   // 하이브리드: 윤곽선 + 온도계 채색
                 bolt_shape(&mut hi, cx + 0.4, 20.7, 12.0, 26.0, false, bolt, DIGIT_SHADOW);
@@ -1007,10 +1007,8 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool, bolt: u8, chg
                 fill_poly_dilated(&mut hi, &pts, 0.9, OUTLINE);
                 hi.fill_poly(&pts, INK);
             }
-            5 => {   // 미니 배지: 오른쪽에, 몸통 높이에 비례(최소 = wstack 배지 18.15)
-                let bh = (40.0 - 2.0 * m) / 20.3 * 18.15;
-                let bw = bh * 0.636;
-                charge_overlay_cut_r(&mut hi, l, 62.5 - bw / 2.0, 20.0, bw, bh, 1.5, false, bolt, clip);
+            5 => {   // 미니 배지: 우상단 — '미니' 비율은 wstack과 동일(기본 번개의 72%), 27×0.72=19.4
+                charge_overlay_cut_r(&mut hi, l, 55.0, m + 9.7, 12.3, 19.4, 1.5, false, bolt, clip);
             }
             6 => {   // 하이브리드
                 bolt_shape(&mut hi, 34.4, 20.7, 17.0, 27.0, false, bolt, DIGIT_SHADOW);
