@@ -198,19 +198,21 @@ function powerCompareHTML(s) {
     [(signed ? `${w >= 0 ? '+' : '−'}${Math.abs(w).toFixed(2)}` : w.toFixed(2)) + 'W',
      v != null ? `${v.toFixed(2)}V` : null, a != null ? `${Math.round(a)}mA` : null].filter(Boolean).join(' · ');
   const charging = s.powerW != null ? s.powerW > 0.05 : !!s.charging;
+  // 라벨은 짧게, 전체 용어·설명은 hover 툴팁(title — i18n이 title도 번역)으로
   const bat = [
-    ['어댑터−시스템 (수지)', wva(s.powerW, V, s.amperage, true)],
-    ['ioreg V×I (셀 실측)', wva(s.ioregW, V, s.ioregA, true)],
-    ['PPBR (방전 전용)', s.ppbrW == null ? '–' : charging ? '충전 중 ~0 (방전 시만)' : wva(-s.ppbrW, V, V ? -s.ppbrW / V * 1000 : null, true)],
+    ['어댑터−시스템 (수지)', wva(s.powerW, V, s.amperage, true), '에너지 수지: 어댑터 입력(PDTR) − 시스템 소비(PSTR) = 배터리로 드나드는 전력. +충전/−방전, 실시간.'],
+    ['ioreg V×I (셀 실측)', wva(s.ioregW, V, s.ioregA, true), '배터리 셀의 전압×전류 직접 실측 (macOS ioreg). 정확하지만 ~60초마다 갱신.'],
+    ['PPBR (방전 전용)', s.ppbrW == null ? '–' : charging ? '충전 중 ~0 (방전 시만)' : wva(-s.ppbrW, V, V ? -s.ppbrW / V * 1000 : null, true), 'SMC PPBR: 배터리 버스 방전 전력 직접 실측. 방전 중엔 정확, 충전 중엔 ~0.'],
   ];
-  let html = `<div class="sec">배터리 전력 (방식별)</div>` + bat.map(([k, v]) => `<div class="cmp"><span>${k}</span><b>${v}</b></div>`).join('');
+  const cmpRow = ([k, v, t]) => `<div class="cmp"><span${t ? ` title="${t}"` : ''}>${k}</span><b>${v}</b></div>`;
+  let html = `<div class="sec">배터리 전력 (방식별)</div>` + bat.map(cmpRow).join('');
   if (s.ac) {
     const nw = detail.adapterWatts, nv = detail.adapterVoltage;
     const adp = [
-      ['ioreg 공칭/정격', wva(nw, nv, (nw && nv) ? nw / nv * 1000 : null, false)],
-      ['SMC 실측 (PDTR·VD0R·ID0R)', wva(s.adapterW, s.dcInV, s.dcInA != null ? s.dcInA * 1000 : null, false)],
+      ['ioreg 공칭/정격', wva(nw, nv, (nw && nv) ? nw / nv * 1000 : null, false), '어댑터가 협상한 계약(공칭/정격) 값 — 실제 전달값이 아니라 최대 약속치.'],
+      ['SMC 실측 (PDTR·VD0R·ID0R)', wva(s.adapterW, s.dcInV, s.dcInA != null ? s.dcInA * 1000 : null, false), '지금 실제로 전달 중인 전력(PDTR)·전압(VD0R)·전류(ID0R) 실측.'],
     ];
-    html += `<div class="sec">어댑터 전력 (방식별)</div>` + adp.map(([k, v]) => `<div class="cmp"><span>${k}</span><b>${v}</b></div>`).join('');
+    html += `<div class="sec">어댑터 전력 (방식별)</div>` + adp.map(cmpRow).join('');
   }
   return html;
 }
@@ -459,7 +461,7 @@ function menubarHTML() {
     ${cfg.widget === 'icon' ? `<div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>` : ''}
     ${cfg.widget === 'stack' ? `<div class="srow"><span>숫자 색·테두리</span>${tglEl('digit_deco', cfg.digit_deco)}</div>` : ''}
     ${cfg.widget === 'wstack' ? `<div class="srow"><span>위 숫자 전력</span><span class="subseg"><button data-w7="sys" class="${cfg.w7_src !== 'bat' ? 'on' : ''}">시스템</button><button data-w7="bat" class="${cfg.w7_src === 'bat' ? 'on' : ''}">배터리</button></span></div>` : ''}
-    <div class="srow"><span>충전 번개</span><span class="subseg"><button data-bolt="classic" class="${cfg.bolt_style !== 'bold' ? 'on' : ''}" title="가늘고 긴 Stats식 번개">기본</button><button data-bolt="bold" class="${cfg.bolt_style === 'bold' ? 'on' : ''}" title="넓적한 만화체 번개">굵게</button></span></div>
+    <div class="srow"><span>충전 번개</span><span class="subseg"><button data-bolt="classic" class="${cfg.bolt_style !== 'bold' ? 'on' : ''}" title="가늘고 긴 Stats식 번개">기본</button><button data-bolt="bold" class="${cfg.bolt_style === 'bold' ? 'on' : ''}" title="넓적한 만화체 번개 — David Bowie 'Aladdin Sane' 스타일">굵게</button></span></div>
     ${cfg.widget === 'wstack' ? `<div class="srow"><span title="충전 중 잔량이 낮으면 채움이 번개에 가려요 — 이때의 표시 방식">충전 표시 (저잔량)</span>${selEl('data-c', 'chg_fill', cfg.chg_fill || 'current', [
       ['current', '기존 (번개가 채움 위)'],
       ['waterline', '1 · 수위선'],

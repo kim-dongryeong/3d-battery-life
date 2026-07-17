@@ -799,5 +799,11 @@
   "기본": "Classic",
   "굵게": "Bold",
   "가늘고 긴 Stats식 번개": "Slim, tall Stats-style bolt",
-  "넓적한 만화체 번개": "Broad comic-style bolt"
+  "넓적한 만화체 번개": "Broad comic-style bolt",
+  "에너지 수지: 어댑터 입력(PDTR) − 시스템 소비(PSTR) = 배터리로 드나드는 전력. +충전/−방전, 실시간.": "Energy balance: adapter input (PDTR) − system draw (PSTR) = power flowing in/out of the battery. + charging / − discharging, real-time.",
+  "배터리 셀의 전압×전류 직접 실측 (macOS ioreg). 정확하지만 ~60초마다 갱신.": "Battery cell voltage × current, measured directly (macOS ioreg). Accurate but refreshes only ~every 60 s.",
+  "SMC PPBR: 배터리 버스 방전 전력 직접 실측. 방전 중엔 정확, 충전 중엔 ~0.": "SMC PPBR: battery-bus discharge power, measured directly. Accurate while discharging; reads ~0 while charging.",
+  "어댑터가 협상한 계약(공칭/정격) 값 — 실제 전달값이 아니라 최대 약속치.": "The negotiated contract (nominal/rated) values — the promised maximum, not what is actually delivered.",
+  "지금 실제로 전달 중인 전력(PDTR)·전압(VD0R)·전류(ID0R) 실측.": "The power (PDTR), voltage (VD0R) and current (ID0R) actually being delivered right now.",
+  "넓적한 만화체 번개 — David Bowie 'Aladdin Sane' 스타일": "Broad comic-style bolt — David Bowie 'Aladdin Sane' style"
 }
