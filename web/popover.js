@@ -463,7 +463,7 @@ function menubarHTML() {
     ${cfg.widget === 'wstack' ? `<div class="srow"><span>위 숫자 전력</span><span class="subseg"><button data-w7="sys" class="${cfg.w7_src !== 'bat' ? 'on' : ''}">시스템</button><button data-w7="bat" class="${cfg.w7_src === 'bat' ? 'on' : ''}">배터리</button></span></div>` : ''}
     <div class="srow"><span>충전 번개</span><span class="subseg"><button data-bolt="classic" class="${cfg.bolt_style !== 'bold' ? 'on' : ''}" title="가늘고 긴 Stats식 번개">기본</button><button data-bolt="bold" class="${cfg.bolt_style === 'bold' ? 'on' : ''}" title="넓적한 만화체 번개 — David Bowie 'Aladdin Sane' 스타일">Bowie</button></span></div>
     ${cfg.widget === 'wstack' ? `<div class="srow"><span title="충전 중 잔량이 낮으면 채움이 번개에 가려요 — 이때의 표시 방식">충전 표시 (저잔량)</span>${selEl('data-c', 'chg_fill', cfg.chg_fill || 'current', [
-      ['current', '1 · 기존 (번개가 채움 위)'],
+      ['current', '1 · 일반 (번개가 채움 위)'],
       ['waterline', '2 · 수위선'],
       ['thermo', '3 · 온도계 번개'],
       ['swap', '4 · 사이드 스왑'],

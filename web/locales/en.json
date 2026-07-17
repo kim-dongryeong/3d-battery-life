@@ -798,11 +798,11 @@
   "어댑터가 협상한 계약(공칭/정격) 값 — 실제 전달값이 아니라 최대 약속치.": "The negotiated contract (nominal/rated) values — the promised maximum, not what is actually delivered.",
   "지금 실제로 전달 중인 전력(PDTR)·전압(VD0R)·전류(ID0R) 실측.": "The power (PDTR), voltage (VD0R) and current (ID0R) actually being delivered right now.",
   "넓적한 만화체 번개 — David Bowie 'Aladdin Sane' 스타일": "Broad comic-style bolt — David Bowie 'Aladdin Sane' style",
-  "1 · 기존 (번개가 채움 위)": "1 · Current (bolt over fill)",
   "2 · 수위선": "2 · Waterline",
   "3 · 온도계 번개": "3 · Thermometer bolt",
   "4 · 사이드 스왑": "4 · Side swap",
   "5 · 윤곽선 번개": "5 · Outlined bolt",
   "6 · 미니 배지": "6 · Mini badge",
-  "7 · 윤곽선+온도계": "7 · Outline + thermometer"
+  "7 · 윤곽선+온도계": "7 · Outline + thermometer",
+  "1 · 일반 (번개가 채움 위)": "1 · Plain (bolt over fill)"
 }
