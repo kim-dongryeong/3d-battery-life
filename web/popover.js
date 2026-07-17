@@ -16,7 +16,7 @@ let procN = +ls('battProcN', '6');                    // top-processes count · 
 let sparkMode = qs('sm') || ls('battSparkMode', 'pct');   // mini-chart metric: pct | w | 3d
 let sparkH = +(qs('sh') ?? ls('battSparkH', '6'));        // mini-chart window hours: 6 | 24 | 0(all)
 let three = null, t3d = null, t3dLoading = false;     // lazy Three.js + persistent live-3D scene (survives DOM rebuilds)
-let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w_sys: true, text_w_bat: false, w7_src: 'sys', digit_deco: true, bolt_style: 'classic', text_temp: false, text_adp: false, chg_fill: 'current', small_unit: false };
+let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w_sys: true, text_w_bat: false, w7_src: 'sys', digit_deco: true, bolt_style: 'bold', text_temp: false, text_adp: false, chg_fill: 'current', small_unit: false };
 let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
 // menu-bar preview (settings panel): glyph dumps from the Rust tray renderer via /api/tray-preview
 let pvSim = 'cur', pvData = null, pvTimer = 0, pvMeasure = null;
@@ -461,15 +461,15 @@ function menubarHTML() {
     ${cfg.widget === 'icon' ? `<div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>` : ''}
     ${cfg.widget === 'stack' ? `<div class="srow"><span>숫자 색·테두리</span>${tglEl('digit_deco', cfg.digit_deco)}</div>` : ''}
     ${cfg.widget === 'wstack' ? `<div class="srow"><span>위 숫자 전력</span><span class="subseg"><button data-w7="sys" class="${cfg.w7_src !== 'bat' ? 'on' : ''}">시스템</button><button data-w7="bat" class="${cfg.w7_src === 'bat' ? 'on' : ''}">배터리</button></span></div>` : ''}
-    <div class="srow"><span>충전 번개</span><span class="subseg"><button data-bolt="classic" class="${cfg.bolt_style !== 'bold' ? 'on' : ''}" title="가늘고 긴 Stats식 번개">기본</button><button data-bolt="bold" class="${cfg.bolt_style === 'bold' ? 'on' : ''}" title="넓적한 만화체 번개 — David Bowie 'Aladdin Sane' 스타일">굵게</button></span></div>
+    <div class="srow"><span>충전 번개</span><span class="subseg"><button data-bolt="classic" class="${cfg.bolt_style !== 'bold' ? 'on' : ''}" title="가늘고 긴 Stats식 번개">기본</button><button data-bolt="bold" class="${cfg.bolt_style === 'bold' ? 'on' : ''}" title="넓적한 만화체 번개 — David Bowie 'Aladdin Sane' 스타일">Bowie</button></span></div>
     ${cfg.widget === 'wstack' ? `<div class="srow"><span title="충전 중 잔량이 낮으면 채움이 번개에 가려요 — 이때의 표시 방식">충전 표시 (저잔량)</span>${selEl('data-c', 'chg_fill', cfg.chg_fill || 'current', [
-      ['current', '기존 (번개가 채움 위)'],
-      ['waterline', '1 · 수위선'],
-      ['thermo', '2 · 온도계 번개'],
-      ['swap', '3 · 사이드 스왑'],
-      ['outline', '4 · 윤곽선 번개'],
-      ['badge', '5 · 미니 배지'],
-      ['hybrid', '6 · 윤곽선+온도계'],
+      ['current', '1 · 기존 (번개가 채움 위)'],
+      ['waterline', '2 · 수위선'],
+      ['thermo', '3 · 온도계 번개'],
+      ['swap', '4 · 사이드 스왑'],
+      ['outline', '5 · 윤곽선 번개'],
+      ['badge', '6 · 미니 배지'],
+      ['hybrid', '7 · 윤곽선+온도계'],
     ])}</div>` : ''}
     <div class="srow"><span title="아이콘 위 전력과 옆 텍스트의 W를 작은 아래 첨자로 — 메뉴바 폭 절약">단위 W 작게</span>${tglEl('small_unit', !!cfg.small_unit)}</div>
     <div class="srow"><span>열기 단축키 <kbd>⌥⌃B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>`;

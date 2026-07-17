@@ -157,7 +157,7 @@ fn d_true() -> bool { true }
 fn d_low() -> u8 { 20 }
 fn d_high() -> u8 { 80 }
 fn d_widget() -> String { "icon".into() }
-fn d_bolt_style() -> String { "classic".into() }
+fn d_bolt_style() -> String { "bold".into() }   // 기본 번개 = Bowie (Aladdin Sane풍 만화체)
 fn d_chg_fill() -> String { "current".into() }
 impl Default for Cfg {
     fn default() -> Self {
