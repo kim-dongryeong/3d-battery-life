@@ -99,7 +99,7 @@ function sanitizeCfg(p) {
   if (typeof p.text_w_bat === 'boolean') o.text_w_bat = p.text_w_bat;
   if (['sys', 'bat'].includes(p.w7_src)) o.w7_src = p.w7_src;
   if (typeof p.digit_deco === 'boolean') o.digit_deco = p.digit_deco;
-  if (['classic', 'bold'].includes(p.bolt_style)) o.bolt_style = p.bolt_style;
+  if (['classic', 'bold', 'zap'].includes(p.bolt_style)) o.bolt_style = p.bolt_style;
   if (typeof p.text_temp === 'boolean') o.text_temp = p.text_temp;
   if (typeof p.text_adp === 'boolean') o.text_adp = p.text_adp;
   if (['current', 'waterline', 'thermo', 'swap', 'outline', 'badge', 'hybrid'].includes(p.chg_fill)) o.chg_fill = p.chg_fill;   // 충전 표시(저잔량) 모드

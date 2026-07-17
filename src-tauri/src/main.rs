@@ -434,7 +434,7 @@ fn main() {
                             // 버튼 탐색 3회 연속 실패 시(비정상) 기존 tray API 폴백.
                             if ATTR_MISS.load(Ordering::Relaxed) < 3 {
                                 let icon = if icon_changed {
-                                    Some(live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat, c.bold_bolt(), c.chg_mode(), c.small_unit))
+                                    Some(live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat, c.bolt_id(), c.chg_mode(), c.small_unit))
                                 } else { None };   // None = 아이콘 유지 (타이틀만 갱신)
                                 let t2 = title.clone();
                                 let su = c.small_unit;
@@ -443,7 +443,7 @@ fn main() {
                                 // ALWAYS Some(…): set_title(None)은 이전 텍스트를 남긴다(좀비 "9.8W")
                                 let _ = tray.set_title(Some(title.clone()));
                                 if icon_changed {
-                                    match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat, c.bold_bolt(), c.chg_mode(), c.small_unit) {
+                                    match live::menu_icon(&l, c.colorize, &c.widget, c.glyph_xl, lpm, c.digit_deco, w7, w7_bat, c.bolt_id(), c.chg_mode(), c.small_unit) {
                                         Some((rgba, w, h)) => { let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))); }
                                         None => { let _ = tray.set_icon(None); }   // text-only widget
                                     }

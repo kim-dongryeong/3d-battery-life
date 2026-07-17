@@ -416,7 +416,7 @@ function tailHTML(s) { return powerCompareHTML(s) + measureHTML() + detailHTML(s
 // ── settings panel (gear) ──────────────────────────────────────────────
 // data-k = a localStorage display pref (popover-only) · data-c = a server cfg key (menu-bar/alerts)
 const selEl = (attr, key, cur, opts) => `<select ${attr}="${key}">` +
-  opts.map(([v, l]) => `<option value="${v}"${String(v) === String(cur) ? ' selected' : ''}>${l}</option>`).join('') + `</select>`;
+  opts.map(([v, l, dis]) => `<option value="${v}"${String(v) === String(cur) ? ' selected' : ''}${dis ? ' disabled' : ''}>${l}</option>`).join('') + `</select>`;
 const tglEl = (key, on) => `<button class="tgl${on ? ' on' : ''}" data-c="${key}" role="switch" aria-checked="${on}"><i></i></button>`;
 const pctOpts = steps => steps.map(v => [String(v), v === 0 ? '끄기' : `${v}%`]);
 
@@ -461,15 +461,16 @@ function menubarHTML() {
     ${cfg.widget === 'icon' ? `<div class="srow"><span>큰 아이콘</span>${tglEl('glyph_xl', cfg.glyph_xl)}</div>` : ''}
     ${cfg.widget === 'stack' ? `<div class="srow"><span>숫자 색·테두리</span>${tglEl('digit_deco', cfg.digit_deco)}</div>` : ''}
     ${cfg.widget === 'wstack' ? `<div class="srow"><span>위 숫자 전력</span><span class="subseg"><button data-w7="sys" class="${cfg.w7_src !== 'bat' ? 'on' : ''}">시스템</button><button data-w7="bat" class="${cfg.w7_src === 'bat' ? 'on' : ''}">배터리</button></span></div>` : ''}
-    <div class="srow"><span>충전 번개</span><span class="subseg"><button data-bolt="classic" class="${cfg.bolt_style !== 'bold' ? 'on' : ''}" title="가늘고 긴 Stats식 번개">기본</button><button data-bolt="bold" class="${cfg.bolt_style === 'bold' ? 'on' : ''}" title="넓적한 만화체 번개 — David Bowie 'Aladdin Sane' 스타일">Bowie</button></span></div>
-    ${cfg.widget === 'wstack' ? `<div class="srow"><span title="충전 중 잔량이 낮으면 채움이 번개에 가려요 — 이때의 표시 방식">충전 표시 (저잔량)</span>${selEl('data-c', 'chg_fill', cfg.chg_fill || 'current', [
+    <div class="srow"><span>충전 번개</span><span class="subseg"><button data-bolt="classic" class="${!['bold', 'zap'].includes(cfg.bolt_style) ? 'on' : ''}" title="가늘고 긴 Stats식 번개">기본</button><button data-bolt="bold" class="${cfg.bolt_style === 'bold' ? 'on' : ''}" title="넓적한 만화체 번개 — David Bowie 'Aladdin Sane' 스타일">Bowie</button><button data-bolt="zap" class="${cfg.bolt_style === 'zap' ? 'on' : ''}" title="각진 6꼭지점 번개 — 참조 아트에서 추출한 날카로운 실루엣">Zap</button></span></div>
+    ${cfg.widget !== 'text' ? `<div class="srow"><span title="충전 중 잔량이 낮으면 채움이 번개에 가려요 — 이때의 표시 방식">충전 표시 (저잔량)</span>${selEl('data-c', 'chg_fill', cfg.chg_fill || 'current', [
+      // 채움이 없는 iconpct는 1·5·6만, 세로 막대는 번개가 셀을 거의 채워 스왑 이동이 무의미 → 비활성
       ['current', '1 · 일반 (번개가 채움 위)'],
-      ['waterline', '2 · 수위선'],
-      ['thermo', '3 · 온도계 번개'],
-      ['swap', '4 · 사이드 스왑'],
+      ['waterline', '2 · 수위선', cfg.widget === 'iconpct'],
+      ['thermo', '3 · 온도계 번개', cfg.widget === 'iconpct'],
+      ['swap', '4 · 사이드 스왑', cfg.widget === 'iconpct' || cfg.widget === 'bar'],
       ['outline', '5 · 윤곽선 번개'],
       ['badge', '6 · 미니 배지'],
-      ['hybrid', '7 · 윤곽선+온도계'],
+      ['hybrid', '7 · 윤곽선+온도계', cfg.widget === 'iconpct'],
     ])}</div>` : ''}
     <div class="srow"><span title="아이콘 위 전력과 옆 텍스트의 W를 작은 아래 첨자로 — 메뉴바 폭 절약">단위 W 작게</span>${tglEl('small_unit', !!cfg.small_unit)}</div>
     <div class="srow"><span>열기 단축키 <kbd>⌥⌃B</kbd></span>${tglEl('shortcut', cfg.shortcut)}</div>`;
@@ -526,7 +527,7 @@ function glyphCanvas(styleKey, dispH, pixelated) {
   const baseVariant = styleKey === 'icon' && cfg.glyph_xl ? 'icon_xl'
     : styleKey === 'stack' && !cfg.digit_deco ? 'stack_plain'
     : styleKey === 'wstack' && cfg.w7_src === 'bat' ? 'wstack_bat' : styleKey;
-  const variant = cfg.bolt_style === 'bold' ? `${baseVariant}_bold` : baseVariant;
+  const variant = cfg.bolt_style === 'zap' ? `${baseVariant}_zap` : cfg.bolt_style === 'bold' ? `${baseVariant}_bold` : baseVariant;
   const g = set && set[variant];
   if (!g) return null;
   try {
