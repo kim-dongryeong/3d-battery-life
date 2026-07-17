@@ -175,19 +175,19 @@ function batterySVG(pct, s) {
 //   배터리 = signed battery power/voltage/current (+ charging · 0 idle · − discharging)
 function rowsPower(s) {
   const r = [];
-  if (s.systemW != null) r.push(['시스템', `${s.systemW.toFixed(1)} W <i class="ld"></i>`]);
+  if (s.systemW != null) r.push(['시스템', `${s.systemW.toFixed(1)}W <i class="ld"></i>`]);
   if (s.ac) {
     // 실측 우선: SMC VD0R(전압)·ID0R(전류) 센서값. SMC 브리지가 없을 때만 공칭 전압 + W/V 파생 전류로 폴백.
     const w = s.adapterW;
     const v = s.dcInV ?? detail.adapterVoltage;
     const a = s.dcInA != null ? Math.round(s.dcInA * 1000)
       : (w != null && v) ? Math.round(w / v * 1000) : null;
-    const p = [w != null ? `${w.toFixed(1)} W` : null, v != null ? `${v.toFixed(2)} V` : null, a != null ? `${a} mA` : null].filter(Boolean);
+    const p = [w != null ? `${w.toFixed(1)}W` : null, v != null ? `${v.toFixed(2)}V` : null, a != null ? `${a}mA` : null].filter(Boolean);
     if (p.length) r.push(['어댑터', p.join(' · ') + (w != null ? ' <i class="ld"></i>' : '')]);
   }
   const bp = s.powerW;
-  const bw = bp == null ? null : Math.abs(bp) < 0.05 ? '0 W' : `${bp > 0 ? '+' : '−'}${Math.abs(bp).toFixed(2)} W`;
-  const b = [bw, s.voltage != null ? `${s.voltage.toFixed(2)} V` : null, s.amperage != null ? `${s.amperage} mA` : null].filter(Boolean);
+  const bw = bp == null ? null : Math.abs(bp) < 0.05 ? '0W' : `${bp > 0 ? '+' : '−'}${Math.abs(bp).toFixed(2)}W`;
+  const b = [bw, s.voltage != null ? `${s.voltage.toFixed(2)}V` : null, s.amperage != null ? `${s.amperage}mA` : null].filter(Boolean);
   r.push(['배터리', (b.length ? b.join(' · ') : '–') + (s.batLive ? ' <i class="ld"></i>' : '')]);
   return r;
 }
@@ -195,8 +195,8 @@ function rowsPower(s) {
 function powerCompareHTML(s) {
   const V = s.voltage;
   const wva = (w, v, a, signed) => w == null ? '–' :
-    [(signed ? `${w >= 0 ? '+' : '−'}${Math.abs(w).toFixed(2)}` : w.toFixed(2)) + ' W',
-     v != null ? `${v.toFixed(2)} V` : null, a != null ? `${Math.round(a)} mA` : null].filter(Boolean).join(' · ');
+    [(signed ? `${w >= 0 ? '+' : '−'}${Math.abs(w).toFixed(2)}` : w.toFixed(2)) + 'W',
+     v != null ? `${v.toFixed(2)}V` : null, a != null ? `${Math.round(a)}mA` : null].filter(Boolean).join(' · ');
   const charging = s.powerW != null ? s.powerW > 0.05 : !!s.charging;
   const bat = [
     ['어댑터−시스템 (수지)', wva(s.powerW, V, s.amperage, true)],
