@@ -563,6 +563,18 @@ fn show_main(app: &AppHandle) {
 
 fn show_main_ready(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        // 창은 시작 시점의 Space에 귀속돼, 다른 Desktop에서 열면 macOS가 그 Space로 '이동'해버린다
+        // (kdr: 항상 Desktop 2에서 열림). MoveToActiveSpace(1<<1)를 켜서 창이 현재 Space로 따라오게.
+        #[cfg(target_os = "macos")]
+        if let Ok(ptr) = w.ns_window() {
+            use objc::runtime::Object;
+            use objc::{msg_send, sel, sel_impl};
+            unsafe {
+                let nsw = ptr as *mut Object;
+                let cur: u64 = msg_send![nsw, collectionBehavior];
+                let _: () = msg_send![nsw, setCollectionBehavior: cur | 2u64];
+            }
+        }
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
