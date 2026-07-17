@@ -76,8 +76,13 @@ fn demote_if_no_visible_ui(app: &AppHandle) {
     let main_visible = app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false));
     let pop_visible = app.get_webview_window("popover").is_some_and(|w| w.is_visible().unwrap_or(false));
     if !main_visible && !pop_visible {
-        APP_MODE.store(0, Ordering::SeqCst); // also cancels an in-flight promotion
-        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+        // 승격 대기(1) 중엔 취소하지 않는다 — 팝오버가 승격 없이 뜨게 된 뒤(574675a), '3D 리포트'
+        // 클릭 시 [팝오버 hide → 이 demote가 뷰어의 진행 중 승격을 0으로 리셋 → 300ms 뒤 CAS(1→2)
+        // 실패 → show_main 액션 증발]로 뷰어가 안 열리는 레이스가 있었다. 취소는 완료 상태(2)만.
+        if APP_MODE.compare_exchange(2, 0, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+            || APP_MODE.load(Ordering::SeqCst) == 0 {
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+        }
     }
 }
 
