@@ -1088,10 +1088,12 @@ const VIEWS = { line: '2D선', heat: '히트맵', '3d': '3D' }, GEOMS = { lines:
 function renderTrend() {
   const el = document.getElementById('trendchart');
   const rt = state.rates;
-  if (!rt || !rt.perCell) { disposeTrend3D(); el.hidden = true; return; }
+  if (!rt || !rt.perCell) { disposeTrend3D(); el.hidden = true; document.documentElement.classList.remove('trend-folded'); return; }
   el.hidden = false;
   el.classList.toggle('big', !!state.trendBig);
   el.classList.toggle('folded', !!state.foldTrend);
+  // 추세가 접혀 '보일' 때만 html.trend-folded → CSS가 #buckets를 위로 띄우고 접힌 필을 그 아래로 옮긴다
+  document.documentElement.classList.toggle('trend-folded', !!state.foldTrend);
   const series = trendSeries();
   const view = state.trendAll ? state.trendView : 'line';
   // collapsed (not 확대) hides the fiddly controls behind "⋯" so the small graph stays uncluttered

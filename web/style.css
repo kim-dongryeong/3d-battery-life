@@ -269,11 +269,16 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #buckets.folded > :not(h2) { display: none; }
 #buckets.folded h2 { margin: 0; }
 #buckets.folded h2 small, #buckets.folded h2 .info { display: none; }
-#trendchart.folded { width: auto; }
+/* 접힘(추세): 작은 필로 줄이고 왼쪽 아래로 옮겨 '구간별 방전 속도' 바로 아래에 세로로 놓는다
+   (기존엔 left:284로 그 오른쪽에 떠 있어 어색했음). 펼치면 .folded가 빠져 base(left:284)로 복귀. */
+#trendchart.folded { left: 16px; bottom: 16px; width: auto; max-width: 256px; }
 #trendchart.folded #trend-body, #trendchart.folded .trow, #trendchart.folded .slope { display: none; }
 #trendchart.folded h2 { margin: 0; }
 #trendchart.folded h2 small { display: none; }
 #trendchart.folded .tbtns button:not(.fold) { display: none; }
+/* 추세가 접혀 보일 때만 #buckets를 위로 띄워 접힌 필이 그 아래 빈 자리에 앉게 한다.
+   클래스 기반(html.trend-folded, specificity 0,1,1,1)이라 base #buckets를 이기고 dormant 레이아웃 규칙엔 안 샌다. */
+html.trend-folded #buckets { bottom: 70px; max-height: calc(100vh - 86px); }
 
 
 /* prominent Maximum Capacity (macOS 배터리 성능 대응) */
