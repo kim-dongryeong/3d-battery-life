@@ -296,7 +296,7 @@ function renderSpark() {
   if (sparkMode === 'w') { const vs = pts.map(p => p.w); sub = `${Math.min(...vs).toFixed(1)}–${Math.max(...vs).toFixed(1)} W`; }
   else if (sparkMode === '3d') sub = '잔량 3D · 드래그로 회전';
   else { const vs = pts.map(p => p.pct); sub = `${Math.min(...vs)}–${Math.max(...vs)}%`; }   // 창 내 잔량 범위(최저–최고). 순증감(%p)은 긴 창에선 무의미
-  foot.innerHTML = `<div class="spmore"><span class="spsub">${hrs}시간 · ${sub}</span><span data-report>3D 분석 리포트 →</span></div>`;
+  foot.innerHTML = `<div class="spmore"><span class="spsub">${hrs}시간 · ${sub}</span><span data-report>Joule 분석 리포트 →</span></div>`;
   if (sparkMode === '3d') start3D(chart);
   else { stop3D(); chart.innerHTML = spark2D(pts); }
 }
@@ -747,7 +747,7 @@ function renderMenu() {
   if (!moreOpen) { el.hidden = true; el.innerHTML = ''; return; }
   const recLabel = (live && live.recording) ? '⏸  배터리 기록 중지' : '▶  배터리 기록 시작';
   el.innerHTML =
-    `<button data-m="report">📊  3D 분석 리포트</button>` +
+    `<button data-m="report">📊  Joule 분석 리포트</button>` +
     `<button data-m="settings">⚙  설정<span class="mk">⌘,</span></button>` +
     `<button data-m="record">${recLabel}</button>` +
     `<button data-m="quit" class="danger">⏻  앱 종료</button>`;

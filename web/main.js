@@ -1989,7 +1989,7 @@ document.querySelectorAll('.seg').forEach(seg => {
 // (shared via localStorage 'battLang' — same origin), so the viewer just reads and applies it.
 initI18n().then(() => {
   observeI18n();
-  const title = t('3D 분석 리포트');
+  const title = t('Joule — 분석 리포트');
   document.title = title;   // browser tab
   // Native window title bar: Tauri doesn't mirror document.title, and Tauri IPC is unreliable for this
   // external-URL window, so send it through the same file bridge as height/actions → Rust set_title.

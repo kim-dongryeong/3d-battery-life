@@ -278,7 +278,7 @@ fn main() {
             // Recording (launchd) is INDEPENDENT of the app — quitting the app never stops it.
             let recording = plist_path().exists();
             let status = MenuItem::with_id(app, "status", status_text(recording), false, None::<&str>)?;
-            let open = MenuItem::with_id(app, "open", "3D 분석 리포트 열기", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Joule 분석 리포트 열기", true, None::<&str>)?;
             // all display/menu-bar/alert settings now live in the popover's settings panel (gear)
             let settings_item = MenuItem::with_id(app, "settings", "설정 열기…", true, None::<&str>)?;
             // one recording item that toggles (was separate 시작/중지 — no need for both)
