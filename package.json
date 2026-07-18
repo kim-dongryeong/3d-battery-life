@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Track macOS battery discharge over time and explore it in 3D",
+  "description": "Joule — Battery, Power & Charging Analyzer for macOS. Track battery discharge over time and explore it in 3D.",
   "bin": {
     "battery-life": "bin/cli.js"
   },

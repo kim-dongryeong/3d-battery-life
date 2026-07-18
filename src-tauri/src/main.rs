@@ -1,4 +1,4 @@
-// Menu-bar (tray) desktop wrapper for 3D Battery Life.
+// Menu-bar (tray) desktop wrapper for Joule (Battery, Power & Charging Analyzer).
 // On launch it: spawns the bundled `battery-life serve` sidecar (local web server),
 // on first run asks (once) whether to enable auto-recording, and shows a tray icon
 // with "뷰어 열기 / 기록 시작 / 기록 중지 / 앱 종료". Build: see TAURI.md. Tauri v2.
@@ -112,7 +112,7 @@ fn run_record(sub: &'static str) {
 
 // First-run consent via a native macOS dialog (osascript — no extra plugin/permission needed).
 fn ask_consent() -> bool {
-    let script = "display dialog \"배터리 방전을 60초마다 자동 기록할까요?\n\n· 로그인 시 자동 시작, 백그라운드(거의 0% CPU)\n· 데이터는 이 맥에만 저장됩니다\n\n메뉴바 아이콘에서 언제든 켜고 끌 수 있어요.\" with title \"3D Battery Life\" buttons {\"나중에\", \"기록 켜기\"} default button \"기록 켜기\"";
+    let script = "display dialog \"배터리 방전을 60초마다 자동 기록할까요?\n\n· 로그인 시 자동 시작, 백그라운드(거의 0% CPU)\n· 데이터는 이 맥에만 저장됩니다\n\n메뉴바 아이콘에서 언제든 켜고 끌 수 있어요.\" with title \"Joule\" buttons {\"나중에\", \"기록 켜기\"} default button \"기록 켜기\"";
     match Sh::new("osascript").args(["-e", script]).output() {
         Ok(o) => String::from_utf8_lossy(&o.stdout).contains("기록 켜기"),
         Err(_) => false,
@@ -289,7 +289,7 @@ fn main() {
             let rec_for_menu = rec_item.clone();
             TrayIconBuilder::with_id("tray")
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("3D Battery Life")
+                .tooltip("Joule — Battery, Power & Charging Analyzer")
                 .menu(&menu)
                 .show_menu_on_left_click(false)   // left-click = popover; right-click = menu
                 .on_tray_icon_event(|tray, event| {
