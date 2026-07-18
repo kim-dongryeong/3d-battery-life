@@ -716,19 +716,23 @@ pub fn battery_pct_icon(l: &Live, colorize: bool, lpm: bool, bolt: u8, chg_mode:
     // left indicator so iconpct still shows charge state: bolt (charging) / plug (full), in ink.
     // 번개를 큼지막하게 → 그만큼 숫자 자리를 오른쪽으로 더 확보(ind)
     // iconpct는 채움이 없어 chg_fill은 4 윤곽선(어두운 테)·5 미니 배지만 의미가 있다 (나머지=기존).
+    // 치수 = 두께(32)에 wstack 비율 적용: 기본 번개 32×1.241(캔버스 상한 38.5), 미니 배지 32×0.894.
+    let bw = 17.1f32; let bh = 38.5f32;
+    let gw = 12.7f32; let gh = 28.6f32;
     let mut ind = if l.charging || l.full { 15.0f32 } else { 0.0 };
     if l.charging {
+        let cx = digits_bolt_x(13.0, bolt);
         match chg_mode {
             4 | 6 => {   // 윤곽선: 잉크색 번개에 얇은 어두운 테 — 밝은 메뉴바에서도 또렷하게
-                let pts = bolt_pts(digits_bolt_x(13.0, bolt), 20.0, 12.0, 27.0, false, bolt);
+                let pts = bolt_pts(cx, 20.0, bw, bh, false, bolt);
                 fill_poly_dilated(&mut hi, &pts, 0.9, (10, 22, 4, 235));
                 hi.fill_poly(&pts, ink);
             }
-            5 => {   // 미니 배지: 좌상단 — 기본 번개(27)의 72% = 19.4, 숫자 자리 넓게 유지
+            5 => {   // 미니 배지: 좌측 — 기본 번개의 72%, 숫자 자리 확보
                 ind = 12.0;
-                bolt_shape(&mut hi, 11.5, 15.0, 12.3, 19.4, false, bolt, ink);
+                bolt_shape(&mut hi, 12.0, 20.0, gw, gh, false, bolt, ink);
             }
-            _ => bolt_shape(&mut hi, digits_bolt_x(13.0, bolt), 20.0, 12.0, 27.0, false, bolt, ink),
+            _ => bolt_shape(&mut hi, cx, 20.0, bw, bh, false, bolt, ink),
         }
     }
     else if l.full { plug(&mut hi, 13.0, 9.0, 20.0, ink); }
@@ -758,47 +762,52 @@ pub fn combo_icon(l: &Live, colorize: bool, lpm: bool, bolt: u8, chg_mode: u8) -
     // chg_fill(충전 표시): 0 기존 · 1 수위선 · 2 온도계 · 3 사이드 스왑 · 4 윤곽선 · 5 배지 · 6 하이브리드
     const CLIP: (f32, f32, f32, f32) = (4.0, 6.0, 64.0, 34.0);   // inner zone (outline untouched)
     const OUTLINE: (u8, u8, u8, u8) = (10, 22, 4, 235);
+    // 치수 = 두께(32)에 wstack 비율: 기본 번개 32×1.241(캔버스 상한 38.5), 미니 배지 32×0.894.
+    let bw = 17.8f32; let bh = 38.5f32;
+    let gw = 13.2f32; let gh = 28.6f32;
+    let bolt_clip = (2.0, 0.5, 66.0, 39.5);   // 번개 컷아웃은 외곽선까지 포함 (숫자·온도계 clip은 CLIP 유지)
     let mut ind = if l.charging || l.full { 12.0f32 } else { 0.0 };
     if l.charging {
         let cx = digits_bolt_x(12.0, bolt);
-        let pts = bolt_pts(cx, 20.0, 12.0, 26.0, false, bolt);
+        let pts = bolt_pts(cx, 20.0, bw, bh, false, bolt);
         match chg_mode {
             1 => {   // 수위선: 채움 오른쪽 끝을 밝은 세로선으로 맨 위에 재표시
-                charge_overlay_cut(&mut hi, l, cx, 20.0, 12.0, 26.0, bolt, CLIP);
+                charge_overlay_cut(&mut hi, l, cx, 20.0, bw, bh, bolt, bolt_clip);
                 hi.fill_rrect(fx - 1.4, 7.2, fx + 1.4, 32.8, 1.4, (0, 0, 0, 115));
                 hi.fill_rrect(fx - 0.8, 7.8, fx + 0.8, 32.2, 0.8, fill);
             }
             2 => {   // 온도계: 채움 경계 왼쪽의 번개를 채움색으로 재도색
-                charge_overlay_cut(&mut hi, l, cx, 20.0, 12.0, 26.0, bolt, CLIP);
+                charge_overlay_cut(&mut hi, l, cx, 20.0, bw, bh, bolt, bolt_clip);
                 fill_poly_clip(&mut hi, &pts, fill, (4.0, 6.0, fx, 34.0));
             }
             3 => {   // 사이드 스왑: 잔량 <50%면 번개가 빈(오른쪽) 영역으로, 숫자는 왼쪽으로
                 if pct < 50.0 {
-                    charge_overlay_cut(&mut hi, l, 50.0, 20.0, 12.0, 26.0, bolt, CLIP);
-                    ind = -28.0;   // 숫자 중심 20 — 왼쪽(채움 위)
+                    charge_overlay_cut(&mut hi, l, 52.0, 20.0, bw, bh, bolt, bolt_clip);
+                    ind = -30.0;   // 숫자 중심 16 — 왼쪽(채움 위)
                 } else {
-                    charge_overlay_cut(&mut hi, l, cx, 20.0, 12.0, 26.0, bolt, CLIP);
+                    charge_overlay_cut(&mut hi, l, cx, 20.0, bw, bh, bolt, bolt_clip);
                 }
             }
             4 => {   // 윤곽선: 컷아웃 없음 — 얇은 어두운 테만, 채움 손실은 실루엣뿐
-                bolt_shape(&mut hi, cx + 0.4, 20.7, 12.0, 26.0, false, bolt, DIGIT_SHADOW);
+                bolt_shape(&mut hi, cx + 0.4, 20.7, bw, bh, false, bolt, DIGIT_SHADOW);
                 fill_poly_dilated(&mut hi, &pts, 0.9, OUTLINE);
                 hi.fill_poly(&pts, INK);
             }
-            5 => {   // 미니 배지: 좌상단 — 기본 번개(26)의 72% = 18.7, 숫자는 중앙 유지
+            5 => {   // 미니 배지: 오른쪽 빈 영역 — 두께×0.894 (기본 번개의 72%), 숫자는 중앙 유지
                 ind = 0.0;
-                charge_overlay_cut_r(&mut hi, l, 12.0, 14.0, 11.9, 18.7, 1.2, false, bolt, CLIP);
+                let gx = 64.0 - gw / 2.0 - 2.0;
+                charge_overlay_cut_r(&mut hi, l, gx, 20.0, gw, gh, 1.2, false, bolt, bolt_clip);
             }
             6 => {   // 하이브리드: 윤곽선 + 온도계 채색
-                bolt_shape(&mut hi, cx + 0.4, 20.7, 12.0, 26.0, false, bolt, DIGIT_SHADOW);
+                bolt_shape(&mut hi, cx + 0.4, 20.7, bw, bh, false, bolt, DIGIT_SHADOW);
                 fill_poly_dilated(&mut hi, &pts, 0.9, OUTLINE);
                 hi.fill_poly(&pts, INK);
                 fill_poly_clip(&mut hi, &pts, fill, (4.0, 6.0, fx, 34.0));
             }
-            _ => charge_overlay_cut(&mut hi, l, cx, 20.0, 12.0, 26.0, bolt, CLIP),
+            _ => charge_overlay_cut(&mut hi, l, cx, 20.0, bw, bh, bolt, bolt_clip),
         }
     } else if l.full {
-        charge_overlay_cut(&mut hi, l, digits_bolt_x(12.0, bolt), 20.0, 12.0, 26.0, bolt, CLIP);
+        charge_overlay_cut(&mut hi, l, digits_bolt_x(12.0, bolt), 20.0, 12.0, 26.0, bolt, CLIP);   // 완충 플러그 기존 크기
     }
     let digits = format!("{}", pct.round() as u32);
     stamp_digits_cut(&mut hi, &digits, 21.0, (6.0 + ind + 62.0) / 2.0, 20.0, 1.0, CLIP);
@@ -831,42 +840,46 @@ pub fn stack_icon(l: &Live, colorize: bool, lpm: bool, deco: bool, bolt: u8, chg
     let fx = 4.0 + fw;   // fill edge x — chg_fill 모드들이 참조
     hi.fill_rrect(4.0, 18.0, fx, 32.3, 3.0, fill);
     // stack: 미니 배터리를 꽉 채우는 번개. chg_fill 모드는 wstack과 동일한 문법.
-    const SCLIP: (f32, f32, f32, f32) = (3.0, 17.0, 39.0, 33.3);
+    const SCLIP: (f32, f32, f32, f32) = (3.0, 17.0, 39.0, 33.3);   // 내부 영역 (배지·온도계용)
+    let bolt_clip = (2.0, 14.5, 40.0, 36.0);   // 기본 번개는 외곽선을 가로질러 컷아웃도 외곽선 포함
     const OUTLINE: (u8, u8, u8, u8) = (10, 22, 4, 235);
+    // 치수 = 두께(20.3, wstack과 동일)에 wstack 비율: 기본 번개 25.2, 미니 배지 18.15.
+    let bw = 18.2f32; let bh = 25.2f32;
+    let gw = 13.1f32; let gh = 18.15f32;
     if l.charging {
-        let pts = bolt_pts(21.0, 26.0, 13.0, 18.0, false, bolt);
+        let pts = bolt_pts(21.0, 26.0, bw, bh, false, bolt);
         match chg_mode {
             1 => {   // 수위선
-                charge_overlay_cut(&mut hi, l, 21.0, 26.0, 13.0, 18.0, bolt, SCLIP);
+                charge_overlay_cut(&mut hi, l, 21.0, 26.0, bw, bh, bolt, bolt_clip);
                 hi.fill_rrect(fx - 1.2, 17.4, fx + 1.2, 32.9, 1.2, (0, 0, 0, 115));
                 hi.fill_rrect(fx - 0.7, 18.0, fx + 0.7, 32.3, 0.7, fill);
             }
             2 => {   // 온도계
-                charge_overlay_cut(&mut hi, l, 21.0, 26.0, 13.0, 18.0, bolt, SCLIP);
+                charge_overlay_cut(&mut hi, l, 21.0, 26.0, bw, bh, bolt, bolt_clip);
                 fill_poly_clip(&mut hi, &pts, fill, (3.0, 17.0, fx, 33.3));
             }
             3 => {   // 사이드 스왑: 잔량 <50%면 번개가 빈(오른쪽) 영역으로
                 let cx = if pct < 50.0 { 30.0 } else { 21.0 };
-                charge_overlay_cut(&mut hi, l, cx, 26.0, 13.0, 18.0, bolt, SCLIP);
+                charge_overlay_cut(&mut hi, l, cx, 26.0, bw, bh, bolt, bolt_clip);
             }
             4 => {   // 윤곽선
-                bolt_shape(&mut hi, 21.4, 26.7, 13.0, 18.0, false, bolt, DIGIT_SHADOW);
+                bolt_shape(&mut hi, 21.4, 26.7, bw, bh, false, bolt, DIGIT_SHADOW);
                 fill_poly_dilated(&mut hi, &pts, 0.8, OUTLINE);
                 hi.fill_poly(&pts, INK);
             }
-            5 => {   // 미니 배지: 오른쪽 끝, 크기는 wstack 배지와 동일(몸통 높이가 같음)
-                charge_overlay_cut_r(&mut hi, l, 33.0, 26.0, 11.55, 18.15, 1.5, false, bolt, SCLIP);
+            5 => {   // 미니 배지: 오른쪽 끝, 두께×0.894 (= wstack 배지)
+                charge_overlay_cut_r(&mut hi, l, 33.0, 26.0, gw, gh, 1.5, false, bolt, SCLIP);
             }
             6 => {   // 하이브리드
-                bolt_shape(&mut hi, 21.4, 26.7, 13.0, 18.0, false, bolt, DIGIT_SHADOW);
+                bolt_shape(&mut hi, 21.4, 26.7, bw, bh, false, bolt, DIGIT_SHADOW);
                 fill_poly_dilated(&mut hi, &pts, 0.8, OUTLINE);
                 hi.fill_poly(&pts, INK);
                 fill_poly_clip(&mut hi, &pts, fill, (3.0, 17.0, fx, 33.3));
             }
-            _ => charge_overlay_cut(&mut hi, l, 21.0, 26.0, 13.0, 18.0, bolt, SCLIP),
+            _ => charge_overlay_cut(&mut hi, l, 21.0, 26.0, bw, bh, bolt, bolt_clip),
         }
     } else if l.full {
-        charge_overlay_cut(&mut hi, l, 21.0, 26.0, 13.0, 18.0, bolt, SCLIP);
+        charge_overlay_cut(&mut hi, l, 21.0, 26.0, 13.0, 18.0, bolt, SCLIP);   // 완충 플러그 기존 크기
     }
     hi.down()
 }
@@ -983,43 +996,49 @@ pub fn battery_icon(l: &Live, colorize: bool, xl: bool, lpm: bool, bolt: u8, chg
     let fw = (56.0 * pct as f32 / 100.0).max(3.0);
     let fx = 6.0 + fw;   // fill edge x — chg_fill 모드들이 참조
     hi.fill_rrect(6.0, m + 4.0, fx, 36.0 - m, 3.0, fill);
-    // icon: 몸통 중앙의 큼지막한 번개. chg_fill 모드는 wstack과 동일한 문법.
-    let clip = (4.0, m + 2.0, 64.0, 38.0 - m);
+    // icon: 몸통 중앙의 큼지막한 번개. 치수 = 두께에 wstack 비율(기본 두께×1.241, 배지 두께×0.894).
+    let t = 40.0 - 2.0 * m;                       // 배터리 두께
+    let bh = (t * 1.2414_f32).min(38.5);          // 기본(채움) 번개 — 캔버스(40) 상한
+    let bw = bh * 0.6296_f32;                      // 원래 종횡비 17/27 유지
+    let gh = (t * 0.8941_f32).min(38.5);           // 미니 배지
+    let gw = gh * 0.6296_f32;
+    let clip = (2.0, 0.5, 66.0, 39.5);            // 번개가 상·하 외곽선을 가로지르므로 컷아웃도 외곽선 포함
     const OUTLINE: (u8, u8, u8, u8) = (10, 22, 4, 235);
     if l.charging {
-        let pts = bolt_pts(34.0, 20.0, 17.0, 27.0, false, bolt);
+        let pts = bolt_pts(34.0, 20.0, bw, bh, false, bolt);
         match chg_mode {
             1 => {   // 수위선
-                charge_overlay_cut(&mut hi, l, 34.0, 20.0, 17.0, 27.0, bolt, clip);
+                charge_overlay_cut(&mut hi, l, 34.0, 20.0, bw, bh, bolt, clip);
                 hi.fill_rrect(fx - 1.4, m + 3.2, fx + 1.4, 36.8 - m, 1.4, (0, 0, 0, 115));
                 hi.fill_rrect(fx - 0.8, m + 3.8, fx + 0.8, 36.2 - m, 0.8, fill);
             }
             2 => {   // 온도계
-                charge_overlay_cut(&mut hi, l, 34.0, 20.0, 17.0, 27.0, bolt, clip);
+                charge_overlay_cut(&mut hi, l, 34.0, 20.0, bw, bh, bolt, clip);
                 fill_poly_clip(&mut hi, &pts, fill, (4.0, m + 2.0, fx, 38.0 - m));
             }
             3 => {   // 사이드 스왑: 잔량 <50%면 번개가 빈(오른쪽) 영역으로
                 let cx = if pct < 50.0 { 48.0 } else { 34.0 };
-                charge_overlay_cut(&mut hi, l, cx, 20.0, 17.0, 27.0, bolt, clip);
+                charge_overlay_cut(&mut hi, l, cx, 20.0, bw, bh, bolt, clip);
             }
             4 => {   // 윤곽선
-                bolt_shape(&mut hi, 34.4, 20.7, 17.0, 27.0, false, bolt, DIGIT_SHADOW);
+                bolt_shape(&mut hi, 34.4, 20.7, bw, bh, false, bolt, DIGIT_SHADOW);
                 fill_poly_dilated(&mut hi, &pts, 0.9, OUTLINE);
                 hi.fill_poly(&pts, INK);
             }
-            5 => {   // 미니 배지: 우상단 — '미니' 비율은 wstack과 동일(기본 번개의 72%), 27×0.72=19.4
-                charge_overlay_cut_r(&mut hi, l, 55.0, m + 9.7, 12.3, 19.4, 1.5, false, bolt, clip);
+            5 => {   // 미니 배지: 오른쪽에, 두께×0.894 (기본 번개의 72%)
+                let gx = 64.0 - gw / 2.0 - 2.0;
+                charge_overlay_cut_r(&mut hi, l, gx, 20.0, gw, gh, 1.5, false, bolt, clip);
             }
             6 => {   // 하이브리드
-                bolt_shape(&mut hi, 34.4, 20.7, 17.0, 27.0, false, bolt, DIGIT_SHADOW);
+                bolt_shape(&mut hi, 34.4, 20.7, bw, bh, false, bolt, DIGIT_SHADOW);
                 fill_poly_dilated(&mut hi, &pts, 0.9, OUTLINE);
                 hi.fill_poly(&pts, INK);
                 fill_poly_clip(&mut hi, &pts, fill, (4.0, m + 2.0, fx, 38.0 - m));
             }
-            _ => charge_overlay_cut(&mut hi, l, 34.0, 20.0, 17.0, 27.0, bolt, clip),
+            _ => charge_overlay_cut(&mut hi, l, 34.0, 20.0, bw, bh, bolt, clip),
         }
     } else if l.full {
-        charge_overlay_cut(&mut hi, l, 34.0, 20.0, 17.0, 27.0, bolt, clip);
+        charge_overlay_cut(&mut hi, l, 34.0, 20.0, 17.0, 27.0, bolt, clip);   // 완충 플러그는 기존 크기 유지
     }
     hi.down()
 }
