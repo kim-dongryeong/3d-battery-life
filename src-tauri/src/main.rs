@@ -119,6 +119,41 @@ fn ask_consent() -> bool {
     }
 }
 
+// ── 자동 업데이트 (tauri-plugin-updater) ──────────────────────────────────────
+// GitHub 릴리스의 latest.json을 확인 → 새 버전이면 네이티브 다이얼로그로 물어보고
+// .app.tar.gz를 받아 서명 검증 후 교체 → 재시작. Stats/BTT의 Sparkle 흐름과 동일.
+// manual=true(메뉴에서 직접 확인)일 때만 "최신 버전" / 오류도 알려준다.
+fn check_updates(app: AppHandle, manual: bool) {
+    tauri::async_runtime::spawn(async move {
+        use tauri_plugin_updater::UpdaterExt;
+        let updater = match app.updater() {
+            Ok(u) => u,
+            Err(e) => { if manual { notify("Joule 업데이트", &format!("업데이터 초기화 실패: {e}")); } return; }
+        };
+        match updater.check().await {
+            Ok(Some(update)) => {
+                let ver = update.version.clone();
+                let asked = tauri::async_runtime::spawn_blocking(move || {
+                    let script = format!(
+                        "display dialog \"Joule 새 버전 v{ver}이 나왔어요.\n\n지금 받아서 자동으로 교체할까요? (몇 초면 끝나요)\" with title \"Joule 업데이트\" buttons {{\"나중에\", \"업데이트\"}} default button \"업데이트\"");
+                    Sh::new("osascript").args(["-e", &script]).output()
+                        .map(|o| String::from_utf8_lossy(&o.stdout).contains("업데이트")).unwrap_or(false)
+                }).await.unwrap_or(false);
+                if !asked { return; }
+                match update.download_and_install(|_, _| {}, || {}).await {
+                    Ok(()) => {
+                        notify("Joule 업데이트", "설치 완료 — 앱을 다시 시작합니다.");
+                        app.restart();
+                    }
+                    Err(e) => notify("Joule 업데이트", &format!("설치 실패: {e}")),
+                }
+            }
+            Ok(None) => { if manual { notify("Joule 업데이트", "지금이 최신 버전이에요."); } }
+            Err(e) => { if manual { notify("Joule 업데이트", &format!("확인 실패: {e}")); } }
+        }
+    });
+}
+
 // Low Power Mode state (`pmset -g` → "lowpowermode  1"). Read on a slow cadence from the ticker —
 // through the timeout runner, so a hung pmset can't block the ticker.
 fn low_power_mode() -> bool {
@@ -230,6 +265,7 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             // Menu-bar-only until a popover/viewer is requested. with_regular_app waits for Dock to
             // finish its async registration before showing and focusing that first window.
@@ -283,8 +319,9 @@ fn main() {
             let settings_item = MenuItem::with_id(app, "settings", "설정 열기…", true, None::<&str>)?;
             // one recording item that toggles (was separate 시작/중지 — no need for both)
             let rec_item = MenuItem::with_id(app, "rec_toggle", if recording { "배터리 기록 중지" } else { "배터리 기록 시작" }, true, None::<&str>)?;
+            let update_item = MenuItem::with_id(app, "check_update", "업데이트 확인…", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "앱 종료 (기록은 계속됨)", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&status, &open, &settings_item, &rec_item, &quit])?;
+            let menu = Menu::with_items(app, &[&status, &open, &settings_item, &rec_item, &update_item, &quit])?;
             let status_for_menu = status.clone();
             let rec_for_menu = rec_item.clone();
             TrayIconBuilder::with_id("tray")
@@ -313,6 +350,7 @@ fn main() {
                         let _ = rec_for_menu.set_text(if turning_on { "배터리 기록 중지" } else { "배터리 기록 시작" });
                         std::thread::spawn(move || run_record(if turning_on { "on" } else { "off" }));
                     }
+                    "check_update" => check_updates(app.clone(), true),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -334,6 +372,16 @@ fn main() {
                         let _ = status_for_consent.set_text(status_text(true));
                         let _ = rec_for_consent.set_text("배터리 기록 중지");   // keep the toggle in sync
                     }
+                });
+            }
+
+            // 3b) 시작 15초 뒤 + 이후 24시간마다 조용히 업데이트 확인 (새 버전 있을 때만 다이얼로그)
+            {
+                let h = app.handle().clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(15));
+                    check_updates(h.clone(), false);
+                    std::thread::sleep(std::time::Duration::from_secs(24 * 3600 - 15));
                 });
             }
 

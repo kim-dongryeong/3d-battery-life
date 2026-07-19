@@ -1,6 +1,6 @@
 [package]
 name = "battery-life-desktop"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [build-dependencies]
@@ -10,6 +10,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-shell = "2"
 tauri-plugin-global-shortcut = "2" # optional global hotkey (⌥⌘B) to open the popover
+tauri-plugin-updater = "2"         # Sparkle-style auto update — GitHub 릴리스의 latest.json 피드
 starship-battery = "0.11"          # native IOKit battery read (~0.4ms, no subprocess) for the live tray
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
