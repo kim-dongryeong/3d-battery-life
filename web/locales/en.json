@@ -62,6 +62,30 @@
       "if unplugged now"
     ],
     [
+      "\\(지금 충전한다면\\)",
+      "(if charging now)"
+    ],
+    [
+      "속도 출처",
+      "Speed source"
+    ],
+    [
+      "이 충전기 이력 기준",
+      "from this charger's history"
+    ],
+    [
+      "비슷한 급 충전기 기준",
+      "from similar-class chargers"
+    ],
+    [
+      "전체 충전 이력 평균",
+      "from all charge history"
+    ],
+    [
+      "직선 = 현재 구간 속도로 등속 외삽",
+      "Line = extrapolated at a constant rate from the current band's speed"
+    ],
+    [
       "직선 기울기 = 현재",
       "Line slope = current"
     ],
@@ -80,6 +104,10 @@
     [
       "충전속도로 외삽",
       "extrapolated from charge speed"
+    ],
+    [
+      "이력 없는 구간은 정격 전력 기반 추정",
+      "Bands without history are estimated from rated power"
     ],
     [
       "macOS 추정\\(ioreg\\)",
@@ -767,6 +795,7 @@
   "배터리 게이지 검산": "Battery gauge check",
   "평균 전력": "Average power",
   "충전 / 방전": "Charge / discharge",
+  "유효 시간": "Effective time",
   "전하량": "Charge",
   "≈ mAh 환산 ▾": "≈ mAh equivalent ▾",
   "≈ mAh 환산 ▴": "≈ mAh equivalent ▴",
