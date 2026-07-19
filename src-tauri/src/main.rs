@@ -582,12 +582,27 @@ fn show_main_ready(app: &AppHandle) {
         // Dock 전환기 MRU에 반영되지 않아 뷰어가 ⌘Tab 맨 오른쪽(오래된 순서)에 박힌다. Dock 아이콘 클릭/
         // Spotlight와 같은 경로인 **LaunchServices 활성화(`open -b <bundle id>`)** 로 시스템이 우리를
         // "밖에서" 활성화하게 하면 진짜 사용자 전환으로 기록돼 뷰어가 맨 앞(왼쪽)으로 온다. set_focus는 안전망.
-        // (2026-07-13 89d2df8에서 도입·검증됐다가 574675a의 '팝오버 즉시표시'가 전제를 깨 무력화된 것을 복원.)
-        // ⚠️ 자기 activate/deactivate 바운스(1·2차)는 그때도, 2026-07-19에도 실패 확인 — open -b만 통한다.
+        // (2026-07-13 89d2df8에서 도입. ⚠️ 단, 앱이 '이미 frontmost'면 open -b 단독은 no-op — 아래 H1 주석.)
+        // ⚠️ 실패 확정(재시도 금지): deactivate 후 '자기(self)' 재활성화 바운스(11ba054·9e4a471).
+        //    통하는 조합은 deactivate 후 '외부(open -b)' 재활성화뿐 — 재활성화 주체가 핵심 차이다.
         #[cfg(target_os = "macos")]
         {
             let app2 = app.clone();
             std::thread::spawn(move || {
+                // H1(2026-07-19): 574675a의 팝오버가 activateIgnoringOtherApps로 앱을 이미 frontmost로
+                // 만들어 둔 상태라, 이 시점의 open -b는 '이미 맨 앞'인 앱을 다시 여는 no-op이 되어
+                // LaunchServices 활성화가 cmd+Tab MRU를 갱신하지 못한다(뷰어가 전환기 맨 오른쪽에 박힘).
+                // open -b '직전에' 앱을 명시적으로 비활성화(NSApp deactivate)해 두면, open -b가 '밖에서
+                // 다시 앞으로'라는 진짜 사용자 전환을 만들어 MRU가 정상 갱신된다. 금지된 '자기 재활성화
+                // 바운스'와의 차이: 재활성화는 우리가 아니라 open -b(외부 LaunchServices)가 담당한다.
+                let _ = app2.run_on_main_thread(|| {
+                    use objc2_app_kit::NSApplication;
+                    use objc2_foundation::MainThreadMarker;
+                    if let Some(mtm) = MainThreadMarker::new() {
+                        NSApplication::sharedApplication(mtm).deactivate();
+                    }
+                });
+                std::thread::sleep(std::time::Duration::from_millis(120));
                 let _ = Sh::new("/usr/bin/open").args(["-b", "com.kdr.battery-life"]).status();
                 std::thread::sleep(std::time::Duration::from_millis(140));
                 let app3 = app2.clone();
