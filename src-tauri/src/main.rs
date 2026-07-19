@@ -558,23 +558,10 @@ fn main() {
 }
 
 fn show_main(app: &AppHandle) {
-    // cmd+Tab 순서 버그의 게이트: 뷰어를 열기 직전에 앱이 '이미' 활성(frontmost)인지 잡아 둔다.
-    // 팝오버 경로(⌘R)에서는 activate_for_popover가 앱을 활성화해 둔 상태라, 곧이은 Accessory→Regular
-    // 승격이 활성 전환(inactive→active) 없이 일어나 macOS가 오래된 MRU 타임스탬프를 찍는다 → 뷰어가
-    // cmd+Tab 맨 오른쪽. 트레이 메뉴 'open' 경로는 앱이 비활성 상태라 승격이 정상 전환이므로 손대지 않는다.
-    #[cfg(target_os = "macos")]
-    let was_active: bool = unsafe {
-        use objc::runtime::Object;
-        use objc::{class, msg_send, sel, sel_impl};
-        let nsapp: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-        msg_send![nsapp, isActive]
-    };
-    #[cfg(not(target_os = "macos"))]
-    let was_active = false;
-    with_regular_app(app, move |app| show_main_ready(&app, was_active));
+    with_regular_app(app, |app| show_main_ready(&app));
 }
 
-fn show_main_ready(app: &AppHandle, was_active: bool) {
+fn show_main_ready(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         // 창은 시작 시점의 Space에 귀속돼, 다른 Desktop에서 열면 macOS가 그 Space로 '이동'해버린다
         // (kdr: 항상 Desktop 2에서 열림). MoveToActiveSpace(1<<1)를 켜서 창이 현재 Space로 따라오게.
@@ -589,37 +576,28 @@ fn show_main_ready(app: &AppHandle, was_active: bool) {
             }
         }
         let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
+        let _ = w.show();   // 포커스 없이 표시 — cmd+Tab 활성화는 아래 LaunchServices가 담당
+        // cmd+Tab MRU 순서 (Apple 버그 FB7743313 우회 — 복원). 팝오버(574675a)로 앱이 이미 활성-Accessory
+        // 인 상태에서 Regular로 승격하면, 앱이 스스로 하는 활성화(NSApp activate/activateWithOptions)는
+        // Dock 전환기 MRU에 반영되지 않아 뷰어가 ⌘Tab 맨 오른쪽(오래된 순서)에 박힌다. Dock 아이콘 클릭/
+        // Spotlight와 같은 경로인 **LaunchServices 활성화(`open -b <bundle id>`)** 로 시스템이 우리를
+        // "밖에서" 활성화하게 하면 진짜 사용자 전환으로 기록돼 뷰어가 맨 앞(왼쪽)으로 온다. set_focus는 안전망.
+        // (2026-07-13 89d2df8에서 도입·검증됐다가 574675a의 '팝오버 즉시표시'가 전제를 깨 무력화된 것을 복원.)
+        // ⚠️ 자기 activate/deactivate 바운스(1·2차)는 그때도, 2026-07-19에도 실패 확인 — open -b만 통한다.
         #[cfg(target_os = "macos")]
-        unsafe {
-            use objc::runtime::Object;
-            use objc::{class, msg_send, sel, sel_impl};
-            if was_active {
-                // 팝오버 경로: 앱이 이미 활성이라 위 set_focus의 activate/activateWithOptions는 MRU상 no-op.
-                // 진짜 inactive→active 전환을 강제한다 — 한 런루프 턴 deactivate 했다가 다음 턴에 재활성화하면
-                // WindowServer가 새 MRU 타임스탬프를 찍어 뷰어가 switcher 맨 앞(왼쪽)으로 온다. 이 경로에만
-                // 적용(게이팅). 자가치유: 다음 턴의 set_focus + activateWithOptions가 뷰어를 반드시 앞으로
-                // 되돌리므로, MRU 트릭이 무효여도 뷰어가 배경에 남지 않는다. (activateIgnoringOtherApps는
-                // 이 맥에서 팝오버 자동숨김이 의존해 동작이 이미 검증됨 → 재활성화가 드롭될 일 없음.)
-                let nsapp: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-                let _: () = msg_send![nsapp, deactivate];
-                let app2 = app.clone();
-                let _ = app.run_on_main_thread(move || {
-                    if let Some(w) = app2.get_webview_window("main") { let _ = w.set_focus(); }
-                    unsafe {
-                        use objc::runtime::Object;
-                        use objc::{class, msg_send, sel, sel_impl};
-                        let cur: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
-                        let _: () = msg_send![cur, activateWithOptions: 3u64];
-                    }
+        {
+            let app2 = app.clone();
+            std::thread::spawn(move || {
+                let _ = Sh::new("/usr/bin/open").args(["-b", "com.kdr.battery-life"]).status();
+                std::thread::sleep(std::time::Duration::from_millis(140));
+                let app3 = app2.clone();
+                let _ = app2.run_on_main_thread(move || {
+                    if let Some(w) = app3.get_webview_window("main") { let _ = w.set_focus(); }
                 });
-            } else {
-                // 트레이 메뉴 경로: 이미 정상 전환이라 기존처럼 앞으로 올리기만.
-                let current: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
-                let _: () = msg_send![current, activateWithOptions: 3u64];
-            }
+            });
         }
+        #[cfg(not(target_os = "macos"))]
+        let _ = w.set_focus();
     }
 }
 
