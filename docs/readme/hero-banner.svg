@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320" role="img" aria-labelledby="joule-hero-title joule-hero-desc">
+<title id="joule-hero-title">Joule — Your Mac's battery, in 3D.</title>
+<desc id="joule-hero-desc">Layered 3D ridgeline of overlapping charge and discharge curves, colored from green (charging) through amber and orange to red (discharging), with the Joule wordmark and tagline.</desc>
+<defs>
+
+  <linearGradient id="bgGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1280" y2="320">
+    <stop offset="0%" stop-color="#0a0a0c"/>
+    <stop offset="55%" stop-color="#121214"/>
+    <stop offset="100%" stop-color="#181819"/>
+  </linearGradient>
+  <radialGradient id="glowGrad" gradientUnits="userSpaceOnUse" cx="230" cy="120" r="420">
+    <stop offset="0%" stop-color="#1e2a24" stop-opacity="0.65"/>
+    <stop offset="100%" stop-color="#0a0a0c" stop-opacity="0"/>
+  </radialGradient>
+
+  <linearGradient id="ridgeGrad0" gradientUnits="userSpaceOnUse" x1="-40.0" y1="0" x2="300.0" y2="0" spreadMethod="repeat">
+    <stop offset="0%"   stop-color="#0ca30c"/>
+    <stop offset="13%"  stop-color="#2fae0f"/>
+    <stop offset="18%"  stop-color="#fab219"/>
+    <stop offset="45%"  stop-color="#ec835a"/>
+    <stop offset="80%"  stop-color="#d03b3b"/>
+    <stop offset="97%"  stop-color="#d03b3b"/>
+    <stop offset="100%" stop-color="#0ca30c"/>
+  </linearGradient>
+
+  <linearGradient id="ridgeGrad1" gradientUnits="userSpaceOnUse" x1="-110.0" y1="0" x2="230.0" y2="0" spreadMethod="repeat">
+    <stop offset="0%"   stop-color="#0ca30c"/>
+    <stop offset="13%"  stop-color="#2fae0f"/>
+    <stop offset="18%"  stop-color="#fab219"/>
+    <stop offset="45%"  stop-color="#ec835a"/>
+    <stop offset="80%"  stop-color="#d03b3b"/>
+    <stop offset="97%"  stop-color="#d03b3b"/>
+    <stop offset="100%" stop-color="#0ca30c"/>
+  </linearGradient>
+
+  <linearGradient id="ridgeGrad2" gradientUnits="userSpaceOnUse" x1="-180.0" y1="0" x2="160.0" y2="0" spreadMethod="repeat">
+    <stop offset="0%"   stop-color="#0ca30c"/>
+    <stop offset="13%"  stop-color="#2fae0f"/>
+    <stop offset="18%"  stop-color="#fab219"/>
+    <stop offset="45%"  stop-color="#ec835a"/>
+    <stop offset="80%"  stop-color="#d03b3b"/>
+    <stop offset="97%"  stop-color="#d03b3b"/>
+    <stop offset="100%" stop-color="#0ca30c"/>
+  </linearGradient>
+
+  <linearGradient id="ridgeGrad3" gradientUnits="userSpaceOnUse" x1="-250.0" y1="0" x2="90.0" y2="0" spreadMethod="repeat">
+    <stop offset="0%"   stop-color="#0ca30c"/>
+    <stop offset="13%"  stop-color="#2fae0f"/>
+    <stop offset="18%"  stop-color="#fab219"/>
+    <stop offset="45%"  stop-color="#ec835a"/>
+    <stop offset="80%"  stop-color="#d03b3b"/>
+    <stop offset="97%"  stop-color="#d03b3b"/>
+    <stop offset="100%" stop-color="#0ca30c"/>
+  </linearGradient>
+
+  <linearGradient id="ridgeGrad4" gradientUnits="userSpaceOnUse" x1="-320.0" y1="0" x2="20.0" y2="0" spreadMethod="repeat">
+    <stop offset="0%"   stop-color="#0ca30c"/>
+    <stop offset="13%"  stop-color="#2fae0f"/>
+    <stop offset="18%"  stop-color="#fab219"/>
+    <stop offset="45%"  stop-color="#ec835a"/>
+    <stop offset="80%"  stop-color="#d03b3b"/>
+    <stop offset="97%"  stop-color="#d03b3b"/>
+    <stop offset="100%" stop-color="#0ca30c"/>
+  </linearGradient>
+
+  <linearGradient id="ridgeGrad5" gradientUnits="userSpaceOnUse" x1="-390.0" y1="0" x2="-50.0" y2="0" spreadMethod="repeat">
+    <stop offset="0%"   stop-color="#0ca30c"/>
+    <stop offset="13%"  stop-color="#2fae0f"/>
+    <stop offset="18%"  stop-color="#fab219"/>
+    <stop offset="45%"  stop-color="#ec835a"/>
+    <stop offset="80%"  stop-color="#d03b3b"/>
+    <stop offset="97%"  stop-color="#d03b3b"/>
+    <stop offset="100%" stop-color="#0ca30c"/>
+  </linearGradient>
+
+  <linearGradient id="scrimGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="760" y2="0">
+    <stop offset="0%"   stop-color="#0a0a0c" stop-opacity="0.94"/>
+    <stop offset="45%"  stop-color="#0a0a0c" stop-opacity="0.72"/>
+    <stop offset="78%"  stop-color="#0a0a0c" stop-opacity="0.18"/>
+    <stop offset="100%" stop-color="#0a0a0c" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="4.5"/>
+  </filter>
+  <clipPath id="canvasClip">
+    <rect x="0" y="0" width="1280" height="320"/>
+  </clipPath>
+</defs>
+<rect x="0" y="0" width="1280" height="320" fill="url(#bgGrad)"/>
+<rect x="0" y="0" width="1280" height="320" fill="url(#glowGrad)"/>
+<g clip-path="url(#canvasClip)">
+  <line x1="0" y1="96" x2="1280" y2="96" stroke="#2c2c2a" stroke-width="1" opacity="0.35"/>
+  <line x1="0" y1="176" x2="1280" y2="176" stroke="#2c2c2a" stroke-width="1" opacity="0.35"/>
+  <line x1="0" y1="256" x2="1280" y2="256" stroke="#2c2c2a" stroke-width="1" opacity="0.35"/>
+  <path d="M -390.0,180.0 C -373.0,153.8 -352.6,145.0 -339.0,145.0 C -254.0,151.3 -135.0,171.2 -50.0,180.0 C -33.0,153.8 -12.6,145.0 1.0,145.0 C 86.0,151.3 205.0,171.2 290.0,180.0 C 307.0,153.8 327.4,145.0 341.0,145.0 C 426.0,151.3 545.0,171.2 630.0,180.0 C 647.0,153.8 667.4,145.0 681.0,145.0 C 766.0,151.3 885.0,171.2 970.0,180.0 C 987.0,153.8 1007.4,145.0 1021.0,145.0 C 1106.0,151.3 1225.0,171.2 1310.0,180.0 C 1327.0,153.8 1347.4,145.0 1361.0,145.0 C 1446.0,151.3 1565.0,171.2 1650.0,180.0 L 1650.0,340 L -390.0,340 Z" fill="url(#bgGrad)" fill-opacity="0.95" stroke="none"/>
+  <path d="M -390.0,180.0 C -373.0,153.8 -352.6,145.0 -339.0,145.0 C -254.0,151.3 -135.0,171.2 -50.0,180.0 C -33.0,153.8 -12.6,145.0 1.0,145.0 C 86.0,151.3 205.0,171.2 290.0,180.0 C 307.0,153.8 327.4,145.0 341.0,145.0 C 426.0,151.3 545.0,171.2 630.0,180.0 C 647.0,153.8 667.4,145.0 681.0,145.0 C 766.0,151.3 885.0,171.2 970.0,180.0 C 987.0,153.8 1007.4,145.0 1021.0,145.0 C 1106.0,151.3 1225.0,171.2 1310.0,180.0 C 1327.0,153.8 1347.4,145.0 1361.0,145.0 C 1446.0,151.3 1565.0,171.2 1650.0,180.0" fill="none" stroke="url(#ridgeGrad5)" stroke-width="1.2" stroke-opacity="0.275" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M -320.0,204.0 C -303.0,168.0 -282.6,156.0 -269.0,156.0 C -184.0,164.6 -65.0,192.0 20.0,204.0 C 37.0,168.0 57.4,156.0 71.0,156.0 C 156.0,164.6 275.0,192.0 360.0,204.0 C 377.0,168.0 397.4,156.0 411.0,156.0 C 496.0,164.6 615.0,192.0 700.0,204.0 C 717.0,168.0 737.4,156.0 751.0,156.0 C 836.0,164.6 955.0,192.0 1040.0,204.0 C 1057.0,168.0 1077.4,156.0 1091.0,156.0 C 1176.0,164.6 1295.0,192.0 1380.0,204.0 C 1397.0,168.0 1417.4,156.0 1431.0,156.0 C 1516.0,164.6 1635.0,192.0 1720.0,204.0 L 1720.0,340 L -320.0,340 Z" fill="url(#bgGrad)" fill-opacity="0.95" stroke="none"/>
+  <path d="M -320.0,204.0 C -303.0,168.0 -282.6,156.0 -269.0,156.0 C -184.0,164.6 -65.0,192.0 20.0,204.0 C 37.0,168.0 57.4,156.0 71.0,156.0 C 156.0,164.6 275.0,192.0 360.0,204.0 C 377.0,168.0 397.4,156.0 411.0,156.0 C 496.0,164.6 615.0,192.0 700.0,204.0 C 717.0,168.0 737.4,156.0 751.0,156.0 C 836.0,164.6 955.0,192.0 1040.0,204.0 C 1057.0,168.0 1077.4,156.0 1091.0,156.0 C 1176.0,164.6 1295.0,192.0 1380.0,204.0 C 1397.0,168.0 1417.4,156.0 1431.0,156.0 C 1516.0,164.6 1635.0,192.0 1720.0,204.0" fill="none" stroke="url(#ridgeGrad4)" stroke-width="1.44" stroke-opacity="0.42" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M -250.0,228.0 C -233.0,182.2 -212.6,167.0 -199.0,167.0 C -114.0,178.0 5.0,212.8 90.0,228.0 C 107.0,182.2 127.4,167.0 141.0,167.0 C 226.0,178.0 345.0,212.8 430.0,228.0 C 447.0,182.2 467.4,167.0 481.0,167.0 C 566.0,178.0 685.0,212.8 770.0,228.0 C 787.0,182.2 807.4,167.0 821.0,167.0 C 906.0,178.0 1025.0,212.8 1110.0,228.0 C 1127.0,182.2 1147.4,167.0 1161.0,167.0 C 1246.0,178.0 1365.0,212.8 1450.0,228.0 C 1467.0,182.2 1487.4,167.0 1501.0,167.0 C 1586.0,178.0 1705.0,212.8 1790.0,228.0 L 1790.0,340 L -250.0,340 Z" fill="url(#bgGrad)" fill-opacity="0.95" stroke="none"/>
+  <path d="M -250.0,228.0 C -233.0,182.2 -212.6,167.0 -199.0,167.0 C -114.0,178.0 5.0,212.8 90.0,228.0 C 107.0,182.2 127.4,167.0 141.0,167.0 C 226.0,178.0 345.0,212.8 430.0,228.0 C 447.0,182.2 467.4,167.0 481.0,167.0 C 566.0,178.0 685.0,212.8 770.0,228.0 C 787.0,182.2 807.4,167.0 821.0,167.0 C 906.0,178.0 1025.0,212.8 1110.0,228.0 C 1127.0,182.2 1147.4,167.0 1161.0,167.0 C 1246.0,178.0 1365.0,212.8 1450.0,228.0 C 1467.0,182.2 1487.4,167.0 1501.0,167.0 C 1586.0,178.0 1705.0,212.8 1790.0,228.0" fill="none" stroke="url(#ridgeGrad3)" stroke-width="1.68" stroke-opacity="0.565" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M -180.0,252.0 C -163.0,196.5 -142.6,178.0 -129.0,178.0 C -44.0,191.3 75.0,233.5 160.0,252.0 C 177.0,196.5 197.4,178.0 211.0,178.0 C 296.0,191.3 415.0,233.5 500.0,252.0 C 517.0,196.5 537.4,178.0 551.0,178.0 C 636.0,191.3 755.0,233.5 840.0,252.0 C 857.0,196.5 877.4,178.0 891.0,178.0 C 976.0,191.3 1095.0,233.5 1180.0,252.0 C 1197.0,196.5 1217.4,178.0 1231.0,178.0 C 1316.0,191.3 1435.0,233.5 1520.0,252.0 C 1537.0,196.5 1557.4,178.0 1571.0,178.0 C 1656.0,191.3 1775.0,233.5 1860.0,252.0 L 1860.0,340 L -180.0,340 Z" fill="url(#bgGrad)" fill-opacity="0.95" stroke="none"/>
+  <path d="M -180.0,252.0 C -163.0,196.5 -142.6,178.0 -129.0,178.0 C -44.0,191.3 75.0,233.5 160.0,252.0 C 177.0,196.5 197.4,178.0 211.0,178.0 C 296.0,191.3 415.0,233.5 500.0,252.0 C 517.0,196.5 537.4,178.0 551.0,178.0 C 636.0,191.3 755.0,233.5 840.0,252.0 C 857.0,196.5 877.4,178.0 891.0,178.0 C 976.0,191.3 1095.0,233.5 1180.0,252.0 C 1197.0,196.5 1217.4,178.0 1231.0,178.0 C 1316.0,191.3 1435.0,233.5 1520.0,252.0 C 1537.0,196.5 1557.4,178.0 1571.0,178.0 C 1656.0,191.3 1775.0,233.5 1860.0,252.0" fill="none" stroke="url(#ridgeGrad2)" stroke-width="1.92" stroke-opacity="0.71" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M -110.0,276.0 C -93.0,210.8 -72.6,189.0 -59.0,189.0 C 26.0,204.7 145.0,254.2 230.0,276.0 C 247.0,210.8 267.4,189.0 281.0,189.0 C 366.0,204.7 485.0,254.2 570.0,276.0 C 587.0,210.8 607.4,189.0 621.0,189.0 C 706.0,204.7 825.0,254.2 910.0,276.0 C 927.0,210.8 947.4,189.0 961.0,189.0 C 1046.0,204.7 1165.0,254.2 1250.0,276.0 C 1267.0,210.8 1287.4,189.0 1301.0,189.0 C 1386.0,204.7 1505.0,254.2 1590.0,276.0 C 1607.0,210.8 1627.4,189.0 1641.0,189.0 C 1726.0,204.7 1845.0,254.2 1930.0,276.0 L 1930.0,340 L -110.0,340 Z" fill="url(#bgGrad)" fill-opacity="0.95" stroke="none"/>
+  <path d="M -110.0,276.0 C -93.0,210.8 -72.6,189.0 -59.0,189.0 C 26.0,204.7 145.0,254.2 230.0,276.0 C 247.0,210.8 267.4,189.0 281.0,189.0 C 366.0,204.7 485.0,254.2 570.0,276.0 C 587.0,210.8 607.4,189.0 621.0,189.0 C 706.0,204.7 825.0,254.2 910.0,276.0 C 927.0,210.8 947.4,189.0 961.0,189.0 C 1046.0,204.7 1165.0,254.2 1250.0,276.0 C 1267.0,210.8 1287.4,189.0 1301.0,189.0 C 1386.0,204.7 1505.0,254.2 1590.0,276.0 C 1607.0,210.8 1627.4,189.0 1641.0,189.0 C 1726.0,204.7 1845.0,254.2 1930.0,276.0" fill="none" stroke="url(#ridgeGrad1)" stroke-width="2.16" stroke-opacity="0.855" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M -40.0,300.0 C -23.0,225.0 -2.6,200.0 11.0,200.0 C 96.0,218.0 215.0,275.0 300.0,300.0 C 317.0,225.0 337.4,200.0 351.0,200.0 C 436.0,218.0 555.0,275.0 640.0,300.0 C 657.0,225.0 677.4,200.0 691.0,200.0 C 776.0,218.0 895.0,275.0 980.0,300.0 C 997.0,225.0 1017.4,200.0 1031.0,200.0 C 1116.0,218.0 1235.0,275.0 1320.0,300.0 C 1337.0,225.0 1357.4,200.0 1371.0,200.0 C 1456.0,218.0 1575.0,275.0 1660.0,300.0 C 1677.0,225.0 1697.4,200.0 1711.0,200.0 C 1796.0,218.0 1915.0,275.0 2000.0,300.0 L 2000.0,340 L -40.0,340 Z" fill="url(#bgGrad)" fill-opacity="0.95" stroke="none"/>
+  <path d="M -40.0,300.0 C -23.0,225.0 -2.6,200.0 11.0,200.0 C 96.0,218.0 215.0,275.0 300.0,300.0 C 317.0,225.0 337.4,200.0 351.0,200.0 C 436.0,218.0 555.0,275.0 640.0,300.0 C 657.0,225.0 677.4,200.0 691.0,200.0 C 776.0,218.0 895.0,275.0 980.0,300.0 C 997.0,225.0 1017.4,200.0 1031.0,200.0 C 1116.0,218.0 1235.0,275.0 1320.0,300.0 C 1337.0,225.0 1357.4,200.0 1371.0,200.0 C 1456.0,218.0 1575.0,275.0 1660.0,300.0 C 1677.0,225.0 1697.4,200.0 1711.0,200.0 C 1796.0,218.0 1915.0,275.0 2000.0,300.0" fill="none" stroke="url(#ridgeGrad0)" stroke-width="6" opacity="0.35" filter="url(#softGlow)"/>
+  <path d="M -40.0,300.0 C -23.0,225.0 -2.6,200.0 11.0,200.0 C 96.0,218.0 215.0,275.0 300.0,300.0 C 317.0,225.0 337.4,200.0 351.0,200.0 C 436.0,218.0 555.0,275.0 640.0,300.0 C 657.0,225.0 677.4,200.0 691.0,200.0 C 776.0,218.0 895.0,275.0 980.0,300.0 C 997.0,225.0 1017.4,200.0 1031.0,200.0 C 1116.0,218.0 1235.0,275.0 1320.0,300.0 C 1337.0,225.0 1357.4,200.0 1371.0,200.0 C 1456.0,218.0 1575.0,275.0 1660.0,300.0 C 1677.0,225.0 1697.4,200.0 1711.0,200.0 C 1796.0,218.0 1915.0,275.0 2000.0,300.0" fill="none" stroke="url(#ridgeGrad0)" stroke-width="2.4" stroke-opacity="1.0" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="691.0" cy="200.0" r="4.5" fill="#0ca30c"/>
+  <circle cx="691.0" cy="200.0" r="4.5" fill="none" stroke="#0a0a0c" stroke-width="2"/>
+  <circle cx="1031.0" cy="200.0" r="4.5" fill="#0ca30c"/>
+  <circle cx="1031.0" cy="200.0" r="4.5" fill="none" stroke="#0a0a0c" stroke-width="2"/>
+</g>
+<rect x="0" y="0" width="760" height="320" fill="url(#scrimGrad)"/>
+
+<g font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <text x="64" y="160" font-size="76" font-weight="700" fill="#ffffff" letter-spacing="-1.5">Joule</text>
+  <text x="67" y="202" font-size="24" font-weight="500" fill="#c3c2b7">Your Mac's battery, in 3D.</text>
+</g>
+</svg>

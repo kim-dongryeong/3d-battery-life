@@ -1,105 +1,208 @@
-# 🔋 Joule
+<p align="center">
+  <img src="docs/readme/hero-banner.svg" alt="Joule — Battery, Power &amp; Charging Analyzer" width="100%">
+</p>
 
-**Battery, Power & Charging Analyzer** — macOS 배터리의 **방전 속도를 시간에 따라 기록**하고, 브라우저에서 **3D로 탐색**하는 도구.
+<p align="center">
+  <a href="README.ko.md">🇰🇷 한국어 README</a>
+</p>
 
-"새것일 땐 100→90%가 1시간, 한 달 뒤엔 30분, 1년 뒤엔 20분" 같은 변화를 입체로 비교하고,
-그게 **부하(Watts) 때문인지 배터리 노화 때문인지**를 분리해서 보여준다.
+<h1 align="center">Joule — Battery, Power &amp; Charging Analyzer</h1>
 
-## 왜 단순 배터리 앱과 다른가
+<p align="center"><b>Your Mac's battery, in 3D.</b><br>
+Twenty days of charging and discharging you can spin, measure, and finally understand —<br>
+with real charger output and energy cross-checked two ways.</p>
 
-방전 속도(%/시간)는 두 가지가 섞인 결과다:
+<p align="center">
+  <a href="https://github.com/kim-dongryeong/3d-battery-life/releases/latest"><img alt="macOS" src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%26%20Intel-black?logo=apple&logoColor=white"></a>
+  <a href="https://github.com/kim-dongryeong/3d-battery-life/releases/latest"><img alt="Version" src="https://img.shields.io/badge/version-0.2.0-blue"></a>
+  <a href="https://github.com/kim-dongryeong/3d-battery-life/releases/latest"><img alt="Auto-updates" src="https://img.shields.io/badge/auto--updates-built--in-brightgreen"></a>
+</p>
 
-1. **부하** — CPU를 많이 쓰면 전력 소모(W)가 올라가 같은 배터리라도 빨리 닳음
-2. **노화** — 만충 용량(mAh)이 줄어 같은 부하에서도 빨리 닳음
+<p align="center">
+  <a href="https://github.com/kim-dongryeong/3d-battery-life/releases/latest">
+    <img alt="Download for macOS" src="https://img.shields.io/badge/Download-macOS%20.dmg-success?style=for-the-badge&logo=apple&logoColor=white">
+  </a>
+</p>
 
-이 도구는 `ioreg`에서 **실시간 전력(전압×전류)**, **만충 용량**, **사이클**, **온도**를 함께 기록하므로,
-"지금 빨리 닳는 게 무거운 작업 탓인지, 배터리가 늙어서인지"를 구분할 수 있다.
+<p align="center">
+  1. Download the DMG (Apple Silicon / Intel) → 2. Drag Joule to Applications → 3. Launch — it lives in your menu bar.<br>
+  Auto-updates. Nothing leaves your Mac.
+</p>
 
-## 빠른 시작
+<br>
+
+<p align="center">
+  <img src="docs/readme/en/hero-3d-clean.png" alt="20 days of charge and discharge stacked into a 3D landscape" width="100%">
+</p>
+
+<p align="center"><i>Every other battery app draws today. Joule draws the last three weeks — as a landscape.</i></p>
+
+## Why Joule
+
+Battery apps show you a number. Joule shows you the story over time — a 3D history no other tool draws, real charger output instead of label specs, and energy measured two independent ways and cross-checked against each other.
+
+## Feature highlights
+
+### See time, not just now
+
+<p align="center"><img src="docs/readme/en/trend-terrain-3d.png" alt="Discharge-rate trend terrain separating aging from load" width="100%"></p>
+<p align="center"><sub>Spin days of charge and discharge curves in 3D — and separate real battery aging from the days you just worked the Mac hard.</sub></p>
+
+### Trust the number — twice
+
+<p align="center"><img src="docs/readme/en/popover-live.png" alt="Menu bar popover with live wattage, three cross-checked methods, and a running energy meter" width="380"></p>
+<p align="center"><sub>One click from the menu bar: live wattage from three independent methods cross-checked against each other, plus a running energy meter you can watch add up in real time.</sub></p>
+
+### Fast charge, fully measured
+
+<p align="center"><img src="docs/readme/en/power-2d-fastcharge.png" alt="A ~60W fast charge plateau integrated to 65.21 Wh and checked against the gauge" width="100%"></p>
+<p align="center"><sub>The charger held a ~60 W plateau for 31 minutes; integrating the whole two-hour session gives 65.21 Wh — cross-checked against the battery gauge (+50.40 Wh / +4,059 mAh, two independent estimates 5% apart).</sub></p>
+
+### Know your chargers
+
+<p align="center"><img src="docs/readme/charger-reality.svg" alt="Charger cards comparing rated vs. actually measured wattage" width="100%"></p>
+<p align="center"><sub>A 90W PD charger delivered 69.2 W here; a 35W charger gave 32.3 W; a 30W charger gave 28.1 W; a power bank, 12.7 W — Joule identifies each one and measures what it actually pushes, not what the label claims.</sub></p>
+
+### What if I used the other charger?
+
+<p align="center"><img src="docs/readme/en/simulator-what-if.png" alt="Full-charge ETA simulator comparing multiple chargers" width="520"></p>
+<p align="center"><sub>"What if I used a different charger?" See the full-charge ETA for every adapter before you reach for one.</sub></p>
+
+### A menu bar chip you design
+
+<p align="center"><img src="docs/readme/en/menubar-designer.png" alt="WYSIWYG menu bar chip designer with live pixel preview and presets" width="100%"></p>
+<p align="center"><sub>A WYSIWYG designer previews the exact pixels your tray will render — before you commit to a layout.</sub></p>
+
+<p align="center"><img src="docs/readme/menubar-chip-live.png" alt="Live menu bar chip showing battery percentage, wattage, ETA, and temperature" width="420"></p>
+<p align="center"><sub>A live chip in your menu bar — ETA, wattage, and temperature, always one glance away.</sub></p>
+
+## By the numbers
+
+Built and proven on one real Mac — no rounded-up marketing figures:
+
+- **20.4 days** recorded
+- **20,717 samples** at a 60-second interval
+- **113 discharge sessions**
+- **25.5 hours** longest single run (100% → 35%)
+- **101.3% → 97.3%** health tracked over the recording window
+
+## The full cockpit
+
+<p align="center"><img src="docs/readme/en/hero-3d-terrain.png" alt="The full Joule cockpit — 3D terrain view, live stats, and controls" width="100%"></p>
+<p align="center"><sub>Everything in one window: the 3D history, live measurements, and the controls to explore both.</sub></p>
+
+## Install
+
+1. Download the `.dmg` from the [latest release](https://github.com/kim-dongryeong/3d-battery-life/releases/latest) — pick Apple Silicon (aarch64) or Intel (x86_64).
+2. Drag **Joule** into Applications.
+3. Launch it — it lives quietly in your menu bar.
+
+Updates arrive automatically after that. Everything stays on your Mac; nothing is ever uploaded.
+
+## How it measures
+
+Joule reads power three independent ways — a smart accounting estimate, macOS `ioreg`, and PPBR (discharge-only) — and reconciles them, so the wattage you see isn't a single guess. Full-charge energy is cross-checked against the battery's own gauge, too.
+
+## FAQ
+
+**Is my data private?**
+Yes — it never leaves your Mac. Nothing is uploaded, ever.
+
+**Does it drain my battery?**
+No meaningfully — sampling once every 60 seconds is negligible.
+
+**What does Joule need to run?**
+macOS · Apple Silicon & Intel. Joule reads `ioreg`/`ps` plus the SMC directly — no `sudo`, no kernel extensions.
+
+---
+
+<details>
+<summary><b>For developers — CLI, data format, building from source</b></summary>
+
+### Quick start
 
 ```bash
-node scripts/gen-demo2.js     # 쇼케이스 데모 생성 (지금 바로 3D 보기)
-npm start                     # 뷰어 → http://localhost:4317   (= node bin/cli.js serve)
+node scripts/gen-demo2.js     # generate a showcase demo (see the 3D view immediately)
+npm start                     # viewer → http://localhost:4317   (= node bin/cli.js serve)
 ```
 
-우측 패널에서 **데모2 ✨(쇼케이스) ↔ 데모1 ↔ 내 데이터**를 전환. 내 데이터는 기록이 쌓일수록 풍부해진다.
-지표·버전·델타·노화(Wh/%) 설명은 화면 우상단 **?안내**(= `/help.html`).
+Switch between **Demo 2 ✨ (showcase) ↔ Demo 1 ↔ My data** in the right-hand panel. "My data" gets richer as recording accumulates. Metric/version/delta/health (Wh/%) definitions are in the **? Help** panel top-right (`/help.html`).
 
-## 자동 기록 (on/off) & 데이터 위치
+### Recording (on/off) and data location
 
-배터리 기록은 launchd로 60초마다 백그라운드 수집(sudo 불필요, idle ~0% CPU). **로그인 시 자동 시작**(재부팅해도 유지).
+Battery recording runs as a 60-second launchd background job (no `sudo`, ~0% idle CPU). It **starts automatically at login** and survives reboots.
 
 ```bash
-node bin/cli.js record on       # 시작 (= ./install.sh).  주기 바꾸기: record on 120
-node bin/cli.js record status   # 켜짐 여부 + 수집 개수
-node bin/cli.js record off       # 중지 (= ./uninstall.sh, 수집한 데이터는 유지)
+node bin/cli.js record on       # start (= ./install.sh). Change the interval: record on 120
+node bin/cli.js record status   # is it running? how many samples so far?
+node bin/cli.js record off      # stop (= ./uninstall.sh; collected data is kept)
 ```
 
-- **실데이터는 한 곳에 모인다**: `~/Library/Application Support/3d-battery-life/samples.jsonl` (`BATTERY_DATA`로 변경 가능). npx·단일 바이너리·Tauri 앱 **어느 걸로 봐도 같은 리포트**. (데모 `.jsonl`은 앱에 동봉되는 자산.)
-- 기록기는 항상 **하나만** 돌도록 idempotent — 세 방법을 다 써도 데이터가 중복되지 않는다.
+- **Real data lives in one place**: `~/Library/Application Support/3d-battery-life/samples.jsonl` (override with `BATTERY_DATA`). npx, the standalone binary, and the Tauri app all read the **same report** from it. (The bundled `.jsonl` demos ship with the app as assets.)
+- The recorder is idempotent — running it through all three packaging paths never produces duplicate data.
 
-## 배포 / 패키징
+### Packaging
 
-같은 코어 위에 포장만 다르게 — 셋 다 이 웹 뷰어를 재사용한다.
+Same core, three wrappers — all three reuse this same web viewer.
 
 ```bash
-# ① npx / CLI  (Node 필요)
+# ① npx / CLI  (requires Node)
 npx battery-life serve        # serve · sample · demo · demo2 · install · uninstall
 node bin/cli.js help
 
-# ② 단일 실행파일  (Node 불필요, Bun으로 컴파일)
+# ② standalone binary  (no Node required, compiled with Bun)
 npm run build:binary          # → dist/battery-life (+ dist/web/)
 ./dist/battery-life serve
 
-# ③ 메뉴바 앱(.app/.dmg)  — Tauri v2  (빌드·실행 검증됨)
-npm run build:app             # 바이너리→사이드카→.app/.dmg  (Bun + Rust + @tauri-apps/cli 필요)
-#   더블클릭 → 첫 실행 때 "기록 켤까요?" 동의 → 메뉴바에서 뷰어 열기 / 기록 시작·중지.  자세한 건 TAURI.md
+# ③ menu bar app (.app/.dmg)  — Tauri v2 (build & run verified)
+npm run build:app             # binary → sidecar → .app/.dmg  (requires Bun + Rust + @tauri-apps/cli)
+#   Double-click → first launch asks "start recording?" → open the viewer / toggle recording from the menu bar. See TAURI.md.
 ```
 
-> **배터리 기록**은 launchd 에이전트가 1분마다 수행(로그인 시 자동 시작). 켜는 법: **③ 앱**은 첫 실행 동의/메뉴바 토글, **CLI**는 `battery-life record on/off/status`(= `./install.sh`/`./uninstall.sh`).
+> **Recording** runs via a launchd agent every minute (auto-starts at login). Turn it on/off: the **app** asks on first launch and offers a menu bar toggle; the **CLI** uses `battery-life record on/off/status` (= `./install.sh`/`./uninstall.sh`).
 
-## 3D 화면 읽는 법
+### Reading the 3D view
 
-| 축/요소 | 의미 |
+| Axis / element | Meaning |
 |---|---|
-| **X (가로)** | 하루 중 시각 (0~24시) |
-| **Y (세로)** | 배터리 % 또는 전력(W) — 패널에서 전환 |
-| **Z (깊이)** | 경과 일수 (뒤=오래됨, 앞=최근) |
-| **색상** | 온도 / CPU 부하 / 전력 — 패널에서 전환 |
-| **곡선 1개** | 방전 세션 1회 (충전 뽑고 → 다시 꽂을 때까지) |
+| **X (horizontal)** | Time of day (0–24h) |
+| **Y (vertical)** | Battery % or power (W) — switch in the panel |
+| **Z (depth)** | Days elapsed (back = older, front = more recent) |
+| **Color** | Temperature / CPU load / power — switch in the panel |
+| **One curve** | One discharge session (from unplugging to the next plug-in) |
 
-곡선이 시간이 갈수록(Z축 앞으로) **가팔라지면** 방전이 빨라지는 것. 곡선에 마우스를 올리면
-그 세션의 `100→90% 소요 시간`, 평균 전력, 온도, 건강도, 최다 CPU 사용 프로세스가 뜬다.
+If a curve gets **steeper** further forward on the Z axis, discharge is speeding up over time. Hovering a curve shows that session's time from 100%→90%, average power, temperature, health, and top CPU process.
 
-## 구성
+### Layout
 
 ```
-bin/sampler.js      한 번 실행 → 배터리 스냅샷 1개를 data/samples.jsonl 에 append
-lib/battery.js      ioreg/pmset 파싱 (전류 2's-complement 변환 포함)
-lib/report.js       JSONL → 세션 분리 + 지표(방전속도, 100→90 시간, 건강도 추이)
-server.js           정적 웹 + /api/report (의존성 0)
-web/                Three.js 3D 뷰어
-scripts/gen-demo.js 물리적으로 일관된 1년치 데모 데이터 생성
-launchd/            60초 주기 LaunchAgent 템플릿
+bin/sampler.js      one run → appends one battery snapshot to data/samples.jsonl
+lib/battery.js      ioreg/pmset parsing (incl. two's-complement current)
+lib/report.js       JSONL → sessions + metrics (discharge rate, 100→90 time, health trend)
+server.js           static web + /api/report (zero dependencies)
+web/                Three.js 3D viewer
+scripts/gen-demo.js generates a physically consistent year of demo data
+launchd/            60-second LaunchAgent template
 ```
 
-## 기록되는 항목 (샘플 1줄 = JSON)
+### Recorded fields (one sample = one JSON line)
 
-`pct, rawCap, rawMax, design, healthPct, voltage, amperage, powerW, watts,
-cycles, tempC, ac, charging, timeRemain, loadPct, topProc/topProcCpu`
+`pct, rawCap, rawMax, design, healthPct, voltage, amperage, powerW, watts, cycles, tempC, ac, charging, timeRemain, loadPct, topProc/topProcCpu`
 
-- 전류(`Amperage`)는 macOS가 unsigned 64-bit로 주므로 음수(방전)로 재해석한다.
-- `watts = |전압 × 전류|` 가 핵심 — 부하의 직접 측정값.
-- `healthPct = 만충용량 / 설계용량` 이 노화 지표.
+- Current (`Amperage`) arrives from macOS as unsigned 64-bit, so it's reinterpreted as negative during discharge.
+- `watts = |voltage × current|` — the direct load measurement.
+- `healthPct = full-charge capacity / design capacity` — the aging metric.
 
-## 의존성 / 권한
+### Dependencies / permissions
 
-- **Node 18+** 만 필요 (npm 패키지 0개, Three.js는 `web/vendor/`에 동봉).
-- `sudo` 불필요, 특별한 개인정보 권한 프롬프트 없음 (`ioreg`/`ps`만 사용).
-- 데이터는 전부 로컬(`data/`)에만 저장된다.
+- **Node 18+** only (zero npm dependencies; Three.js is vendored in `web/vendor/`).
+- No `sudo`, no kernel extensions — reads `ioreg`/`ps` plus the SMC directly.
+- All data stays local, under `~/Library/Application Support/3d-battery-life/`.
 
-## 중지
+### Stopping
 
 ```bash
-./uninstall.sh        # 기록 중단 (data/ 는 보존)
+./uninstall.sh        # stop recording (data/ is preserved)
 ```
+
+</details>

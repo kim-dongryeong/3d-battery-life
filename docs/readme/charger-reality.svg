@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400" role="img" aria-labelledby="joule-chg-title joule-chg-desc">
+<title id="joule-chg-title">What your chargers actually deliver</title>
+<desc id="joule-chg-desc">Horizontal bar chart comparing each charger's rated wattage to the wattage Joule actually measured on this Mac: a 90W PD charger measured 69.2W, a 35W USB-C charger measured 32.3W, a 30W USB-C charger measured 28.1W, and a USB 5V power bank measured 12.7W with no printed wattage rating.</desc>
+<defs>
+  <linearGradient id="cr-bgGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1280" y2="400">
+    <stop offset="0%" stop-color="#111113"/>
+    <stop offset="100%" stop-color="#1b1b1e"/>
+  </linearGradient>
+</defs>
+
+<rect x="0" y="0" width="1280" height="400" fill="url(#cr-bgGrad)"/>
+
+<g font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+
+  <!-- Header -->
+  <text x="64" y="56" font-size="32" font-weight="700" fill="#ffffff">What your chargers actually deliver</text>
+  <text x="64" y="86" font-size="17" font-weight="500" fill="#c3c2b7">Rated vs. measured on this Mac, by Joule</text>
+
+  <!-- Legend -->
+  <g>
+    <rect x="758" y="42" width="14" height="14" rx="3" fill="#3987e5"/>
+    <text x="780" y="53" font-size="13" fill="#c3c2b7">Measured (this Mac)</text>
+    <rect x="980" y="42" width="14" height="14" rx="3" fill="#3987e5" fill-opacity="0.32"/>
+    <text x="1002" y="53" font-size="13" fill="#c3c2b7">Rated (printed spec)</text>
+  </g>
+
+  <line x1="64" y1="116" x2="1220" y2="116" stroke="#2c2c2a" stroke-width="1" opacity="0.7"/>
+
+  <!-- Axis: vertical baseline at 0W and gridlines every 20W, track spans 380 -> 1220 (0 -> 100W) -->
+  <g stroke="#2c2c2a" stroke-width="1" opacity="0.55">
+    <line x1="548"  y1="152" x2="548"  y2="380"/>
+    <line x1="716"  y1="152" x2="716"  y2="380"/>
+    <line x1="884"  y1="152" x2="884"  y2="380"/>
+    <line x1="1052" y1="152" x2="1052" y2="380"/>
+    <line x1="1220" y1="152" x2="1220" y2="380"/>
+  </g>
+  <line x1="380" y1="152" x2="380" y2="380" stroke="#383835" stroke-width="1.5"/>
+
+  <g font-size="12" fill="#898781" text-anchor="middle">
+    <text x="380"  y="396">0</text>
+    <text x="548"  y="396">20W</text>
+    <text x="716"  y="396">40W</text>
+    <text x="884"  y="396">60W</text>
+    <text x="1052" y="396">80W</text>
+    <text x="1220" y="396">100W</text>
+  </g>
+
+  <!-- Row 1: 90W PD charger -->
+  <text x="64" y="186" font-size="19" font-weight="600" fill="#ffffff">90W PD charger</text>
+  <rect x="380" y="169" width="581.28" height="22" fill="#3987e5"/>
+  <path d="M 963.28,169 L 1132,169 Q 1136,169 1136,173 L 1136,187 Q 1136,191 1132,191 L 963.28,191 Z" fill="#3987e5" fill-opacity="0.32"/>
+  <text x="961.28" y="161" font-size="14" font-weight="700" fill="#ffffff" text-anchor="end">69.2W<tspan font-size="10" font-weight="500" fill="#c3c2b7"> measured</tspan></text>
+  <text x="1144" y="185" font-size="14" font-weight="700" fill="#ffffff" text-anchor="start">90W<tspan font-size="10" font-weight="500" fill="#c3c2b7"> rated</tspan></text>
+
+  <!-- Row 2: 35W USB-C -->
+  <text x="64" y="246" font-size="19" font-weight="600" fill="#ffffff">35W USB-C charger</text>
+  <rect x="380" y="229" width="271.32" height="22" fill="#3987e5"/>
+  <path d="M 653.32,229 L 670,229 Q 674,229 674,233 L 674,247 Q 674,251 670,251 L 653.32,251 Z" fill="#3987e5" fill-opacity="0.32"/>
+  <text x="651.32" y="221" font-size="14" font-weight="700" fill="#ffffff" text-anchor="end">32.3W</text>
+  <text x="682" y="245" font-size="14" font-weight="700" fill="#ffffff" text-anchor="start">35W</text>
+
+  <!-- Row 3: 30W USB-C -->
+  <text x="64" y="306" font-size="19" font-weight="600" fill="#ffffff">30W USB-C charger</text>
+  <rect x="380" y="289" width="236.04" height="22" fill="#3987e5"/>
+  <path d="M 618.04,289 L 628,289 Q 632,289 632,293 L 632,307 Q 632,311 628,311 L 618.04,311 Z" fill="#3987e5" fill-opacity="0.32"/>
+  <text x="616.04" y="281" font-size="14" font-weight="700" fill="#ffffff" text-anchor="end">28.1W</text>
+  <text x="640" y="305" font-size="14" font-weight="700" fill="#ffffff" text-anchor="start">30W</text>
+
+  <!-- Row 4: Power bank (USB 5V) — no printed wattage rating, measured only -->
+  <text x="64" y="366" font-size="19" font-weight="600" fill="#ffffff">Power bank (USB 5V)</text>
+  <path d="M 380,349 L 482.68,349 Q 486.68,349 486.68,353 L 486.68,367 Q 486.68,371 482.68,371 L 380,371 Z" fill="#3987e5"/>
+  <text x="494.68" y="365" font-size="14" font-weight="700" fill="#ffffff" text-anchor="start">12.7W</text>
+  <text x="560" y="365" font-size="12" font-style="italic" fill="#898781" text-anchor="start">no rated wattage printed (5V USB)</text>
+
+</g>
+</svg>
