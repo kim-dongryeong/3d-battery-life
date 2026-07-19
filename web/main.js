@@ -338,10 +338,11 @@ function buildLines(report) {
     yMax = mags.length ? Math.max(0.1, percentile(mags, 0.98)) : 1;   // symmetric ±yMax; p98 so one spike doesn't flatten it
   } else if (state.y === 'pct') {
     yMax = 100;
-  } else {   // watts: 배터리는 부호축이라 |값|의 p98(대칭 ±yMax), 시스템/어댑터는 값 그대로
+  } else {   // watts: 배터리는 부호축이라 |값| 기준(대칭 ±yMax), 시스템/어댑터는 값 그대로
     const sgn = isSignedY();
     const vals = runs.flatMap(r => r.points.map(wattValueOf)).filter(v => v != null).map(v => sgn ? Math.abs(v) : v);
-    yMax = Math.max(5, vals.length ? percentile(vals, 0.98) : 5);
+    // 실제 최대값을 축으로 — p98은 60W 급속충전 플라토 같은 진짜 고전력 구간을 축 위로 잘라 평평하게 그렸음
+    yMax = Math.max(5, vals.length ? vals.reduce((m, v) => v > m ? v : m, -Infinity) : 5);
   }
 
   let ri = -1;
