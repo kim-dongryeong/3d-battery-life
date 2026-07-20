@@ -173,53 +173,6 @@ function smcdStatus() {
   console.log(`bin:   ${smcdBin()}${fs.existsSync(smcdBin()) ? '' : '  (absent!)'}`);
 }
 
-// ── legacy (`3d-battery-life` / `com.kdr.*`) → joule migration ──────────────
-// Idempotent: safe to call on every run — the 2nd+ call is a no-op (old paths/labels are gone
-// by then). Invoked below (see migrateLegacy() call), before the switch dispatches on `cmd` —
-// i.e. before anything reads userDataDir() or launchd state — so a pre-existing legacy install
-// is carried forward transparently on first launch of the renamed CLI/app.
-const LEGACY_LABEL = 'com.kdr.3d-battery-life.sampler';
-const LEGACY_SMCD_LABEL = 'com.kdr.3d-battery-life.smcd';
-function migrateLegacy() {
-  // (a) data dir: rename old → new ONLY if the old dir exists and the new one doesn't — this is
-  // an atomic rename (fs.renameSync), so samples.jsonl and all history carry over intact. If BOTH
-  // exist, do nothing but warn — merging risks duplicating records, so we never merge automatically.
-  const oldData = path.join(os.homedir(), 'Library', 'Application Support', '3d-battery-life');
-  const newData = path.join(os.homedir(), 'Library', 'Application Support', 'joule');
-  let oldIsDir = false;
-  try { oldIsDir = fs.statSync(oldData).isDirectory(); } catch { /* absent */ }
-  if (oldIsDir && !fs.existsSync(newData)) {
-    try { fs.renameSync(oldData, newData); console.log(`migrated legacy data dir → ${newData}`); }
-    catch (e) { console.error(`⚠️  legacy data migration failed (${e.message}) — still reading ${oldData}`); }
-  } else if (oldIsDir && fs.existsSync(newData)) {
-    console.error(`⚠️  both ${oldData} and ${newData} exist — leaving both as-is (no automatic merge)`);
-  }
-
-  // (b) old-labeled launchd agents: bootout + delete the plist, then reinstall under the new
-  // labels (LABEL/SMCD_LABEL below are already the new kr.kdr.joule.* values) IF they were active.
-  const uid = process.getuid();
-  const oldSamplerPlist = path.join(os.homedir(), 'Library', 'LaunchAgents', `${LEGACY_LABEL}.plist`);
-  const oldSmcdPlist = path.join(os.homedir(), 'Library', 'LaunchAgents', `${LEGACY_SMCD_LABEL}.plist`);
-  const samplerWasActive = fs.existsSync(oldSamplerPlist);
-  const smcdWasActive = fs.existsSync(oldSmcdPlist);
-  for (const [label, plist] of [[LEGACY_LABEL, oldSamplerPlist], [LEGACY_SMCD_LABEL, oldSmcdPlist]]) {
-    if (fs.existsSync(plist)) {
-      spawnSync('launchctl', ['bootout', `gui/${uid}/${label}`], { stdio: 'ignore' });   // errors ignored — already-unloaded is fine
-      try { fs.rmSync(plist); } catch { /* ignore */ }
-    }
-  }
-  // recordOn/smcdOn are function declarations (hoisted) — calling them here, ahead of their
-  // textual definition further down, is safe. They install under the NEW labels/paths since
-  // LABEL/SMCD_LABEL/userDataDir() have already been updated to the joule identifiers.
-  if (samplerWasActive) { recordOn(60); console.log('migrated: sampler reinstalled as kr.kdr.joule.sampler'); }
-  if (smcdWasActive) { smcdOn(); console.log('migrated: smcd reinstalled as kr.kdr.joule.smcd'); }
-}
-
-// Run the migration on every invocation (idempotent — 2nd+ call is a no-op since the legacy
-// paths/plists are gone by then). Placed here, after LABEL/SMCD_LABEL/recordOn/smcdOn are all
-// defined (const TDZ + hoisting), and BEFORE the switch below does any real work/reads state.
-migrateLegacy();
-
 switch (cmd) {
   case 'serve':
     startServer({ root });

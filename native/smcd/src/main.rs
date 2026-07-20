@@ -10,22 +10,10 @@ mod smc;
 use smc::Smc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-// (a) 데이터 경로 마이그레이션: 옛 폴더가 있고 새 폴더가 없으면 통째로 rename.
-//     둘 다 있으면 손대지 않는다(병합 금지 — 중복 위험). 앱/CLI가 먼저 도는 정상 경로에서는
-//     이미 이전이 끝나 있을 것 — 여기는 smcd만 먼저 뜨는 극단적 케이스를 위한 최소 안전망.
-fn migrate_legacy_data_dir(home: &str) {
-    let old = std::path::Path::new(home).join("Library/Application Support/3d-battery-life");
-    let new = std::path::Path::new(home).join("Library/Application Support/joule");
-    if old.is_dir() && !new.exists() {
-        let _ = std::fs::rename(&old, &new);
-    }
-}
-
 fn data_dir() -> std::path::PathBuf {
     if let Ok(d) = std::env::var("JOULE_DATA") { return d.into(); }
     if let Ok(d) = std::env::var("BATTERY_DATA") { return d.into(); }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    migrate_legacy_data_dir(&home);
     std::path::Path::new(&home).join("Library/Application Support/joule")
 }
 

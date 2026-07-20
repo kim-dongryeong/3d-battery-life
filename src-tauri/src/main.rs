@@ -90,68 +90,10 @@ fn demote_if_no_visible_ui(app: &AppHandle) {
 fn demote_if_no_visible_ui(_app: &AppHandle) {}
 
 const LABEL: &str = "kr.kdr.joule.sampler";
-// Legacy (pre-rename) identifiers — read-only, used ONLY by migrate_legacy() below to detect and
-// carry forward an existing install. Never used for anything else.
-const LEGACY_LABEL: &str = "com.kdr.3d-battery-life.sampler";
-const LEGACY_SMCD_LABEL: &str = "com.kdr.3d-battery-life.smcd";
 
 fn home() -> PathBuf { PathBuf::from(std::env::var("HOME").unwrap_or_default()) }
 fn plist_path() -> PathBuf { home().join("Library/LaunchAgents").join(format!("{LABEL}.plist")) }
-fn legacy_plist_path(label: &str) -> PathBuf { home().join("Library/LaunchAgents").join(format!("{label}.plist")) }
 fn data_dir() -> PathBuf { home().join("Library/Application Support/joule") }
-fn legacy_data_dir() -> PathBuf { home().join("Library/Application Support/3d-battery-life") }
-
-// One-time (idempotent) migration from the old `3d-battery-life` / `com.kdr.*` identifiers to
-// `joule` / `kr.kdr.joule.*`. Called first thing in setup(), before anything else reads data_dir()
-// or plist_path(). Safe to call on every launch — the 2nd+ call is a no-op (legacy paths/plists
-// are already gone by then).
-fn migrate_legacy() {
-    // (a) data dir: rename old → new ONLY if the old exists and the new doesn't (atomic rename —
-    // samples.jsonl and all history carry over). If BOTH exist, do nothing but warn: merging risks
-    // duplicating records, so we never merge automatically.
-    let (old, new) = (legacy_data_dir(), data_dir());
-    let old_is_dir = old.is_dir();
-    if old_is_dir && !new.exists() {
-        if let Err(e) = std::fs::rename(&old, &new) {
-            eprintln!("⚠️  legacy data migration failed ({e}) — still reading {}", old.display());
-        } else {
-            eprintln!("migrated legacy data dir → {}", new.display());
-        }
-    } else if old_is_dir && new.exists() {
-        eprintln!("⚠️  both {} and {} exist — leaving both as-is (no automatic merge)", old.display(), new.display());
-    }
-
-    // (b) old-labeled launchd agents: bootout + delete the plist, then reinstall under the new
-    // label (via the already-migrated run_record, which shells out to the sidecar's `record <sub>`
-    // — LABEL there is already kr.kdr.joule.sampler) IF the legacy agent was active.
-    // no libc dependency in this crate — shell out to `id -u` (same approach bin/cli.js uses via
-    // process.getuid(), just without a Node runtime here).
-    let uid = Sh::new("id").arg("-u").output().ok()
-        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<u32>().ok())
-        .unwrap_or(0);
-    let old_sampler = legacy_plist_path(LEGACY_LABEL);
-    let old_smcd = legacy_plist_path(LEGACY_SMCD_LABEL);
-    let sampler_was_active = old_sampler.exists();
-    let smcd_was_active = old_smcd.exists();
-    for (label, plist) in [(LEGACY_LABEL, &old_sampler), (LEGACY_SMCD_LABEL, &old_smcd)] {
-        if plist.exists() {
-            let _ = Sh::new("launchctl").args(["bootout", &format!("gui/{uid}/{label}")]).status();
-            let _ = std::fs::remove_file(plist);
-        }
-    }
-    if sampler_was_active {
-        run_record("on");   // reinstalls under the NEW label (kr.kdr.joule.sampler)
-        eprintln!("migrated: sampler reinstalled as kr.kdr.joule.sampler");
-    }
-    if smcd_was_active {
-        // smcd isn't managed by this app's run_record (CLI-only "smcd on"); shell out to the
-        // sidecar directly, same as run_record does for "record".
-        if let Some(bin) = sidecar_bin() {
-            let _ = Sh::new(bin).args(["smcd", "on"]).status();
-            eprintln!("migrated: smcd reinstalled as kr.kdr.joule.smcd");
-        }
-    }
-}
 
 fn status_text(on: bool) -> &'static str {
     if on { "🟢 배터리 기록: 켜짐 (백그라운드 · 앱과 무관)" } else { "⚪ 배터리 기록: 꺼짐" }
@@ -325,9 +267,6 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
-            // 0) One-time (idempotent) migration from the old `3d-battery-life`/`com.kdr.*`
-            // identifiers, BEFORE anything below reads data_dir()/plist_path() or launchd state.
-            migrate_legacy();
             // Menu-bar-only until a popover/viewer is requested. with_regular_app waits for Dock to
             // finish its async registration before showing and focusing that first window.
             #[cfg(target_os = "macos")]
