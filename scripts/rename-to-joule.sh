@@ -50,20 +50,20 @@ if [ -d "$ENV" ]; then
   echo "✓ _env REPOS 행 + vscode 폴더 갱신"
 fi
 
-# 5) repo 안의 .vscode 심링크 재지정 (gitignore라 커밋 대상 아님)
+# 4) repo 안의 .vscode 심링크 재지정 (gitignore라 커밋 대상 아님)
 if [ -L "$NEW/.vscode" ] || [ -e "$NEW/.vscode" ]; then
   rm -f "$NEW/.vscode"; ln -s "../_env/vscode/joule" "$NEW/.vscode"
   echo "✓ .vscode 심링크 → ../_env/vscode/joule"
 fi
 
-# 6) 생성물 ~/bin/git-autosync.sh 즉시 패치 (다음 부트스트랩 때 REPOS에서 재생성됨)
+# 5) 생성물 ~/bin/git-autosync.sh 즉시 패치 (다음 부트스트랩 때 REPOS에서 재생성됨)
 [ -f "$HOME/bin/git-autosync.sh" ] && { sed -i '' 's#dev/3d-battery-life#dev/joule#g' "$HOME/bin/git-autosync.sh"; echo "✓ git-autosync.sh 경로 패치"; }
 
-# 7) _env 커밋+푸시 (private repo)
+# 6) _env 커밋+푸시 (private repo). 신원은 현재 표준 kdr@kdr.kr
 if [ -d "$ENV/.git" ]; then
   git -C "$ENV" add -A
-  GIT_AUTHOR_NAME='Kim Dongryeong' GIT_AUTHOR_EMAIL='kdr@namouli.com' \
-  GIT_COMMITTER_NAME='Kim Dongryeong' GIT_COMMITTER_EMAIL='kdr@namouli.com' \
+  GIT_AUTHOR_NAME='Kim Dongryeong' GIT_AUTHOR_EMAIL='kdr@kdr.kr' \
+  GIT_COMMITTER_NAME='Kim Dongryeong' GIT_COMMITTER_EMAIL='kdr@kdr.kr' \
     git -C "$ENV" commit -q -m "repo rename: 3d-battery-life → joule (folder ~/dev/joule, GitHub joule-battery-power-charging-analyzer)" || echo "  (변경 없음/커밋 스킵)"
   git -C "$ENV" push -q 2>/dev/null && echo "✓ _env 커밋+푸시" || echo "  ⚠️ _env push 실패 — 수동 push 필요"
 fi
@@ -71,9 +71,8 @@ fi
 echo
 echo "완료 ✓  검증:"
 echo "  ls \"$NEW\" && git -C \"$NEW\" remote -v | head -1        # 새 폴더 + 새 remote URL"
-echo "  launchctl print gui/$UID_N/com.kdr.3d-battery-life.sampler | grep -A2 arguments   # 새 경로"
-echo "  node \"$NEW/bin/cli.js\" record status                    # 기록 살아있는지"
+echo "  launchctl print gui/\$(id -u)/kr.kdr.joule.sampler | grep -A2 arguments   # v0.3.0 sampler(앱 경로)"
 echo "  readlink \"$NEW/.vscode\"                                 # → ../_env/vscode/joule"
 echo "  ls \"$NEW_PROJ\"                                          # transcripts + memory/"
 echo
-echo "데이터(~/Library/Application Support/3d-battery-life/)와 smcd 데몬은 의도적으로 그대로 — 20k+ 기록 연속성 유지."
+echo "기록 데이터는 ~/Library/Application Support/joule/ (v0.3.0 기준), 이 dev 폴더 이동과 무관."
