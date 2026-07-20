@@ -1,5 +1,5 @@
 // Menu-bar (tray) desktop wrapper for Joule (Battery, Power & Charging Analyzer).
-// On launch it: spawns the bundled `battery-life serve` sidecar (local web server),
+// On launch it: spawns the bundled `joule serve` sidecar (local web server),
 // on first run asks (once) whether to enable auto-recording, and shows a tray icon
 // with "뷰어 열기 / 기록 시작 / 기록 중지 / 앱 종료". Build: see TAURI.md. Tauri v2.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -89,21 +89,79 @@ fn demote_if_no_visible_ui(app: &AppHandle) {
 #[cfg(not(target_os = "macos"))]
 fn demote_if_no_visible_ui(_app: &AppHandle) {}
 
-const LABEL: &str = "com.kdr.3d-battery-life.sampler";
+const LABEL: &str = "kr.kdr.joule.sampler";
+// Legacy (pre-rename) identifiers — read-only, used ONLY by migrate_legacy() below to detect and
+// carry forward an existing install. Never used for anything else.
+const LEGACY_LABEL: &str = "com.kdr.3d-battery-life.sampler";
+const LEGACY_SMCD_LABEL: &str = "com.kdr.3d-battery-life.smcd";
 
 fn home() -> PathBuf { PathBuf::from(std::env::var("HOME").unwrap_or_default()) }
 fn plist_path() -> PathBuf { home().join("Library/LaunchAgents").join(format!("{LABEL}.plist")) }
-fn data_dir() -> PathBuf { home().join("Library/Application Support/3d-battery-life") }
+fn legacy_plist_path(label: &str) -> PathBuf { home().join("Library/LaunchAgents").join(format!("{label}.plist")) }
+fn data_dir() -> PathBuf { home().join("Library/Application Support/joule") }
+fn legacy_data_dir() -> PathBuf { home().join("Library/Application Support/3d-battery-life") }
+
+// One-time (idempotent) migration from the old `3d-battery-life` / `com.kdr.*` identifiers to
+// `joule` / `kr.kdr.joule.*`. Called first thing in setup(), before anything else reads data_dir()
+// or plist_path(). Safe to call on every launch — the 2nd+ call is a no-op (legacy paths/plists
+// are already gone by then).
+fn migrate_legacy() {
+    // (a) data dir: rename old → new ONLY if the old exists and the new doesn't (atomic rename —
+    // samples.jsonl and all history carry over). If BOTH exist, do nothing but warn: merging risks
+    // duplicating records, so we never merge automatically.
+    let (old, new) = (legacy_data_dir(), data_dir());
+    let old_is_dir = old.is_dir();
+    if old_is_dir && !new.exists() {
+        if let Err(e) = std::fs::rename(&old, &new) {
+            eprintln!("⚠️  legacy data migration failed ({e}) — still reading {}", old.display());
+        } else {
+            eprintln!("migrated legacy data dir → {}", new.display());
+        }
+    } else if old_is_dir && new.exists() {
+        eprintln!("⚠️  both {} and {} exist — leaving both as-is (no automatic merge)", old.display(), new.display());
+    }
+
+    // (b) old-labeled launchd agents: bootout + delete the plist, then reinstall under the new
+    // label (via the already-migrated run_record, which shells out to the sidecar's `record <sub>`
+    // — LABEL there is already kr.kdr.joule.sampler) IF the legacy agent was active.
+    // no libc dependency in this crate — shell out to `id -u` (same approach bin/cli.js uses via
+    // process.getuid(), just without a Node runtime here).
+    let uid = Sh::new("id").arg("-u").output().ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<u32>().ok())
+        .unwrap_or(0);
+    let old_sampler = legacy_plist_path(LEGACY_LABEL);
+    let old_smcd = legacy_plist_path(LEGACY_SMCD_LABEL);
+    let sampler_was_active = old_sampler.exists();
+    let smcd_was_active = old_smcd.exists();
+    for (label, plist) in [(LEGACY_LABEL, &old_sampler), (LEGACY_SMCD_LABEL, &old_smcd)] {
+        if plist.exists() {
+            let _ = Sh::new("launchctl").args(["bootout", &format!("gui/{uid}/{label}")]).status();
+            let _ = std::fs::remove_file(plist);
+        }
+    }
+    if sampler_was_active {
+        run_record("on");   // reinstalls under the NEW label (kr.kdr.joule.sampler)
+        eprintln!("migrated: sampler reinstalled as kr.kdr.joule.sampler");
+    }
+    if smcd_was_active {
+        // smcd isn't managed by this app's run_record (CLI-only "smcd on"); shell out to the
+        // sidecar directly, same as run_record does for "record".
+        if let Some(bin) = sidecar_bin() {
+            let _ = Sh::new(bin).args(["smcd", "on"]).status();
+            eprintln!("migrated: smcd reinstalled as kr.kdr.joule.smcd");
+        }
+    }
+}
 
 fn status_text(on: bool) -> &'static str {
     if on { "🟢 배터리 기록: 켜짐 (백그라운드 · 앱과 무관)" } else { "⚪ 배터리 기록: 꺼짐" }
 }
 
-// The sidecar binary sits next to this executable inside the .app (Contents/MacOS/battery-life).
+// The sidecar binary sits next to this executable inside the .app (Contents/MacOS/joule).
 fn sidecar_bin() -> Option<PathBuf> {
-    std::env::current_exe().ok()?.parent().map(|d| d.join("battery-life"))
+    std::env::current_exe().ok()?.parent().map(|d| d.join("joule"))
 }
-// Run `battery-life record <sub>` (on|off|status) — sets up / tears down the launchd sampler.
+// Run `joule record <sub>` (on|off|status) — sets up / tears down the launchd sampler.
 fn run_record(sub: &'static str) {
     if let Some(bin) = sidecar_bin() {
         let _ = Sh::new(bin).args(["record", sub]).status();
@@ -267,6 +325,9 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
+            // 0) One-time (idempotent) migration from the old `3d-battery-life`/`com.kdr.*`
+            // identifiers, BEFORE anything below reads data_dir()/plist_path() or launchd state.
+            migrate_legacy();
             // Menu-bar-only until a popover/viewer is requested. with_regular_app waits for Dock to
             // finish its async registration before showing and focusing that first window.
             #[cfg(target_os = "macos")]
@@ -274,13 +335,13 @@ fn main() {
             // 1) start the local server (bundled single binary) as a sidecar.
             // First reap any orphan from a previous run: RunEvent::Exit's kill is skipped on
             // SIGKILL/crash, and an orphaned server keeps port 4317 + stale measure state alive
-            // (유령 측정 세션). BATTERY_SIDECAR=1 lets the server also self-exit when re-parented
+            // (유령 측정 세션). JOULE_SIDECAR=1 lets the server also self-exit when re-parented
             // to launchd (ppid 1); the pkill here covers servers too old to know that trick.
-            let _ = Sh::new("/usr/bin/pkill").args(["-f", "battery-life serve"]).status();
+            let _ = Sh::new("/usr/bin/pkill").args(["-f", "joule serve"]).status();
             std::thread::sleep(std::time::Duration::from_millis(200));   // let the port release (server also retries EADDRINUSE)
-            let cmd = app.shell().sidecar("battery-life").expect("sidecar 'battery-life' missing")
-                .args(["serve"]).env("BATTERY_SIDECAR", "1");
-            let (mut rx, child) = cmd.spawn().expect("failed to spawn battery-life serve");
+            let cmd = app.shell().sidecar("joule").expect("sidecar 'joule' missing")
+                .args(["serve"]).env("JOULE_SIDECAR", "1");
+            let (mut rx, child) = cmd.spawn().expect("failed to spawn joule serve");
             *sidecar.lock().unwrap() = Some(child);
             tauri::async_runtime::spawn(async move {
                 while let Some(ev) = rx.recv().await {
@@ -651,7 +712,7 @@ fn show_main_ready(app: &AppHandle) {
                     }
                 });
                 std::thread::sleep(std::time::Duration::from_millis(120));
-                let _ = Sh::new("/usr/bin/open").args(["-b", "com.kdr.battery-life"]).status();
+                let _ = Sh::new("/usr/bin/open").args(["-b", "kr.kdr.joule"]).status();
                 std::thread::sleep(std::time::Duration::from_millis(140));
                 let app3 = app2.clone();
                 let _ = app2.run_on_main_thread(move || {

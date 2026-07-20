@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build a single self-contained executable (no Node needed at runtime) with Bun.
-# Output: dist/battery-life  +  dist/web/  (assets ship alongside the binary).
-#   run:  ./dist/battery-life serve     ./dist/battery-life sample
+# Output: dist/joule  +  dist/web/  (assets ship alongside the binary).
+#   run:  ./dist/joule serve     ./dist/joule sample
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$DIR/dist"
@@ -22,11 +22,11 @@ case "${1:-host}" in
   *)     BT=bun ;;
 esac
 rm -rf "$OUT"; mkdir -p "$OUT/data"
-echo "▶ compiling bin/cli.js ($BT) → $OUT/battery-life"
-bun build "$DIR/bin/cli.js" --compile --minify --target="$BT" --outfile "$OUT/battery-life"
+echo "▶ compiling bin/cli.js ($BT) → $OUT/joule"
+bun build "$DIR/bin/cli.js" --compile --minify --target="$BT" --outfile "$OUT/joule"
 cp -R "$DIR/web" "$OUT/web"     # static viewer assets, read next to the executable
 
 echo
-echo "✅ built: $OUT/battery-life"
-echo "   ship $OUT/battery-life together with $OUT/web/ (and a data/ dir is created on first run)"
-echo "   try:  ($OUT/battery-life demo2 needs Node)  then  $OUT/battery-life serve  →  http://localhost:4317"
+echo "✅ built: $OUT/joule"
+echo "   ship $OUT/joule together with $OUT/web/ (and a data/ dir is created on first run)"
+echo "   try:  ($OUT/joule demo2 needs Node)  then  $OUT/joule serve  →  http://localhost:4317"

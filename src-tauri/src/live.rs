@@ -172,7 +172,7 @@ impl Default for Cfg {
 }
 pub fn cfg_path() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
-        .join("Library/Application Support/3d-battery-life/tray.json")
+        .join("Library/Application Support/joule/tray.json")
 }
 // The popover's settings panel writes tray.json (via the node server's /api/config); the tray
 // menu no longer mutates it, so we only ever READ it here.

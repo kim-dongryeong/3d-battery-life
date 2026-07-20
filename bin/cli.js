@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Universal entry — works via `npx battery-life <cmd>` AND as a bun-compiled single binary.
+// Universal entry — works via `npx joule <cmd>` AND as a bun-compiled single binary.
 //   serve (default) · sample · record on|off|status · demo · demo2
 // serve/sample/record run in-process (so they work inside the compiled binary, no Node needed);
 // demo/demo2 shell out to Node (dev/npx only).
@@ -21,7 +21,7 @@ const root = resolveRoot();
 const cmd = (process.argv[2] || 'serve').replace(/^-+/, '');
 
 // ── launchd auto-recording ──────────────────────────────────────────────────
-const LABEL = 'com.kdr.3d-battery-life.sampler';
+const LABEL = 'kr.kdr.joule.sampler';
 const AGENT = path.join(os.homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
 const xml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
@@ -48,7 +48,7 @@ function plistXML(interval) {
 ${args}
   </array>
   <key>EnvironmentVariables</key>
-  <dict><key>BATTERY_DATA</key><string>${xml(data)}</string></dict>
+  <dict><key>JOULE_DATA</key><string>${xml(data)}</string></dict>
   <key>StartInterval</key><integer>${interval}</integer>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>${xml(path.join(data, 'sampler.log'))}</string>
@@ -91,7 +91,7 @@ function recordOn(interval) {
     return;
   }
   console.log(`✅ recording ON — every ${interval}s → ${samplesFile()}`);
-  console.log(`   auto-starts at login (survives reboot).  status: battery-life record status   stop: battery-life record off`);
+  console.log(`   auto-starts at login (survives reboot).  status: joule record status   stop: joule record off`);
 }
 function recordOff() {
   const uid = process.getuid();
@@ -116,11 +116,11 @@ function recordStatus() {
 }
 
 // ── smcd: 앱 없이도 SMC 전력 발행 + 분당 기록을 유지하는 상주 데몬 (launchd KeepAlive) ──────
-const SMCD_LABEL = 'com.kdr.3d-battery-life.smcd';
+const SMCD_LABEL = 'kr.kdr.joule.smcd';
 const SMCD_AGENT = path.join(os.homedir(), 'Library', 'LaunchAgents', `${SMCD_LABEL}.plist`);
 function smcdBin() {
-  if (COMPILED) return path.join(path.dirname(process.execPath), 'battery-life-smcd');   // 번들: battery-life 옆
-  return path.join(pkgRoot, 'native', 'smcd', 'target', 'release', 'battery-life-smcd'); // dev: cargo 산출물
+  if (COMPILED) return path.join(path.dirname(process.execPath), 'joule-smcd');   // 번들: joule 옆
+  return path.join(pkgRoot, 'native', 'smcd', 'target', 'release', 'joule-smcd'); // dev: cargo 산출물
 }
 function smcdOn() {
   const bin = smcdBin();
@@ -139,7 +139,7 @@ function smcdOn() {
     <string>${xml(bin)}</string>
   </array>
   <key>EnvironmentVariables</key>
-  <dict><key>BATTERY_DATA</key><string>${xml(data)}</string></dict>
+  <dict><key>JOULE_DATA</key><string>${xml(data)}</string></dict>
   <key>KeepAlive</key><true/>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>${xml(path.join(data, 'smcd.log'))}</string>
@@ -172,6 +172,53 @@ function smcdStatus() {
   console.log(`plist: ${SMCD_AGENT}${fs.existsSync(SMCD_AGENT) ? '' : '  (absent)'}`);
   console.log(`bin:   ${smcdBin()}${fs.existsSync(smcdBin()) ? '' : '  (absent!)'}`);
 }
+
+// ── legacy (`3d-battery-life` / `com.kdr.*`) → joule migration ──────────────
+// Idempotent: safe to call on every run — the 2nd+ call is a no-op (old paths/labels are gone
+// by then). Invoked below (see migrateLegacy() call), before the switch dispatches on `cmd` —
+// i.e. before anything reads userDataDir() or launchd state — so a pre-existing legacy install
+// is carried forward transparently on first launch of the renamed CLI/app.
+const LEGACY_LABEL = 'com.kdr.3d-battery-life.sampler';
+const LEGACY_SMCD_LABEL = 'com.kdr.3d-battery-life.smcd';
+function migrateLegacy() {
+  // (a) data dir: rename old → new ONLY if the old dir exists and the new one doesn't — this is
+  // an atomic rename (fs.renameSync), so samples.jsonl and all history carry over intact. If BOTH
+  // exist, do nothing but warn — merging risks duplicating records, so we never merge automatically.
+  const oldData = path.join(os.homedir(), 'Library', 'Application Support', '3d-battery-life');
+  const newData = path.join(os.homedir(), 'Library', 'Application Support', 'joule');
+  let oldIsDir = false;
+  try { oldIsDir = fs.statSync(oldData).isDirectory(); } catch { /* absent */ }
+  if (oldIsDir && !fs.existsSync(newData)) {
+    try { fs.renameSync(oldData, newData); console.log(`migrated legacy data dir → ${newData}`); }
+    catch (e) { console.error(`⚠️  legacy data migration failed (${e.message}) — still reading ${oldData}`); }
+  } else if (oldIsDir && fs.existsSync(newData)) {
+    console.error(`⚠️  both ${oldData} and ${newData} exist — leaving both as-is (no automatic merge)`);
+  }
+
+  // (b) old-labeled launchd agents: bootout + delete the plist, then reinstall under the new
+  // labels (LABEL/SMCD_LABEL below are already the new kr.kdr.joule.* values) IF they were active.
+  const uid = process.getuid();
+  const oldSamplerPlist = path.join(os.homedir(), 'Library', 'LaunchAgents', `${LEGACY_LABEL}.plist`);
+  const oldSmcdPlist = path.join(os.homedir(), 'Library', 'LaunchAgents', `${LEGACY_SMCD_LABEL}.plist`);
+  const samplerWasActive = fs.existsSync(oldSamplerPlist);
+  const smcdWasActive = fs.existsSync(oldSmcdPlist);
+  for (const [label, plist] of [[LEGACY_LABEL, oldSamplerPlist], [LEGACY_SMCD_LABEL, oldSmcdPlist]]) {
+    if (fs.existsSync(plist)) {
+      spawnSync('launchctl', ['bootout', `gui/${uid}/${label}`], { stdio: 'ignore' });   // errors ignored — already-unloaded is fine
+      try { fs.rmSync(plist); } catch { /* ignore */ }
+    }
+  }
+  // recordOn/smcdOn are function declarations (hoisted) — calling them here, ahead of their
+  // textual definition further down, is safe. They install under the NEW labels/paths since
+  // LABEL/SMCD_LABEL/userDataDir() have already been updated to the joule identifiers.
+  if (samplerWasActive) { recordOn(60); console.log('migrated: sampler reinstalled as kr.kdr.joule.sampler'); }
+  if (smcdWasActive) { smcdOn(); console.log('migrated: smcd reinstalled as kr.kdr.joule.smcd'); }
+}
+
+// Run the migration on every invocation (idempotent — 2nd+ call is a no-op since the legacy
+// paths/plists are gone by then). Placed here, after LABEL/SMCD_LABEL/recordOn/smcdOn are all
+// defined (const TDZ + hoisting), and BEFORE the switch below does any real work/reads state.
+migrateLegacy();
 
 switch (cmd) {
   case 'serve':
@@ -214,7 +261,7 @@ switch (cmd) {
     break;
   }
   default:
-    console.log(`battery-life <command>
+    console.log(`joule <command>
 
   serve             start the local web viewer at http://localhost:4317   [default]
   sample            take one battery snapshot → shared samples log
@@ -225,5 +272,5 @@ switch (cmd) {
   demo | demo2      generate demo data (data/demo*.jsonl)                 [Node]
 
   data (real samples): ${samplesFile()}
-  npx battery-life serve      # or: ./battery-life serve  (compiled binary)`);
+  npx joule serve      # or: ./joule serve  (compiled binary)`);
 }

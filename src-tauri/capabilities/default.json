@@ -1,14 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Allow the main window to run the battery-life sidecar.",
+  "description": "Allow the main window to run the joule sidecar.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "shell:default",
     {
       "identifier": "shell:allow-spawn",
-      "allow": [{ "name": "binaries/battery-life", "sidecar": true, "args": ["serve"] }]
+      "allow": [{ "name": "binaries/joule", "sidecar": true, "args": ["serve"] }]
     }
   ]
 }

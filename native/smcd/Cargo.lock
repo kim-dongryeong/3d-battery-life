@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "battery-life-smcd"
+name = "joule-smcd"
 version = "0.1.0"

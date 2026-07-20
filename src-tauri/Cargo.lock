@@ -110,25 +110,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
-name = "battery-life-desktop"
-version = "0.2.0"
-dependencies = [
- "fontdue",
- "objc",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "serde",
- "serde_json",
- "starship-battery",
- "tauri",
- "tauri-build",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-shell",
- "tauri-plugin-updater",
-]
-
-[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1742,6 +1723,25 @@ checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
 dependencies = [
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "joule-desktop"
+version = "0.2.0"
+dependencies = [
+ "fontdue",
+ "objc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "serde",
+ "serde_json",
+ "starship-battery",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-shell",
+ "tauri-plugin-updater",
 ]
 
 [[package]]

@@ -138,7 +138,7 @@ node bin/cli.js record status   # is it running? how many samples so far?
 node bin/cli.js record off      # stop (= ./uninstall.sh; collected data is kept)
 ```
 
-- **Real data lives in one place**: `~/Library/Application Support/3d-battery-life/samples.jsonl` (override with `BATTERY_DATA`). npx, the standalone binary, and the Tauri app all read the **same report** from it. (The bundled `.jsonl` demos ship with the app as assets.)
+- **Real data lives in one place**: `~/Library/Application Support/joule/samples.jsonl` (override with `JOULE_DATA`). npx, the standalone binary, and the Tauri app all read the **same report** from it. (The bundled `.jsonl` demos ship with the app as assets.)
 - The recorder is idempotent — running it through all three packaging paths never produces duplicate data.
 
 ### Packaging
@@ -147,19 +147,19 @@ Same core, three wrappers — all three reuse this same web viewer.
 
 ```bash
 # ① npx / CLI  (requires Node)
-npx battery-life serve        # serve · sample · demo · demo2 · install · uninstall
+npx joule serve        # serve · sample · demo · demo2 · install · uninstall
 node bin/cli.js help
 
 # ② standalone binary  (no Node required, compiled with Bun)
-npm run build:binary          # → dist/battery-life (+ dist/web/)
-./dist/battery-life serve
+npm run build:binary          # → dist/joule (+ dist/web/)
+./dist/joule serve
 
 # ③ menu bar app (.app/.dmg)  — Tauri v2 (build & run verified)
 npm run build:app             # binary → sidecar → .app/.dmg  (requires Bun + Rust + @tauri-apps/cli)
 #   Double-click → first launch asks "start recording?" → open the viewer / toggle recording from the menu bar. See TAURI.md.
 ```
 
-> **Recording** runs via a launchd agent every minute (auto-starts at login). Turn it on/off: the **app** asks on first launch and offers a menu bar toggle; the **CLI** uses `battery-life record on/off/status` (= `./install.sh`/`./uninstall.sh`).
+> **Recording** runs via a launchd agent every minute (auto-starts at login). Turn it on/off: the **app** asks on first launch and offers a menu bar toggle; the **CLI** uses `joule record on/off/status` (= `./install.sh`/`./uninstall.sh`).
 
 ### Reading the 3D view
 
@@ -197,7 +197,7 @@ launchd/            60-second LaunchAgent template
 
 - **Node 18+** only (zero npm dependencies; Three.js is vendored in `web/vendor/`).
 - No `sudo`, no kernel extensions — reads `ioreg`/`ps` plus the SMC directly.
-- All data stays local, under `~/Library/Application Support/3d-battery-life/`.
+- All data stays local, under `~/Library/Application Support/joule/`.
 
 ### Stopping
 

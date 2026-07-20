@@ -1,7 +1,7 @@
 # Brief — Live menu-bar battery module (match & beat Stats' Battery module)
 
 Repo: `/Users/kimdongryeong/dev/3d-battery-life` (macOS battery tracker; Tauri v2 tray app in `src-tauri/`,
-web viewer in `web/`, node sidecar `battery-life serve`, launchd 60s sampler → shared `samples.jsonl`).
+web viewer in `web/`, node sidecar `joule serve`, launchd 60s sampler → shared `samples.jsonl`).
 
 ## GOAL
 Make our Tauri tray app a FULL live battery monitor (parity with exelban/Stats' Battery module) **plus**

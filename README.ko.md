@@ -138,7 +138,7 @@ node bin/cli.js record status   # 실행 중? 지금까지 샘플 개수?
 node bin/cli.js record off      # 중지 (= ./uninstall.sh; 수집 데이터 유지)
 ```
 
-- **실제 데이터 저장 위치**: `~/Library/Application Support/3d-battery-life/samples.jsonl` (환경변수 `BATTERY_DATA`로 변경 가능). npx, 독립 바이너리, Tauri 앱이 모두 **같은 리포트**를 읽습니다. (번들된 `.jsonl` 데모는 앱 자산으로 함께 배포)
+- **실제 데이터 저장 위치**: `~/Library/Application Support/joule/samples.jsonl` (환경변수 `JOULE_DATA`로 변경 가능). npx, 독립 바이너리, Tauri 앱이 모두 **같은 리포트**를 읽습니다. (번들된 `.jsonl` 데모는 앱 자산으로 함께 배포)
 - 기록기는 멱등성 — 세 가지 패키징 경로를 모두 거쳐도 중복 데이터 생성 없음.
 
 ### 패키징
@@ -147,19 +147,19 @@ node bin/cli.js record off      # 중지 (= ./uninstall.sh; 수집 데이터 유
 
 ```bash
 # ① npx / CLI  (Node 필요)
-npx battery-life serve        # serve · sample · demo · demo2 · install · uninstall
+npx joule serve        # serve · sample · demo · demo2 · install · uninstall
 node bin/cli.js help
 
 # ② 독립 바이너리  (Node 불필요, Bun으로 컴파일)
-npm run build:binary          # → dist/battery-life (+ dist/web/)
-./dist/battery-life serve
+npm run build:binary          # → dist/joule (+ dist/web/)
+./dist/joule serve
 
 # ③ 메뉴바 앱 (.app/.dmg)  — Tauri v2 (빌드 & 실행 검증됨)
 npm run build:app             # 바이너리 → sidecar → .app/.dmg  (Bun + Rust + @tauri-apps/cli 필요)
 #   더블클릭 → 첫 실행 시 "기록 시작?" 확인 → 뷰어 열기 / 메뉴바 토글로 기록 제어. TAURI.md 참조.
 ```
 
-> **기록**는 1분마다 launchd 에이전트로 실행 (로그인 시 자동 시작). 시작/중지: **앱**은 첫 실행 시 확인하고 메뉴바 토글 제공; **CLI**는 `battery-life record on/off/status` (= `./install.sh`/`./uninstall.sh`)로 제어.
+> **기록**는 1분마다 launchd 에이전트로 실행 (로그인 시 자동 시작). 시작/중지: **앱**은 첫 실행 시 확인하고 메뉴바 토글 제공; **CLI**는 `joule record on/off/status` (= `./install.sh`/`./uninstall.sh`)로 제어.
 
 ### 3D 뷰 읽기
 
@@ -197,7 +197,7 @@ launchd/            60초 LaunchAgent 템플릿
 
 - **Node 18+** 필수만 (npm 의존성 없음; Three.js는 `web/vendor/`에 벤더링됨).
 - `sudo` 없음, 커널 확장 없음 — ioreg·ps에 더해 SMC를 직접 읽음.
-- 모든 데이터는 로컬 — `~/Library/Application Support/3d-battery-life/` 에만 저장.
+- 모든 데이터는 로컬 — `~/Library/Application Support/joule/` 에만 저장.
 
 ### 중지
 

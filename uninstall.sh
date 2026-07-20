@@ -1,6 +1,6 @@
 #!/bin/bash
 # Stop background battery recording. Your collected data is left intact.
-# Thin wrapper around `battery-life record off`.
+# Thin wrapper around `joule record off`.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NODE="$(command -v node || true)"

@@ -256,7 +256,7 @@ export function startServer({ root, port } = {}) {
       try {
         const s = sample();
         // whether the launchd sampler is installed (so the popover's recording toggle shows the right label)
-        try { s.recording = fs.existsSync(path.join(process.env.HOME || '', 'Library/LaunchAgents/com.kdr.3d-battery-life.sampler.plist')); } catch { /* ignore */ }
+        try { s.recording = fs.existsSync(path.join(process.env.HOME || '', 'Library/LaunchAgents/kr.kdr.joule.sampler.plist')); } catch { /* ignore */ }
         // systemW/adapterW + the live battery rail are merged inside sample() now (applyLiveSMC),
         // so both /api/live AND the launchd sampler record them when the app is running.
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -489,10 +489,10 @@ export function startServer({ root, port } = {}) {
     });
   }
 
-  // As a Tauri sidecar (BATTERY_SIDECAR=1): a dying/killed parent can't always kill us (SIGKILL/crash
+  // As a Tauri sidecar (JOULE_SIDECAR=1): a dying/killed parent can't always kill us (SIGKILL/crash
   // skips RunEvent::Exit) — an orphaned server then keeps port 4317 + stale in-memory measure state
   // while re-writing its persist file (the 유령 측정 세션 incident). Orphaned ⇒ ppid becomes 1 ⇒ exit.
-  if (process.env.BATTERY_SIDECAR === '1') {
+  if (process.env.JOULE_SIDECAR === '1') {
     setInterval(() => { if (process.ppid === 1) { measurePersist(); process.exit(0); } }, 5000);
   }
   let binds = 0;
@@ -507,7 +507,7 @@ export function startServer({ root, port } = {}) {
       : `server error: ${e.message}`);
     process.exit(1);
   });
-  server.listen(PORT, '127.0.0.1', () => console.log(`3d-battery-life ▶  http://localhost:${PORT}   (samples: ${path.join(userDataDir(), 'samples.jsonl')})`));
+  server.listen(PORT, '127.0.0.1', () => console.log(`joule ▶  http://localhost:${PORT}   (samples: ${path.join(userDataDir(), 'samples.jsonl')})`));
   return server;
 }
 
