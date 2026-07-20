@@ -13,7 +13,7 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VER="${1:?usage: release.sh <version e.g. 0.2.0>}"
-REPO="kim-dongryeong/3d-battery-life"
+REPO="kim-dongryeong/joule-battery-power-charging-analyzer"
 SIGN_ID="Developer ID Application: Dongryeong Kim (58V5P2LQ68)"
 KEY="$HOME/.tauri/joule.key"
 [ -f "$KEY" ] || { echo "error: $KEY 없음 (tauri signer generate)"; exit 1; }

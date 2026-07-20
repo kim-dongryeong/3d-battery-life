@@ -13,13 +13,13 @@ Twenty days of charging and discharging you can spin, measure, and finally under
 with real charger output and energy cross-checked two ways.</p>
 
 <p align="center">
-  <a href="https://github.com/kim-dongryeong/3d-battery-life/releases/latest"><img alt="macOS" src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%26%20Intel-black?logo=apple&logoColor=white"></a>
-  <a href="https://github.com/kim-dongryeong/3d-battery-life/releases/latest"><img alt="Version" src="https://img.shields.io/badge/version-0.2.0-blue"></a>
-  <a href="https://github.com/kim-dongryeong/3d-battery-life/releases/latest"><img alt="Auto-updates" src="https://img.shields.io/badge/auto--updates-built--in-brightgreen"></a>
+  <a href="https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest"><img alt="macOS" src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%26%20Intel-black?logo=apple&logoColor=white"></a>
+  <a href="https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest"><img alt="Version" src="https://img.shields.io/badge/version-0.2.0-blue"></a>
+  <a href="https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest"><img alt="Auto-updates" src="https://img.shields.io/badge/auto--updates-built--in-brightgreen"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/kim-dongryeong/3d-battery-life/releases/latest">
+  <a href="https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest">
     <img alt="Download for macOS" src="https://img.shields.io/badge/Download-macOS%20.dmg-success?style=for-the-badge&logo=apple&logoColor=white">
   </a>
 </p>
@@ -93,7 +93,7 @@ Built and proven on one real Mac — no rounded-up marketing figures:
 
 ## Install
 
-1. Download the `.dmg` from the [latest release](https://github.com/kim-dongryeong/3d-battery-life/releases/latest) — pick Apple Silicon (aarch64) or Intel (x86_64).
+1. Download the `.dmg` from the [latest release](https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest) — pick Apple Silicon (aarch64) or Intel (x86_64).
 2. Drag **Joule** into Applications.
 3. Launch it — it lives quietly in your menu bar.
 

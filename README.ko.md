@@ -13,13 +13,13 @@
 실제 충전기 출력과 두 방식으로 교차검증한 전력량까지.</p>
 
 <p align="center">
-  <a href="https://github.com/kim-dongryeong/3d-battery-life/releases/latest"><img alt="macOS" src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%26%20Intel-black?logo=apple&logoColor=white"></a>
-  <a href="https://github.com/kim-dongryeong/3d-battery-life/releases/latest"><img alt="Version" src="https://img.shields.io/badge/version-0.2.0-blue"></a>
-  <a href="https://github.com/kim-dongryeong/3d-battery-life/releases/latest"><img alt="자동 업데이트" src="https://img.shields.io/badge/auto--updates-built--in-brightgreen"></a>
+  <a href="https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest"><img alt="macOS" src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%26%20Intel-black?logo=apple&logoColor=white"></a>
+  <a href="https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest"><img alt="Version" src="https://img.shields.io/badge/version-0.2.0-blue"></a>
+  <a href="https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest"><img alt="자동 업데이트" src="https://img.shields.io/badge/auto--updates-built--in-brightgreen"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/kim-dongryeong/3d-battery-life/releases/latest">
+  <a href="https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest">
     <img alt="macOS 다운로드" src="https://img.shields.io/badge/Download-macOS%20.dmg-success?style=for-the-badge&logo=apple&logoColor=white">
   </a>
 </p>
@@ -93,7 +93,7 @@
 
 ## 설치
 
-1. [최신 버전](https://github.com/kim-dongryeong/3d-battery-life/releases/latest)에서 `.dmg` 다운로드 — Apple Silicon(aarch64) 또는 Intel(x86_64) 선택.
+1. [최신 버전](https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest)에서 `.dmg` 다운로드 — Apple Silicon(aarch64) 또는 Intel(x86_64) 선택.
 2. **Joule**을 응용 프로그램 폴더로 드래그.
 3. 실행 — 메뉴바에 상주합니다.
 
