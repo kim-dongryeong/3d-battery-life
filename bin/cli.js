@@ -63,22 +63,6 @@ function recordOn(interval) {
   const data = userDataDir();
   fs.mkdirSync(data, { recursive: true });
   fs.mkdirSync(path.dirname(AGENT), { recursive: true });
-  // one-time migration: merge legacy per-project data into the shared log (dedup by timestamp).
-  // Merge (not copy) because the launchd sampler may already have written a few to the shared dir.
-  const legacy = path.join(pkgRoot, 'data', 'samples.jsonl');
-  const marker = path.join(data, '.migrated');
-  if (!fs.existsSync(marker) && fs.existsSync(legacy)) {
-    const read = f => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean); } catch { return []; } };
-    const seen = new Set(), rows = [];
-    for (const line of [...read(legacy), ...read(samplesFile())]) {
-      let iso; try { iso = JSON.parse(line).iso; } catch { continue; }
-      if (iso && !seen.has(iso)) { seen.add(iso); rows.push([iso, line]); }
-    }
-    rows.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
-    fs.writeFileSync(samplesFile(), rows.map(r => r[1]).join('\n') + '\n');
-    fs.writeFileSync(marker, `merged legacy ${legacy}\n`);
-    console.log(`migrated legacy history → ${rows.length} total samples in ${samplesFile()}`);
-  }
   fs.writeFileSync(AGENT, plistXML(interval));
   const uid = process.getuid();
   spawnSync('launchctl', ['bootout', `gui/${uid}/${LABEL}`], { stdio: 'ignore' }); // idempotent: drop any old one first
