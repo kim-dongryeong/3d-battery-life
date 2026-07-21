@@ -39,6 +39,11 @@ use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt}
 #[cfg(target_os = "macos")]
 static APP_MODE: AtomicU8 = AtomicU8::new(0);
 
+// 팝오버가 우리를 frontmost로 만들기 '직전'의 앱 bundle id. 뷰어를 열 때 이 앱으로 잠깐 물러났다
+// open -b로 돌아오면 Cmd+Tab MRU가 정상화된다(그 앱은 원래 2번째 자리라 순서도 자연스럽다).
+#[cfg(target_os = "macos")]
+static PREV_FRONT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 #[cfg(target_os = "macos")]
 fn with_regular_app<F>(app: &AppHandle, action: F)
 where
@@ -624,43 +629,31 @@ fn show_main_ready(app: &AppHandle) {
             }
         }
         let _ = w.unminimize();
-        let _ = w.show();   // 포커스 없이 표시 — cmd+Tab 활성화는 아래 LaunchServices가 담당
-        // cmd+Tab MRU 순서 (Apple 버그 FB7743313 우회 — 복원). 팝오버(574675a)로 앱이 이미 활성-Accessory
-        // 인 상태에서 Regular로 승격하면, 앱이 스스로 하는 활성화(NSApp activate/activateWithOptions)는
-        // Dock 전환기 MRU에 반영되지 않아 뷰어가 ⌘Tab 맨 오른쪽(오래된 순서)에 박힌다. Dock 아이콘 클릭/
-        // Spotlight와 같은 경로인 **LaunchServices 활성화(`open -b <bundle id>`)** 로 시스템이 우리를
-        // "밖에서" 활성화하게 하면 진짜 사용자 전환으로 기록돼 뷰어가 맨 앞(왼쪽)으로 온다. set_focus는 안전망.
-        // (2026-07-13 89d2df8에서 도입. ⚠️ 단, 앱이 '이미 frontmost'면 open -b 단독은 no-op — 아래 H1 주석.)
-        // ⚠️ 실패 확정(재시도 금지): deactivate 후 '자기(self)' 재활성화 바운스(11ba054·9e4a471).
-        //    통하는 조합은 deactivate 후 '외부(open -b)' 재활성화뿐 — 재활성화 주체가 핵심 차이다.
+        // ── Cmd+Tab MRU 복원 (Apple 버그 FB7743313 우회) ─────────────────────────────────
+        // 팝오버가 앱을 스스로 활성화(activateIgnoringOtherApps)해 둔 상태라 앱은 화면 맨 앞이지만,
+        // Cmd+Tab MRU는 '자기-활성화 = 진짜 전환 아님'으로 무시돼 뷰어가 전환기 맨 오른쪽에 박힌다.
+        // 제대로 갱신하려면 '밖에서 온 전환'(LaunchServices `open -b`)이 필요한데, 내가 이미 frontmost면
+        // no-op이다. 최신 macOS는 deactivate()가 no-op·hide()는 보이는 창이 있어야만 동작 → 스스로
+        // 뒤로 물러날 방법이 없다. 그래서 (1) '직전에 쓰던 앱'을 잠깐 앞으로 올려 물러난 뒤 (2) open -b로
+        // 나를 다시 부른다(진짜 사용자 전환 → MRU 갱신). 직전 앱을 쓰면 번쩍임이 자연스럽고(이미 화면에
+        // 있음) Cmd+Tab 2번째 자리도 맞다. (3) 뷰어 show()는 이 활성화 다음으로 미뤄 한 번만 뜨게 한다.
         #[cfg(target_os = "macos")]
         {
             let app2 = app.clone();
             std::thread::spawn(move || {
-                // H1(2026-07-19): 574675a의 팝오버가 activateIgnoringOtherApps로 앱을 이미 frontmost로
-                // 만들어 둔 상태라, 이 시점의 open -b는 '이미 맨 앞'인 앱을 다시 여는 no-op이 되어
-                // LaunchServices 활성화가 cmd+Tab MRU를 갱신하지 못한다(뷰어가 전환기 맨 오른쪽에 박힘).
-                // open -b '직전에' 앱을 명시적으로 비활성화(NSApp deactivate)해 두면, open -b가 '밖에서
-                // 다시 앞으로'라는 진짜 사용자 전환을 만들어 MRU가 정상 갱신된다. 금지된 '자기 재활성화
-                // 바운스'와의 차이: 재활성화는 우리가 아니라 open -b(외부 LaunchServices)가 담당한다.
-                let _ = app2.run_on_main_thread(|| {
-                    use objc2_app_kit::NSApplication;
-                    use objc2_foundation::MainThreadMarker;
-                    if let Some(mtm) = MainThreadMarker::new() {
-                        NSApplication::sharedApplication(mtm).deactivate();
-                    }
-                });
+                let prev = PREV_FRONT.lock().ok().and_then(|g| g.clone()).unwrap_or_else(|| "com.apple.finder".to_string());
+                let _ = Sh::new("/usr/bin/open").args(["-b", &prev]).status();          // 1) 직전 앱으로 물러남
                 std::thread::sleep(std::time::Duration::from_millis(120));
-                let _ = Sh::new("/usr/bin/open").args(["-b", "kr.kdr.joule"]).status();
-                std::thread::sleep(std::time::Duration::from_millis(140));
+                let _ = Sh::new("/usr/bin/open").args(["-b", "kr.kdr.joule"]).status();  // 2) 외부 재활성화 → MRU
+                std::thread::sleep(std::time::Duration::from_millis(120));
                 let app3 = app2.clone();
-                let _ = app2.run_on_main_thread(move || {
-                    if let Some(w) = app3.get_webview_window("main") { let _ = w.set_focus(); }
+                let _ = app2.run_on_main_thread(move || {                               // 3) 이제서야 뷰어 표시
+                    if let Some(w) = app3.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); }
                 });
             });
         }
         #[cfg(not(target_os = "macos"))]
-        let _ = w.set_focus();
+        { let _ = w.show(); let _ = w.set_focus(); }
     }
 }
 
@@ -865,9 +858,20 @@ fn icon_anchor(app: &AppHandle) -> Option<(f64, f64, f64, f64)> {
 // key window가 되게 한다 — key가 아니면 바깥 클릭의 Focused(false)가 안 와 자동숨김이 죽는다.
 #[cfg(target_os = "macos")]
 fn activate_for_popover() {
-    use objc2_app_kit::NSApplication;
+    use objc2_app_kit::{NSApplication, NSWorkspace};
     use objc2_foundation::MainThreadMarker;
     if let Some(mtm) = MainThreadMarker::new() {
+        // activate 직전에 '직전 앱'을 기억(자기 자신 제외) — show_main_ready의 MRU 복원에 쓴다.
+        unsafe {
+            if let Some(prev) = NSWorkspace::sharedWorkspace().frontmostApplication() {
+                if let Some(bid) = prev.bundleIdentifier() {
+                    let s = bid.to_string();
+                    if s != "kr.kdr.joule" {
+                        if let Ok(mut g) = PREV_FRONT.lock() { *g = Some(s); }
+                    }
+                }
+            }
+        }
         #[allow(deprecated)]
         NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
     }

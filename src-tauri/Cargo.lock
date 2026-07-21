@@ -1727,7 +1727,7 @@ dependencies = [
 
 [[package]]
 name = "joule-desktop"
-version = "0.3.0"
+version = "1.0.1"
 dependencies = [
  "fontdue",
  "objc",

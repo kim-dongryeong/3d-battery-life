@@ -1,6 +1,6 @@
 [package]
 name = "joule-desktop"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 
 [build-dependencies]
@@ -16,7 +16,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 fontdue = "0.9"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSFont", "NSAttributedString", "NSButton", "NSControl", "NSFontDescriptor", "NSBitmapImageRep", "NSImage", "NSImageRep", "NSGraphics", "NSCell"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSWorkspace", "NSRunningApplication", "NSFont", "NSAttributedString", "NSButton", "NSControl", "NSFontDescriptor", "NSBitmapImageRep", "NSImage", "NSImageRep", "NSGraphics", "NSCell"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSGeometry", "NSArray", "NSAttributedString", "NSString", "NSDictionary", "NSValue", "NSObject"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
