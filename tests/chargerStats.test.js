@@ -206,6 +206,18 @@ test('a) 같은 name+adapterId, 다른 계약 3개(듀얼포트 재협상) → �
   assert.ok(row.offeredMenu);
   assert.deepEqual(row.offeredMenu.map(p => p.v), [5, 9, 15, 20]);
   assert.equal(Math.max(...row.offeredMenu.map(p => p.w)), 35);
+  // menuVariants: offeredMenu(35W)를 뺀 나머지 관측 메뉴들의 최대 W, 내림차순 — 듀얼포트 분배 관측치
+  assert.deepEqual(row.menuVariants, [27, 17]);
+});
+
+test('g) 메뉴가 1종뿐이면 menuVariants는 빈 배열', () => {
+  const FAM = 'e000400a', AID = 12345, NAME = '20W USB-C Power Adapter';
+  const K20 = '20W@9V/e000400a#12345';
+  const adapters = { [K20]: { name: NAME, hvcMenu: [{ v: 5, a: 3 }, { v: 9, a: 2.22 }] } };   // 최대 20W
+  const samples = acRun({ t0: 1, n: 20, adapter: { adapterWnom: 20, adapterVnom: 9, familyCode: FAM, adapterId: AID }, adapterW: 18 });
+  const rows = aggregateChargers(samples, adapters);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].menuVariants, []);
 });
 
 test('b) adapterId 0 + 일반명, 메뉴 최대 65W vs 67W → 반올림 같은 클래스로 병합, 90W는 별도 유지', () => {

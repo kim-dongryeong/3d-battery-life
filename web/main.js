@@ -1175,12 +1175,21 @@ function chgTrackMaxW(c) {
   return c.offeredMenu && c.offeredMenu.length ? Math.max(...c.offeredMenu.map(p => p.w)) : (c.ratedW || 0);
 }
 // "제공: 5V·3A · 9V·3A · … (최대 35W)" — 충전기 자체가 제공하는 PD 프로필 메뉴(adapters.json hvcMenu).
-// 메뉴가 없으면(비-PD·구형 USB 등) 아예 생략.
+// 메뉴가 없으면(비-PD·구형 USB 등) 아예 생략. 듀얼포트 어댑터처럼 축소 메뉴도 관측됐으면(menuVariants)
+// 이 줄이 "풀 메뉴 하나만"이 아니란 걸 알리도록 라벨을 "제공(단독)"으로 바꾼다 — 아래 chgMenuVariantsLine 참고.
 function chgOfferedLine(c) {
   if (!c.offeredMenu || !c.offeredMenu.length) return '';
   const items = c.offeredMenu.map(p => `${p.v}V·${p.a}A`).join(' · ');
   const maxW = Math.max(...c.offeredMenu.map(p => p.w));
-  return `<div class="chgMeta">제공: ${items} (최대 ${maxW}W)</div>`;
+  const label = c.menuVariants && c.menuVariants.length ? '제공(단독)' : '제공';
+  return `<div class="chgMeta">${label}: ${items} (최대 ${maxW}W)</div>`;
+}
+// "분배 관측: 27W 메뉴 · 17W 메뉴" — 듀얼포트 어댑터가 다른 포트와 전력을 나눌 때 협상한 축소
+// 메뉴들(menuVariants, offeredMenu 제외 내림차순). 없으면(단일 메뉴만 관측) 생략.
+function chgMenuVariantsLine(c) {
+  if (!c.menuVariants || !c.menuVariants.length) return '';
+  const items = c.menuVariants.map(w => `${w}W 메뉴`).join(' · ');
+  return `<div class="chgMeta" title="듀얼포트 전력 분배 등으로 축소 광고된 메뉴가 관측됨">분배 관측: ${items}</div>`;
 }
 // 계약(chargerKey)별 실측 한 줄씩: "20V·35W — 9.6시간 · ≤32.3W · ⌀21.0W · ⌀19.9V · ≤1.66A"
 // (≤=최댓값, ⌀=시간가중평균). 듀얼포트 재협상으로 계약이 갈린 모델은 이렇게 계약별로 늘어놓아야
@@ -1273,6 +1282,7 @@ function renderChargers() {
       ${chgIdentityLine(c)}
       <div class="chgTrack">${trackW ? `<div class="chgRated" style="width:${ratedPct}%"></div>` : ''}${c.maxW != null ? `<div class="chgMax" style="width:${maxPct}%"></div>` : ''}${avgPct != null ? `<div class="chgAvgMark" style="left:${avgPct}%"></div>` : ''}</div>
       ${chgOfferedLine(c)}
+      ${chgMenuVariantsLine(c)}
       ${chgProfilesLine(c)}
       ${chgMeasuredLine(c)}
     </div>`;
