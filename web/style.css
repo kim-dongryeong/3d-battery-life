@@ -306,6 +306,17 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #chargers.folded { width: auto; min-width: 0; }
 #chargers.folded > :not(h2) { display: none; }
 #chargers.folded h2 { margin: 0; }
+/* 확대 버튼 — #trendchart .tbtns 관례 그대로(카드 헤더 우측, 접기 버튼 옆) */
+#chargers h2 .cbtns { float: right; margin-right: 34px; }   /* 접기 버튼(.pcollapse, 우측 절대배치) 자리 확보 */
+#chargers .cbtns button { border: 1px solid var(--line); background: var(--btn); color: var(--dim);
+  border-radius: 6px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
+#chargers .cbtns button:hover { color: var(--fg); }
+#chargers .cbtns button.on { background: var(--accent); color: var(--onfg); border-color: var(--accent); font-weight: 600; }
+#chargers .cbtns button.hl { border-color: var(--accent); color: var(--accent); font-weight: 600;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+/* 확대 상태: #trendchart.big과 같은 중앙 대형 패널 문법. 46vh 클램프는 해제하되 스크롤은 유지 */
+#chargers.big { left: 50%; top: 50%; right: auto; bottom: auto; transform: translate(-50%, -50%);
+  width: 86vw; max-width: 720px; max-height: 82vh; z-index: 30; box-shadow: 0 12px 60px rgba(0,0,0,.6); }
 
 /* ---- fold (접기): panels collapse to a slim header pill ---- */
 .fold { border: none; background: none; color: var(--dim); cursor: pointer; font-size: 11px;

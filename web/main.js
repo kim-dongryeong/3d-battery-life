@@ -36,6 +36,8 @@ state.foldBuckets = (() => { try { return localStorage.getItem('battFoldB') === 
 state.foldTrend = (() => { try { return localStorage.getItem('battFoldT') === '1'; } catch { return false; } })();
 // 기능 A(내 충전기·보조배터리) 카드 접힘 — #buckets와 같은 pcollapse 관례. 기본은 접힘(화면 소음 최소화).
 state.foldChargers = (() => { try { const v = localStorage.getItem('battFoldC'); return v == null ? true : v === '1'; } catch { return true; } })();
+// 확대(#trendchart의 tbig 패턴 그대로 복제) — 카드를 화면 중앙에 큼직하게
+state.chargersBig = (() => { try { return localStorage.getItem('battChgBig') === '1'; } catch { return false; } })();
 state.chargers = null;   // /api/chargers 응답(내 데이터 전용) — load()에서 채움
 state.editingCharger = null;   // 인라인 별명 편집 중인 modelKey(없으면 null) — WKWebView는 prompt() 미지원이라 인라인 입력으로 대체
 state.xScale = (() => {
@@ -1246,12 +1248,15 @@ function renderChargers() {
   el.hidden = state.source !== 'real';       // 충전기 데이터는 내 데이터 전용 — /api/charge-rates와 같은 이유
   if (el.hidden) return;
   el.classList.toggle('folded', !!state.foldChargers);
+  el.classList.toggle('big', !state.foldChargers && !!state.chargersBig);
   const cFold = `<button class="pcollapse" data-cfold title="${state.foldChargers ? '펼치기' : '접기(최소화)'}">${state.foldChargers ? '▸' : '▾'}</button>`;
+  // 확대 버튼: #trendchart의 data-tbig과 동일한 패턴 — 접힌 상태에선 카드 자체가 비었으니 숨김
+  const cBig = state.foldChargers ? '' : `<span class="cbtns"><button data-cbig class="${state.chargersBig ? 'on' : 'hl'}">${state.chargersBig ? '축소' : '확대'}</button></span>`;
   const data = state.chargers;
-  if (!data) { el.innerHTML = `<h2>${cFold}내 충전기·보조배터리</h2><div class="note">불러오는 중…</div>`; fitPanelForChargers(); return; }
+  if (!data) { el.innerHTML = `<h2>${cFold}${cBig}내 충전기·보조배터리</h2><div class="note">불러오는 중…</div>`; fitPanelForChargers(); return; }
   const rows = (data.chargers || []).slice().sort((a, b) => b.lastSeen - a.lastSeen);   // lastSeen 내림차순(서버는 정렬 안 함)
   if (!rows.length) {
-    el.innerHTML = `<h2>${cFold}내 충전기·보조배터리</h2><div class="note">충전기 데이터 없음 — 충전 중 기록이 쌓이면 표시됩니다</div>`;
+    el.innerHTML = `<h2>${cFold}${cBig}내 충전기·보조배터리</h2><div class="note">충전기 데이터 없음 — 충전 중 기록이 쌓이면 표시됩니다</div>`;
     fitPanelForChargers();
     return;
   }
@@ -1272,7 +1277,7 @@ function renderChargers() {
       ${chgMeasuredLine(c)}
     </div>`;
   }).join('');
-  el.innerHTML = `<h2>${cFold}내 충전기·보조배터리</h2>` +
+  el.innerHTML = `<h2>${cFold}${cBig}내 충전기·보조배터리</h2>` +
     `<div class="note">충전기 ${rows.length}개 · 총 공급 ${totalWh.toFixed(1)} Wh</div>` +
     body;
   if (state.editingCharger) {   // 인라인 편집 입력 자동 포커스+select (렌더마다 새 엘리먼트라 다시 잡아줘야 함)
@@ -2525,6 +2530,12 @@ document.getElementById('chargers').addEventListener('click', e => {
   if (btn && btn.hasAttribute('data-cfold')) {
     state.foldChargers = !state.foldChargers;
     try { localStorage.setItem('battFoldC', state.foldChargers ? '1' : '0'); } catch { /* ignore */ }
+    renderChargers();
+    return;
+  }
+  if (btn && btn.hasAttribute('data-cbig')) {
+    state.chargersBig = !state.chargersBig;
+    try { localStorage.setItem('battChgBig', state.chargersBig ? '1' : '0'); } catch { /* ignore */ }
     renderChargers();
     return;
   }

@@ -103,7 +103,7 @@ pub struct Cfg {
     #[serde(default)] pub w_src: Option<String>,    // LEGACY: which W the single chip meant ("sys" | "bat")
     #[serde(default)] pub text_w_sys: Option<bool>, // append system power "7.4W"
     #[serde(default)] pub text_w_bat: Option<bool>, // append battery-rail power "3.1W" (both may be on)
-    #[serde(default)] pub w7_src: Option<String>,   // widget "wstack" power source: "sys" | "bat"
+    #[serde(default = "d_w7_src")] pub w7_src: Option<String>,   // widget "wstack" power source: "sys" | "bat"
     #[serde(default = "d_true")] pub digit_deco: bool, // stack digits: state color + outline (false = plain white)
     #[serde(default = "d_bolt_style")] pub bolt_style: String, // charging bolt: "classic" | "bold"
     #[serde(default)] pub text_temp: Option<bool>,  // append battery temperature "31°" (SMC, when known)
@@ -112,7 +112,7 @@ pub struct Cfg {
     // "current" 기존 | "waterline" 수위선 | "thermo" 온도계 번개 | "swap" 사이드 스왑
     // | "outline" 윤곽선 번개(컷아웃 없음) | "badge" 미니 배지 | "hybrid" 윤곽선+온도계
     #[serde(default = "d_chg_fill")] pub chg_fill: String,
-    #[serde(default)] pub small_unit: bool,         // 전력 단위 W를 작게(아이콘: 실제 축소, 텍스트: ᵂ) — 메뉴바 폭 절약
+    #[serde(default = "d_true")] pub small_unit: bool, // 전력 단위 W를 작게(아이콘: 실제 축소, 텍스트: ᵂ) — 메뉴바 폭 절약
 }
 
 impl Cfg {
@@ -161,13 +161,14 @@ fn d_low() -> u8 { 20 }
 fn d_high() -> u8 { 80 }
 fn d_widget() -> String { "icon".into() }
 fn d_bolt_style() -> String { "bold".into() }   // 기본 번개 = Bowie (Aladdin Sane풍 만화체)
-fn d_chg_fill() -> String { "current".into() }
+fn d_chg_fill() -> String { "swap".into() }     // 기본 충전 표시 = 사이드 스왑
+fn d_w7_src() -> Option<String> { Some("bat".into()) }   // 기본 위 숫자 전력 소스 = 배터리
 impl Default for Cfg {
     fn default() -> Self {
         Cfg { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: "icon".into(), glyph_xl: false, shortcut: true,
               text_pct: None, text_time: None, text_w: None, w_src: None,   // None → title_items falls back to `info`
-              text_w_sys: None, text_w_bat: None, w7_src: None, digit_deco: true, bolt_style: d_bolt_style(),
-              text_temp: None, text_adp: None, chg_fill: d_chg_fill(), small_unit: false }
+              text_w_sys: None, text_w_bat: None, w7_src: d_w7_src(), digit_deco: true, bolt_style: d_bolt_style(),
+              text_temp: None, text_adp: None, chg_fill: d_chg_fill(), small_unit: true }
     }
 }
 pub fn cfg_path() -> std::path::PathBuf {

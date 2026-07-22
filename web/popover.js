@@ -16,7 +16,7 @@ let procN = +ls('battProcN', '6');                    // top-processes count · 
 let sparkMode = qs('sm') || ls('battSparkMode', 'pct');   // mini-chart metric: pct | w | 3d
 let sparkH = +(qs('sh') ?? ls('battSparkH', '6'));        // mini-chart window hours: 6 | 24 | 0(all)
 let three = null, t3d = null, t3dLoading = false;     // lazy Three.js + persistent live-3D scene (survives DOM rebuilds)
-let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w_sys: true, text_w_bat: false, w7_src: 'sys', digit_deco: true, bolt_style: 'bold', text_temp: false, text_adp: false, chg_fill: 'current', small_unit: false };
+let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w_sys: true, text_w_bat: false, w7_src: 'bat', digit_deco: true, bolt_style: 'bold', text_temp: false, text_adp: false, chg_fill: 'swap', small_unit: true };
 let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
 let buildInfo = null;   // 로드된 빌드 식별(버전·커밋 해시) — 프로세스 수명 동안 불변이라 1회만 조회
 // menu-bar preview (settings panel): glyph dumps from the Rust tray renderer via /api/tray-preview
@@ -747,16 +747,14 @@ $('sparkbox').addEventListener('click', e => {
   if (e.target.closest('[data-report]')) openReport();   // spark preview → full 3D report
 });
 // ── overflow (⋮) menu: settings + the app actions from the right-click tray menu ──
-// 설정 opens the in-popover panel; record/quit POST to /api/action → a file the tray app consumes.
+// 설정 opens the in-popover panel; quit POSTs to /api/action → a file the tray app consumes.
 function renderMenu() {
   const m = $('moreBtn'); if (m) m.style.color = moreOpen ? 'var(--fg)' : '';
   const el = $('omenu');
   if (!moreOpen) { el.hidden = true; el.innerHTML = ''; return; }
-  const recLabel = (live && live.recording) ? '⏸  배터리 기록 중지' : '▶  배터리 기록 시작';
   el.innerHTML =
     `<button data-m="report">📊  Joule 분석 리포트</button>` +
     `<button data-m="settings">⚙  설정<span class="mk">⌘,</span></button>` +
-    `<button data-m="record">${recLabel}</button>` +
     `<button data-m="quit" class="danger">⏻  앱 종료</button>`;
   el.hidden = false;
 }
@@ -768,7 +766,7 @@ $('omenu').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   moreOpen = false; renderMenu();
   if (b.dataset.m === 'settings') { settingsOpen = true; pullConfig(); render(); }
-  else postAction(b.dataset.m);   // record / quit
+  else postAction(b.dataset.m);   // quit
 });
 // clicking anywhere else closes the overflow menu
 document.addEventListener('click', e => {

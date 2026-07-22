@@ -72,7 +72,7 @@ let chargersCache = { at: 0, data: null };   // /api/chargers cache (전체 samp
 
 // tray.json = the settings the menu-bar (Rust) and the popover settings panel both share.
 // The Rust ticker re-reads it every 2s, so a popover change applies to the menu bar live.
-const TRAY_DEFAULTS = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, digit_deco: true, bolt_style: 'classic' };
+const TRAY_DEFAULTS = { info: 4, colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, digit_deco: true, bolt_style: 'classic', chg_fill: 'swap', small_unit: true };
 const trayPath = () => path.join(userDataDir(), 'tray.json');
 function readTray() {
   let t;
@@ -98,7 +98,7 @@ function readTray() {
       t.text_w_bat = [6, 7].includes(i);
     }
   }
-  if (t.w7_src == null) t.w7_src = 'sys';
+  if (t.w7_src == null) t.w7_src = 'bat';
   if (t.text_temp == null) t.text_temp = false;   // post-chips additions: absent = off
   if (t.text_adp == null) t.text_adp = false;
   return t;
