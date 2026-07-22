@@ -11,6 +11,7 @@ import { analyzeRates } from './lib/bucketRates.js';
 import { sample, detail } from './lib/battery.js';
 import { chargerKey, readAdapters, upsertAdapter } from './lib/adapters.js';
 import { chargeStats, ratesWithFallback, classKey, energyBalanceETA } from './lib/chargeRates.js';
+import { aggregateChargers } from './lib/chargerStats.js';
 import { userDataDir, cacheDir, appendSample } from './lib/paths.js';
 import { applyLiveSMC } from './lib/battery.js';
 import * as measure from './lib/measure.js';
@@ -46,6 +47,7 @@ let procsCache = { at: 0, data: [] };   // /api/procs cache (shared across reque
 let procsInflight = false;
 let detailCache = { at: 0, data: {} };  // /api/detail cache (slow-changing fields)
 let sparkCache = { at: 0, data: [] };    // /api/spark cache (recent %, for the popover mini-graph)
+let chargersCache = { at: 0, data: null };   // /api/chargers cache (전체 samples.jsonl 훑는 집계라 30s TTL)
 
 // tray.json = the settings the menu-bar (Rust) and the popover settings panel both share.
 // The Rust ticker re-reads it every 2s, so a popover change applies to the menu bar live.
@@ -294,6 +296,21 @@ export function startServer({ root, port } = {}) {
         res.end(JSON.stringify({ current: key ? { key, cls, meta: adapters[key] || null, assumed } : null,
           resolved, profiles: stats.profiles, classes: stats.classes, global: stats.global,
           avgSysChargeW: stats.avgSysChargeW, adapters, energyBalance: eb }));
+      } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+
+    // 내 충전기·보조배터리 통계 — 뷰어 우하단 카드의 소스. 내 데이터 전용(데모엔 어댑터 필드가 없음).
+    // 집계는 lib/chargerStats.js(테스트됨), 여기선 캐시(30s — 전체 samples.jsonl을 훑으므로)+조립만.
+    if (url.pathname === '/api/chargers') {
+      try {
+        if (Date.now() - chargersCache.at > 30000) {
+          const samples = readSource('real', assetDir);
+          const adapters = readAdapters();
+          chargersCache = { at: Date.now(), data: { generatedAt: Math.round(Date.now() / 1000), chargers: aggregateChargers(samples, adapters) } };
+        }
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(chargersCache.data));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
       return;
     }
