@@ -276,6 +276,11 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #chargers .chgHead { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; margin-bottom: 4px; }
 #chargers .chgName { font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 #chargers .chgName:hover { color: var(--accent); }
+/* 인라인 별명 편집 — WKWebView가 prompt()를 지원하지 않아 이름 자리에서 바로 입력받는다(카드 톤에 맞춘 최소 스타일). */
+#chargers .chgNameEdit { font: inherit; font-weight: 600; color: var(--fg); background: var(--btn);
+  border: 1px solid var(--accent); border-radius: 4px; padding: 1px 5px; width: 168px; max-width: 60%; }
+#chargers .chgNameEdit:focus { outline: none; }
+#chargers .chgNameEdit::placeholder { color: var(--dim); font-weight: 400; }
 #chargers .chgOrigName { font-weight: 400; color: var(--dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #chargers .chgAgo { margin-left: auto; flex: none; color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; }
 #chargers .pbadge { flex: none; background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent);

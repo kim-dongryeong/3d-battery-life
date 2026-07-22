@@ -884,7 +884,7 @@
   "마지막 사용": "Last used",
   "충전기 데이터 없음 — 충전 중 기록이 쌓이면 표시됩니다": "No charger data yet — appears once charging history accumulates",
   "클릭해서 별명 지정": "Click to set a nickname",
-  "충전기 별명을 입력하세요 (비우면 삭제)": "Enter a nickname for this charger (leave blank to remove)",
+  "Enter 저장 · Esc 취소": "Enter to save · Esc to cancel",
   "V 오버레이 (전력 W · 2D)": "V overlay (Power W · 2D)",
   "A 오버레이 (전력 W · 2D)": "A overlay (Power W · 2D)",
   "둘다": "Both",

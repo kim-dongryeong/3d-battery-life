@@ -37,6 +37,7 @@ state.foldTrend = (() => { try { return localStorage.getItem('battFoldT') === '1
 // 기능 A(내 충전기·보조배터리) 카드 접힘 — #buckets와 같은 pcollapse 관례. 기본은 접힘(화면 소음 최소화).
 state.foldChargers = (() => { try { const v = localStorage.getItem('battFoldC'); return v == null ? true : v === '1'; } catch { return true; } })();
 state.chargers = null;   // /api/chargers 응답(내 데이터 전용) — load()에서 채움
+state.editingCharger = null;   // 인라인 별명 편집 중인 modelKey(없으면 null) — WKWebView는 prompt() 미지원이라 인라인 입력으로 대체
 state.xScale = (() => {
   try {
     const q = +new URLSearchParams(location.search).get('xs');   // ?xs=2 deep-link (shareable view)
@@ -1133,13 +1134,18 @@ function chargerName(c) {
   const techLbl = c.tech ? TECH_KO[c.tech] : null;
   return techLbl ? `${c.ratedW}W ${techLbl}` : `${c.ratedW}W`;
 }
-// (기능 C) 별명 — HTML/속성 이스케이프. 이름·라벨 모두 서드파티 입력(충전기 자체 표기 · 사용자 프롬프트)이라 필요.
+// (기능 C) 별명 — HTML/속성 이스케이프. 이름·라벨 모두 서드파티 입력(충전기 자체 표기 · 사용자 입력)이라 필요.
 const escHtml = s => String(s).replace(/[<>&"]/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[ch]));
-// 모델명 헤더 HTML — 클릭해서 별명(라벨) 지정(prompt). 라벨이 있으면 라벨을 굵게, 원래 이름은
-// "⟨…⟩"로 옆에 회색 작게(예: "서재 65W ⟨pd charger⟩"). data-modelkey로 클릭 핸들러가 행을 식별한다.
+// 모델명 헤더 HTML — 클릭해서 별명(라벨) 지정. Tauri WKWebView는 prompt()를 지원하지 않아(무반응) 네이티브
+// 대화상자 대신 그 자리에서 <input>으로 바뀌는 인라인 편집(state.editingCharger)으로 구현했다.
+// 편집 중이 아니면: 라벨이 있으면 라벨을 굵게, 원래 이름은 "⟨…⟩"로 옆에 회색 작게(예: "서재 65W ⟨pd charger⟩").
+// data-modelkey로 클릭/키보드/blur 핸들러가 행을 식별한다.
 function chgNameHtml(c) {
   const base = chargerName(c);
   const key = escHtml(c.modelKey);
+  if (state.editingCharger === c.modelKey) {
+    return `<input type="text" class="chgNameEdit" data-modelkey="${key}" value="${escHtml(c.label || '')}" placeholder="${escHtml(base)}" title="Enter 저장 · Esc 취소" maxlength="60">`;
+  }
   const title = '클릭해서 별명 지정';
   if (c.label) {
     return `<span class="chgName" data-modelkey="${key}" title="${title}">${escHtml(c.label)}</span>` +
@@ -1233,6 +1239,10 @@ function renderChargers() {
   el.innerHTML = `<h2>${cFold}내 충전기·보조배터리</h2>` +
     `<div class="note">충전기 ${rows.length}개 · 총 공급 ${totalWh.toFixed(1)} Wh</div>` +
     body;
+  if (state.editingCharger) {   // 인라인 편집 입력 자동 포커스+select (렌더마다 새 엘리먼트라 다시 잡아줘야 함)
+    const input = el.querySelector('.chgNameEdit');
+    if (input) { input.focus(); input.select(); }
+  }
   fitPanelForChargers();
 }
 
@@ -2444,7 +2454,30 @@ document.getElementById('buckets').addEventListener('click', e => {
   const tr = e.target.closest('tr[data-band]');
   if (tr) { state.selectedBand = +tr.dataset.band; state.trendAll = false; renderRates(); }
 });
-// 기능 A 카드: 접기/펼치기 + (기능 C) 모델명 클릭 → 별명 지정
+// (기능 C) 별명 저장 — 인라인 <input>의 값을 서버에 보내고 카드를 새로 받아 다시 그린다.
+// 빈 값이면 서버(setLabel)가 라벨을 삭제한다. 실패해도 조용히(콘솔만) — 네이티브 alert() 없음.
+function saveChargerLabel(key, label) {
+  fetch('/api/chargers/label', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, label }) })
+    .then(() => fetch('/api/chargers')).then(res => res.ok ? res.json() : null)
+    .then(d => { if (d) state.chargers = d; })
+    .catch(err => console.error('충전기 별명 저장 실패', err))
+    .finally(() => renderChargers());
+}
+// 편집 중인 <input> 하나를 마무리(저장 또는 취소)한다. Enter/Esc/blur 세 경로가 모두 여기로 모이는데,
+// 한 경로가 처리(예: Enter→즉시 재렌더)하면 그 렌더가 input을 DOM에서 떼어내면서 blur/focusout을
+// 동기적으로 한 번 더 유발할 수 있어(포커스된 엘리먼트 제거 시 브라우저가 강제 blur) — dataset.done
+// 가드로 같은 input에 대한 중복 처리(중복 POST 등)를 막는다.
+function finishChargerEdit(input, save) {
+  if (input.dataset.done) return;
+  input.dataset.done = '1';
+  const key = input.dataset.modelkey;
+  state.editingCharger = null;
+  if (save) saveChargerLabel(key, input.value.trim());
+  else renderChargers();
+}
+// 기능 A 카드: 접기/펼치기 + (기능 C) 모델명 클릭 → 인라인 별명 편집 시작.
+// WKWebView(Tauri 실앱)는 window.prompt()를 지원하지 않아 클릭해도 무반응이었다(Chromium 테스트에서만
+// 통과) — 그 자리에서 <input>으로 바뀌는 인라인 편집으로 교체.
 document.getElementById('chargers').addEventListener('click', e => {
   const btn = e.target.closest('button');
   if (btn && btn.hasAttribute('data-cfold')) {
@@ -2453,15 +2486,24 @@ document.getElementById('chargers').addEventListener('click', e => {
     renderChargers();
     return;
   }
+  if (e.target.closest('.chgNameEdit')) return;   // 편집 중인 input 클릭 — 캐럿 이동일 뿐, 새로 시작하지 않음
   const nameEl = e.target.closest('[data-modelkey]');
   if (!nameEl) return;
-  const key = nameEl.dataset.modelkey;
-  const row = (state.chargers && state.chargers.chargers || []).find(c => c.modelKey === key);
-  const next = prompt(t('충전기 별명을 입력하세요 (비우면 삭제)'), (row && row.label) || '');
-  if (next === null) return;   // 취소
-  fetch('/api/chargers/label', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, label: next }) })
-    .then(() => fetch('/api/chargers')).then(res => res.ok ? res.json() : null)
-    .then(d => { if (d) { state.chargers = d; renderChargers(); } }).catch(() => {});
+  state.editingCharger = nameEl.dataset.modelkey;
+  renderChargers();
+});
+// Enter=저장 · Esc=취소 (focus는 blur/focusout에서 저장 — 아래)
+document.getElementById('chargers').addEventListener('keydown', e => {
+  const input = e.target.closest('.chgNameEdit');
+  if (!input) return;
+  if (e.key === 'Enter') { e.preventDefault(); finishChargerEdit(input, true); }
+  else if (e.key === 'Escape') { e.preventDefault(); finishChargerEdit(input, false); }
+});
+// blur=저장 — 'blur'는 버블링하지 않으므로 위임엔 'focusout' 사용.
+document.getElementById('chargers').addEventListener('focusout', e => {
+  const input = e.target.closest('.chgNameEdit');
+  if (!input) return;
+  finishChargerEdit(input, true);
 });
 document.getElementById('trendchart').addEventListener('click', e => {
   const cell = e.target.closest('[data-period]');
