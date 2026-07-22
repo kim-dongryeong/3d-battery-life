@@ -206,8 +206,12 @@ test('a) 같은 name+adapterId, 다른 계약 3개(듀얼포트 재협상) → �
   assert.ok(row.offeredMenu);
   assert.deepEqual(row.offeredMenu.map(p => p.v), [5, 9, 15, 20]);
   assert.equal(Math.max(...row.offeredMenu.map(p => p.w)), 35);
-  // menuVariants: offeredMenu(35W)를 뺀 나머지 관측 메뉴들의 최대 W, 내림차순 — 듀얼포트 분배 관측치
-  assert.deepEqual(row.menuVariants, [27, 17]);
+  // menuVariants: offeredMenu(35W)를 뺀 나머지 관측 메뉴들, 내림차순 — 듀얼포트 분배 관측치.
+  // [{maxW, menu:[{v,a,w}]}] 형태로, 각 변형의 V·A 전체(축소 메뉴 자체)까지 담는다.
+  assert.deepEqual(row.menuVariants.map(v => v.maxW), [27, 17]);
+  assert.deepEqual(row.menuVariants[0].menu, [
+    { v: 5, a: 3, w: 15 }, { v: 9, a: 3, w: 27 }, { v: 15, a: 1.83, w: 27 }, { v: 20, a: 1.37, w: 27 },
+  ]);
 });
 
 test('g) 메뉴가 1종뿐이면 menuVariants는 빈 배열', () => {

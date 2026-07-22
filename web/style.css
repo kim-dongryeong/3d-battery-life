@@ -303,6 +303,7 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #chargers .chgMax { position: absolute; left: 0; top: -1px; bottom: -1px; border-radius: 4px; background: var(--accent); }
 #chargers .chgAvgMark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #e8a13c; }   /* 평균 전력 표식 — 그래프의 평균 점선과 같은 색 */
 #chargers .chgMeta { color: var(--dim); font-size: 10px; line-height: 1.5; }
+#chargers .chgMetaCont { visibility: hidden; }   /* 분배 관측 연속 줄 — 라벨을 숨겨 첫 줄과 들여쓰기를 맞춤 */
 #chargers.folded { width: auto; min-width: 0; }
 #chargers.folded > :not(h2) { display: none; }
 #chargers.folded h2 { margin: 0; }

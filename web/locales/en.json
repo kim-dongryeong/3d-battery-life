@@ -462,10 +462,6 @@
       "Distribution observed: "
     ],
     [
-      "(\\d+)W 메뉴",
-      "$1W menu"
-    ],
-    [
       "실측",
       "Measured"
     ],

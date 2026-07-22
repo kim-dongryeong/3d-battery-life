@@ -1174,22 +1174,32 @@ function chgNameHtml(c) {
 function chgTrackMaxW(c) {
   return c.offeredMenu && c.offeredMenu.length ? Math.max(...c.offeredMenu.map(p => p.w)) : (c.ratedW || 0);
 }
+// menu([{v,a,w}])를 "5V·3A · 9V·3A · … (최대 NW)"로 포맷 — chgOfferedLine·chgMenuVariantsLine 공용.
+function fmtMenuMaxLine(menu, maxW) {
+  const items = menu.map(p => `${p.v}V·${p.a}A`).join(' · ');
+  return `${items} (최대 ${maxW}W)`;
+}
 // "제공: 5V·3A · 9V·3A · … (최대 35W)" — 충전기 자체가 제공하는 PD 프로필 메뉴(adapters.json hvcMenu).
 // 메뉴가 없으면(비-PD·구형 USB 등) 아예 생략. 듀얼포트 어댑터처럼 축소 메뉴도 관측됐으면(menuVariants)
 // 이 줄이 "풀 메뉴 하나만"이 아니란 걸 알리도록 라벨을 "제공(단독)"으로 바꾼다 — 아래 chgMenuVariantsLine 참고.
 function chgOfferedLine(c) {
   if (!c.offeredMenu || !c.offeredMenu.length) return '';
-  const items = c.offeredMenu.map(p => `${p.v}V·${p.a}A`).join(' · ');
   const maxW = Math.max(...c.offeredMenu.map(p => p.w));
   const label = c.menuVariants && c.menuVariants.length ? '제공(단독)' : '제공';
-  return `<div class="chgMeta">${label}: ${items} (최대 ${maxW}W)</div>`;
+  return `<div class="chgMeta">${label}: ${fmtMenuMaxLine(c.offeredMenu, maxW)}</div>`;
 }
-// "분배 관측: 27W 메뉴 · 17W 메뉴" — 듀얼포트 어댑터가 다른 포트와 전력을 나눌 때 협상한 축소
-// 메뉴들(menuVariants, offeredMenu 제외 내림차순). 없으면(단일 메뉴만 관측) 생략.
+// "분배 관측: 5V·3A · 9V·3A · 15V·1.83A · 20V·1.37A (최대 27W)" 다음 줄에
+// "           5V·3A · 9V·1.94A · 15V·1.16A · 20V·0.87A (최대 17W)" — 듀얼포트 어댑터가 다른
+// 포트와 전력을 나눌 때 협상한 축소 메뉴들의 V·A 전체(menuVariants, offeredMenu 제외 내림차순).
+// 첫 줄만 라벨을 보이고 이후 줄은 라벨을 숨겨(.chgMetaCont) 들여쓴 것처럼 이어 붙인다.
+// 없으면(단일 메뉴만 관측) 생략. fmtMenuMaxLine()으로 chgOfferedLine과 포맷을 공유한다.
 function chgMenuVariantsLine(c) {
   if (!c.menuVariants || !c.menuVariants.length) return '';
-  const items = c.menuVariants.map(w => `${w}W 메뉴`).join(' · ');
-  return `<div class="chgMeta" title="듀얼포트 전력 분배 등으로 축소 광고된 메뉴가 관측됨">분배 관측: ${items}</div>`;
+  const title = '듀얼포트 전력 분배 등으로 축소 광고된 메뉴가 관측됨';
+  return c.menuVariants.map((v, i) => {
+    const labelHtml = i === 0 ? '분배 관측: ' : '<span class="chgMetaCont">분배 관측: </span>';
+    return `<div class="chgMeta" title="${title}">${labelHtml}${fmtMenuMaxLine(v.menu, v.maxW)}</div>`;
+  }).join('');
 }
 // 계약(chargerKey)별 실측 한 줄씩: "20V·35W — 9.6시간 · ≤32.3W · ⌀21.0W · ⌀19.9V · ≤1.66A"
 // (≤=최댓값, ⌀=시간가중평균). 듀얼포트 재협상으로 계약이 갈린 모델은 이렇게 계약별로 늘어놓아야
