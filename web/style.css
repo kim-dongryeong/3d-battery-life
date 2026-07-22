@@ -4,6 +4,7 @@
   --dim: #8a93a6;
   --line: #232838;
   --accent: #4dd0c0;
+  --good: #3ecf6e;   /* 정품/인증 배지(기능 D) — accent와 구분되는 초록, 다크/라이트 각각 톤 조정 */
   --panel: rgba(16, 19, 28, 0.82);
   /* self-referencing var() is a cycle → guaranteed-invalid → these were transparent in dark mode */
   --btn: #1b2232;
@@ -17,6 +18,7 @@ html.light {
   --dim: #566074;
   --line: #d3dae6;
   --accent: #0c8f80;
+  --good: #1f8a4c;
   --panel: rgba(255, 255, 255, 0.84);
   --btn: #e7ecf3;
   --th: #e9edf4;
@@ -285,6 +287,15 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #chargers .chgAgo { margin-left: auto; flex: none; color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; }
 #chargers .pbadge { flex: none; background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent);
   border-radius: 20px; padding: 1px 7px; font-size: 9.5px; font-weight: 600; white-space: nowrap; }
+/* 정체(인증) 배지 줄(기능 D) — 이름 줄(.pbadge, accent 톤) 바로 아래 별도 줄이라 시각적으로 안 겹친다.
+   tech 칩은 중립 톤(.pbadge의 accent와 구분), Apple 정품만 초록, 미확인은 회색. */
+#chargers .chgIdent { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 0 0 4px; }
+#chargers .chgTech, #chargers .chgNoId { flex: none; background: var(--btn); color: var(--dim);
+  border: 1px solid var(--line); border-radius: 20px; padding: 1px 7px; font-size: 9.5px; font-weight: 600; white-space: nowrap; }
+#chargers .chgAuth { flex: none; background: color-mix(in srgb, var(--good) 22%, transparent); color: var(--good);
+  border-radius: 20px; padding: 1px 7px; font-size: 9.5px; font-weight: 600; white-space: nowrap; }
+#chargers .chgMfr { flex: none; color: var(--dim); font-size: 10px; }
+#chargers .chgProfile { padding-left: 6px; }
 #chargers .chgTrack { position: relative; height: 8px; border-radius: 4px; background: var(--btn);
   border: 1px solid var(--line); margin: 4px 0; }
 #chargers .chgRated { position: absolute; left: 0; top: -1px; bottom: -1px; border-radius: 4px;

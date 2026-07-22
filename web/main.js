@@ -1128,8 +1128,19 @@ function renderRates() {
 // 스키마 v2: 한 행 = 물리 충전기(모델). 같은 충전기라도 포트 분배로 계약(chargerKey)이 갈리는 경우
 // (예: Apple 듀얼포트 35W→27W→17W)는 lib/chargerStats.js가 이미 modelKey로 합쳐서 내려준다 —
 // 여기(뷰)는 모델 행 하나에 제공 메뉴(offeredMenu)·계약별 사용시간(profiles)·실측치 3줄만 그리면 된다.
+// macOS가 붙이는 자리표시자성 이름 — lib/chargerStats.js GENERIC_NAME_RE 사본(브라우저 전용이라
+// 그 파일을 import 못 해 목록만 맞춰 둔다). 일반명이면 W를 붙여 최소한의 구분력을 준다(기능 B).
+const GENERIC_NAME_RE = /^(pd charger|usb host|usb brick|usb-c|adapter|charger|unknown|미상)$/i;
 function chargerName(c) {
-  if (c.name) return c.name;
+  if (c.name) {
+    // 일반명(서드파티 다수가 공유하는 문구, 예: "pd charger")이면 W를 붙여 최소 구분력을 준다.
+    // offeredMenu가 있으면(단독 사용 시 낼 수 있는 최댓값을 아는 경우) "max ⟨W⟩" 표기로 강조,
+    // 없으면(협상 메뉴를 모름) 정격 W만 붙인다. 구체적 이름(이미 W를 포함하는 제품명 등)은 그대로.
+    if (GENERIC_NAME_RE.test(c.name.trim()) && c.ratedW != null) {
+      return c.offeredMenu && c.offeredMenu.length ? `${c.name} max ${c.ratedW}W` : `${c.name} ${c.ratedW}W`;
+    }
+    return c.name;
+  }
   if (c.ratedW == null) return TECH_KO.unknown;                              // 정격조차 모름 — '미상'(어댑터 필드 없던 과거 이력 포함)
   const techLbl = c.tech ? TECH_KO[c.tech] : null;
   return techLbl ? `${c.ratedW}W ${techLbl}` : `${c.ratedW}W`;
@@ -1144,7 +1155,11 @@ function chgNameHtml(c) {
   const base = chargerName(c);
   const key = escHtml(c.modelKey);
   if (state.editingCharger === c.modelKey) {
-    return `<input type="text" class="chgNameEdit" data-modelkey="${key}" value="${escHtml(c.label || '')}" placeholder="${escHtml(base)}" title="Enter 저장 · Esc 취소" maxlength="60">`;
+    // kdr 요구: 클릭하면 "지금 보이는 이름"(라벨이 있으면 라벨, 없으면 보강 기본명)을 그대로 값으로
+    // 열어 그 자리에서 직접 고친다 — 빈 입력에서 새로 타이핑하게 하지 않는다. 저장 시 이 base와
+    // 같으면(=고치지 않았거나 기본명으로 되돌렸으면) 라벨을 삭제한다 — finishChargerEdit() 참고.
+    const current = c.label || base;
+    return `<input type="text" class="chgNameEdit" data-modelkey="${key}" value="${escHtml(current)}" placeholder="${escHtml(base)}" title="Enter 저장 · Esc 취소" maxlength="60">`;
   }
   const title = '클릭해서 별명 지정';
   if (c.label) {
@@ -1165,14 +1180,34 @@ function chgOfferedLine(c) {
   const maxW = Math.max(...c.offeredMenu.map(p => p.w));
   return `<div class="chgMeta">제공: ${items} (최대 ${maxW}W)</div>`;
 }
-// "사용 계약: 20V·35W 7.8시간 · …" — 모델을 이룬 계약(chargerKey)별 실사용 시간, minutes 내림차순(profiles 순서 그대로).
+// 계약(chargerKey)별 실측 한 줄씩: "20V·35W — 9.6시간 · ≤32.3W · ⌀21.0W · ⌀19.9V · ≤1.66A"
+// (≤=최댓값, ⌀=시간가중평균). 듀얼포트 재협상으로 계약이 갈린 모델은 이렇게 계약별로 늘어놓아야
+// "35W 계약은 잠깐, 17W 계약이 대부분"처럼 실제 쓰인 양상이 드러난다 — 모델 전체 실측 줄(아래
+// chgMeasuredLine)은 이걸 다 합친 값이라 이 정보가 뭉개진다. minutes 내림차순(profiles 순서 그대로).
 function chgProfilesLine(c) {
   if (!c.profiles || !c.profiles.length) return '';
-  const items = c.profiles.map(p => {
-    const label = [p.vnom != null ? `${p.vnom}V` : null, p.wnom != null ? `${p.wnom}W` : null].filter(Boolean).join('·');
-    return `${label}${label ? ' ' : ''}${(p.minutes / 60).toFixed(1)}시간`;
-  }).join(' · ');
-  return `<div class="chgMeta">사용 계약: ${items}</div>`;
+  const rows = c.profiles.map(p => {
+    const label = [p.vnom != null ? `${p.vnom}V` : null, p.wnom != null ? `${p.wnom}W` : null].filter(Boolean).join('·') || '?';
+    const bits = [`${(p.minutes / 60).toFixed(1)}시간`];
+    if (p.maxW != null) bits.push(`≤${p.maxW.toFixed(1)}W`);
+    if (p.avgW != null) bits.push(`⌀${p.avgW.toFixed(1)}W`);
+    if (p.avgV != null) bits.push(`⌀${p.avgV.toFixed(1)}V`);
+    if (p.maxA != null) bits.push(`≤${p.maxA.toFixed(2)}A`);
+    return `<div class="chgProfile">${label} — ${bits.join(' · ')}</div>`;
+  }).join('');
+  return `<div class="chgMeta">사용 계약</div>${rows}`;
+}
+// 정체(인증) 배지 줄 — tech 칩(예: USB-C PD) + 제조사(있으면, Apple Inc.면 정품 배지) + 둘 다
+// 없으면 회색 "식별정보 미제공"(USB-PD는 제품명을 전송하지 않고, 인증 제품만 macOS가 Name/
+// Manufacturer를 채운다 — lib/battery.js parseAdapter() 주석 참고. 과장 없이 사실만 표기).
+// 보조배터리 배지(.pbadge)는 이름 줄(chgHead)에 따로 있어 여기와 시각적으로 겹치지 않는다.
+function chgIdentityLine(c) {
+  const chips = [];
+  if (c.tech && TECH_KO[c.tech]) chips.push(`<span class="chgTech">${TECH_KO[c.tech]}</span>`);
+  if (c.manufacturer === 'Apple Inc.') chips.push(`<span class="chgAuth" title="Apple이 인증한 정품 정보(Manufacturer=Apple Inc.)가 이 충전기에서 실측됐어요">Apple 정품</span>`);
+  else if (c.manufacturer) chips.push(`<span class="chgMfr">${escHtml(c.manufacturer)}</span>`);
+  else if (!c.name) chips.push(`<span class="chgNoId" title="USB-PD는 제품명을 전송하지 않고, 인증 제품만 macOS가 Name/Manufacturer를 채워요">식별정보 미제공</span>`);
+  return chips.length ? `<div class="chgIdent">${chips.join('')}</div>` : '';
 }
 // "실측: 최대 33.1W · 평균 12.4W · 평균 19.9V · 최대 1.68A · 평균 0.92A · 공급 235.6Wh · 총 28시간 30분"
 // — 모델 단위로 풀링된 실측치. 항목별로 값이 없으면(V/A 실측이 한 번도 없었던 구형 이력 등) 그 토막만 생략.
@@ -1230,6 +1265,7 @@ function renderChargers() {
     const avgPct = c.avgW != null ? Math.min(100, c.avgW / commonMax * 100) : null;
     return `<div class="chgRow">
       <div class="chgHead">${chgNameHtml(c)}${badge}<span class="chgAgo" title="마지막 사용">${agoText(c.lastSeen * 1000)}</span></div>
+      ${chgIdentityLine(c)}
       <div class="chgTrack">${trackW ? `<div class="chgRated" style="width:${ratedPct}%"></div>` : ''}${c.maxW != null ? `<div class="chgMax" style="width:${maxPct}%"></div>` : ''}${avgPct != null ? `<div class="chgAvgMark" style="left:${avgPct}%"></div>` : ''}</div>
       ${chgOfferedLine(c)}
       ${chgProfilesLine(c)}
@@ -2472,7 +2508,13 @@ function finishChargerEdit(input, save) {
   input.dataset.done = '1';
   const key = input.dataset.modelkey;
   state.editingCharger = null;
-  if (save) saveChargerLabel(key, input.value.trim());
+  if (save) {
+    const val = input.value.trim();
+    // 보강 기본명과 같아졌으면(안 고쳤거나 도로 기본명으로 되돌렸으면) 라벨 삭제 — 빈 값으로 POST.
+    const row = ((state.chargers && state.chargers.chargers) || []).find(c => c.modelKey === key);
+    const base = row ? chargerName(row) : null;
+    saveChargerLabel(key, val === base ? '' : val);
+  }
   else renderChargers();
 }
 // 기능 A 카드: 접기/펼치기 + (기능 C) 모델명 클릭 → 인라인 별명 편집 시작.

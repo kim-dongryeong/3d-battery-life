@@ -274,3 +274,58 @@ test('d) offeredMenu = 계약 사용시간이 아니라 "메뉴 자체의 최댓
   assert.equal(Math.max(...row.offeredMenu.map(p => p.w)), 45, '사용시간이 적어도 메뉴 최댓값(45W)이 큰 쪽을 채택');
   assert.equal(row.offeredMenu[0].v, 9);
 });
+
+// ---- V2.1: 계약(profiles)별 실측 V/A ---------------------------------------------------------
+
+test('e) profiles[]는 계약별 시간가중 avgV/avgA·maxA를 독립적으로 담는다(모델 전체 값과 다를 수 있음)', () => {
+  const FAM = 'e000400a', AID = 555, NAME = 'Dual V Charger';   // 구체적 이름 → adapterId만으로 병합
+  const t0 = 13_000_000;
+  const rate1 = { adapterWnom: 35, adapterVnom: 20, familyCode: FAM, adapterId: AID };
+  const rate2 = { adapterWnom: 17, adapterVnom: 20, familyCode: FAM, adapterId: AID };
+  const samples1 = [
+    { t: t0, ac: true, adapterW: 30, dcInV: 20, dcInA: 1.5, ...rate1 },
+    { t: t0 + 60, ac: true, adapterW: 30, dcInV: 20, dcInA: 1.5, ...rate1 },          // 쌍1: dt=60, V=20·A=1.5
+    { t: t0 + 60 + 600, ac: true, adapterW: 30, dcInV: 22, dcInA: -2.5, ...rate1 },   // 쌍2: dt=600, V=21·A=2.0(부호무시), maxA=2.5
+  ];
+  const t1 = t0 + 100_000;
+  const samples2 = [
+    { t: t1, ac: true, adapterW: 15, dcInV: 9, dcInA: 1.0, ...rate2 },
+    { t: t1 + 60, ac: true, adapterW: 15, dcInV: 9, dcInA: 1.0, ...rate2 },           // 쌍1: dt=60, V=9·A=1.0
+    { t: t1 + 60 + 600, ac: true, adapterW: 15, dcInV: 10, dcInA: 1.2, ...rate2 },    // 쌍2: dt=600, V=9.5·A=1.1, maxA=1.2
+  ];
+  const rows = aggregateChargers([...samples1, ...samples2], { [`35W@20V/${FAM}#${AID}`]: { name: NAME }, [`17W@20V/${FAM}#${AID}`]: { name: NAME } });
+  assert.equal(rows.length, 1, '같은 name+adapterId → 모델 1행');
+  const row = rows[0];
+  const p35 = row.profiles.find(p => p.wnom === 35), p17 = row.profiles.find(p => p.wnom === 17);
+  assert.ok(p35 && p17);
+  const expV35 = +((20 * 60 + 21 * 600) / 660).toFixed(1);
+  const expA35 = +((1.5 * 60 + 2.0 * 600) / 660).toFixed(2);
+  assert.equal(p35.avgV, expV35);
+  assert.equal(p35.avgA, expA35);
+  assert.equal(p35.maxA, 2.5);
+  const expV17 = +((9 * 60 + 9.5 * 600) / 660).toFixed(1);
+  const expA17 = +((1.0 * 60 + 1.1 * 600) / 660).toFixed(2);
+  assert.equal(p17.avgV, expV17);
+  assert.equal(p17.avgA, expA17);
+  assert.equal(p17.maxA, 1.2);
+  assert.notEqual(p35.avgV, p17.avgV, '계약별로 독립 계산 — 모델 전체로 뭉개지지 않음');
+});
+
+test('f) profiles[]는 계약별 maxW/avgW/energyWh도 담는다(모델 합산 값과 별개)', () => {
+  const FAM = 'e000400a', AID = 28699, NAME = '35W USB-C Power Adapter';
+  const K35 = '35W@20V/e000400a#28699', K17 = '17W@20V/e000400a#28699';
+  const adapters = { [K35]: { name: NAME }, [K17]: { name: NAME } };
+  const samples = [
+    ...acRun({ t0: 1, n: 5, adapter: { adapterWnom: 35, adapterVnom: 20, familyCode: FAM, adapterId: AID }, adapterW: 34 }),   // 5분, 상수 34W
+    ...acRun({ t0: 100_000, n: 20, adapter: { adapterWnom: 17, adapterVnom: 20, familyCode: FAM, adapterId: AID }, adapterW: 16 }), // 20분, 상수 16W
+  ];
+  const rows = aggregateChargers(samples, adapters);
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  const p35 = row.profiles.find(p => p.wnom === 35), p17 = row.profiles.find(p => p.wnom === 17);
+  assert.equal(p35.maxW, 34); assert.equal(p35.avgW, 34); assert.equal(p35.energyWh, +(34 * 5 / 60).toFixed(1));
+  assert.equal(p17.maxW, 16); assert.equal(p17.avgW, 16); assert.equal(p17.energyWh, +(16 * 20 / 60).toFixed(1));
+  // 모델 전체 값은 두 계약의 시간가중 풀링이라 계약별 값과 다름
+  assert.notEqual(row.avgW, p35.avgW);
+  assert.equal(row.maxW, 34);   // 최댓값은 두 계약 중 더 큰 쪽과 일치
+});
