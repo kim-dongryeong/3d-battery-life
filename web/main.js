@@ -13,6 +13,7 @@ const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 
 // ---- 2D 연속 시간축 (state.view === 'flat') ----------------------------------------------------
 const FLAT_W = 72;                    // 2D 시간축의 월드 폭 (3D의 X=24보다 넓게)
 let _fw = { w0: 0, w1: 1 };           // buildLines 시점에 고정된 보이는 창 — 좌표·축·예상선이 공유
+let _flatStride = 1;                  // buildLines가 정한 다운샘플 간격 — V/A 오버레이도 같은 간격으로 그려 성능 일치
 const xFlat = tt => ((tt - _fw.w0) / (_fw.w1 - _fw.w0) - 0.5) * FLAT_W;
 const flatSpanNow = () => FV.span(state.report);
 // 창 적용: 이미 flatViewport 전이 함수로 정규화된 창(null 허용)만 받는다. rAF 스로틀 재구축.
@@ -23,7 +24,7 @@ function applyFlatWin(win) {
 }
 
 // ---- state --------------------------------------------------------------
-const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, detail: null, chargeRates: null, chargeCompare: '', rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', projDis: 'on', projChg: 'on', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines' };
+const state = { source: 'real', y: 'pct', color: 'state', report: null, rates: null, detail: null, chargeRates: null, chargeCompare: '', rateVersion: 'v4a_pooled', rateLevel: 'rawcap', rateWin: 300, markerSize: 0.2, wattsRail: 'battery', powerMethod: 'balance', floorGuide: 'on', valGuide: 'step', projDis: 'on', projChg: 'on', selectedBand: null, selectedPeriod: null, trendAll: true, trendBig: false, trendMore: false, trendView: '3d', trendGeom: 'lines', period: 'day', metric: 'rate', delta: false, zeroMode: 'both', tickDate: 2, tickBand: 2, tickVal: 2, gridMain: 'lines', ovV: 'off', ovA: 'off' };
 // 뷰어 기본 = 다크 (kdr 2026-07-12: 팝오버는 라이트, 뷰어는 다크). 팝오버와 키를 분리
 // (battTheme는 팝오버 몫) — 같은 키를 쓰면 한쪽 설정이 다른 쪽 기본값을 덮어쓴다.
 state.theme = (() => { try { return localStorage.getItem('battViewerTheme') || 'dark'; } catch { return 'dark'; } })();
@@ -33,6 +34,9 @@ state.tab = '3d';
 state.showTicks = false;   // 추세 눈금 밀도 조절 줄 — 기본 숨김(헤더 소음 감소), '눈금' 버튼으로 토글
 state.foldBuckets = (() => { try { return localStorage.getItem('battFoldB') === '1'; } catch { return false; } })();
 state.foldTrend = (() => { try { return localStorage.getItem('battFoldT') === '1'; } catch { return false; } })();
+// 기능 A(내 충전기·보조배터리) 카드 접힘 — #buckets와 같은 pcollapse 관례. 기본은 접힘(화면 소음 최소화).
+state.foldChargers = (() => { try { const v = localStorage.getItem('battFoldC'); return v == null ? true : v === '1'; } catch { return true; } })();
+state.chargers = null;   // /api/chargers 응답(내 데이터 전용) — load()에서 채움
 state.xScale = (() => {
   try {
     const q = +new URLSearchParams(location.search).get('xs');   // ?xs=2 deep-link (shareable view)
@@ -63,6 +67,8 @@ try { const c = localStorage.getItem('battFloorGuide'); if (['on', 'off'].includ
 try { const c = localStorage.getItem('battValGuide'); if (['diag', 'step', 'dot', 'plane', 'off'].includes(c)) state.valGuide = c; } catch { /* ignore */ }
 try { const l = localStorage.getItem('battRateLevel'); if (l === 'pct' || l === 'rawcap') state.rateLevel = l; } catch { /* ignore */ }   // '정수% 사용' 전역 설정
 try { const m = localStorage.getItem('battPowerMethod'); if (['balance', 'ioreg', 'hybrid'].includes(m)) state.powerMethod = m; } catch { /* ignore */ }   // 배터리 전력 측정 방식(그래프+구간별)
+try { const v = localStorage.getItem('battOvV'); if (['off', 'bat', 'adp', 'both'].includes(v)) state.ovV = v; } catch { /* ignore */ }   // V 오버레이(전력 W · 2D 전용)
+try { const v = localStorage.getItem('battOvA'); if (['off', 'bat', 'adp', 'both'].includes(v)) state.ovA = v; } catch { /* ignore */ }   // A 오버레이
 try {   // 3D 방전/충전 예상선 표시 (각각 독립 on/off) — 구버전 battProjLine을 방전 기본값으로 승계
   const old = localStorage.getItem('battProjLine');
   const pd = localStorage.getItem('battProjDis') ?? old, pc = localStorage.getItem('battProjChg');
@@ -107,6 +113,7 @@ const overlay = new THREE.Group(); overlay.visible = false; scene.add(overlay); 
 const projGroup = new THREE.Group(); scene.add(projGroup);   // 방전 예상선(현재→0%) — 배터리 % 모드에서만
 const nowGroup = new THREE.Group(); scene.add(nowGroup);     // '현재' 위치 점(실시간 잔량) — 잔량 모드에서 항상
 const intervalGroup = new THREE.Group(); scene.add(intervalGroup);   // 구간 전력량 강조 밴드(2D 시간축)
+const overlayVA = new THREE.Group(); scene.add(overlayVA);   // V/A 오버레이(전력 W · 2D 시간축 전용)
 let projYMax = 100, projMaxDay = 1;   // stashed from the last buildLines so loadRates can redraw the projection alone
 let pinned = null, curHover = null;   // 마커 고정 상태 · 현재 호버 결과 {vp,point,dayIndex,line}
 let tipManual = false;                // 고정 툴팁을 드래그해 직접 배치했는지 → 그러면 마커 추적 중단
@@ -244,6 +251,22 @@ function buildFlatAxes(valMax, valLabel) {
     sceneRoot.add(m);
   }
   const xt = makeLabel(tr('날짜/시간 →'), { color: TH().titleC }); xt.position.set(0, -2.6, 0); sceneRoot.add(xt);   // 시간축 제목도 항상 플롯 하단(부호축 중앙 아님)
+
+  // V/A 오버레이 보조축 — 전력 W · 2D 전용. 플롯 우변(x1) 바깥에 왼쪽 값축과 별개로 무부호 0..max 5분할.
+  // 색으로 축↔선을 매칭(별도 범례 불필요) — 배터리/둘다는 batV·batA 색, 어댑터 단독은 adpV·adpA 색.
+  if (state.y === 'watts' && (state.ovV !== 'off' || state.ovA !== 'off')) {
+    const ovc = OVC(), or = overlayRanges();
+    const axisTick = (xOff, maxVal, unit, color) => {
+      const css = hexCss(color);
+      for (let i = 0; i <= 5; i++) {
+        const v = maxVal * i / 5, y = Y * i / 5;
+        sceneRoot.add(axisLine([xOff - 0.3, y, 0], [xOff, y, 0], color));
+        const s = makeLabel(`${Math.round(v)}${unit}`, { size: 24, color: css }); s.position.set(xOff + 1.3, y, 0); sceneRoot.add(s);
+      }
+    };
+    if (state.ovV !== 'off') axisTick(x1 + 2.2, or.vMax, 'V', state.ovV === 'adp' ? ovc.adpV : ovc.batV);
+    if (state.ovA !== 'off') axisTick(state.ovV !== 'off' ? x1 + 5.2 : x1 + 2.2, or.aMax, 'A', state.ovA === 'adp' ? ovc.adpA : ovc.batA);
+  }
 }
 
 // ---- battery curves (continuous runs: charge + discharge, gap-split) ----
@@ -267,6 +290,32 @@ const CURVE_C = {
 };
 const CC = () => CURVE_C[state.theme] || CURVE_C.dark;
 const stateColor = p => (p.charging ? CC().chg : (p.ac ? CC().full : CC().dis));
+
+// ---- V/A 오버레이 팔레트 (전력 W · 2D 시간축 전용) ------------------------------------------
+// 기존 팔레트(dis 적주황·chg 초록·full 청회·lpm 노랑·0선 청록·accent 파랑)와 겹치지 않도록 보라·마젠타 대역만 사용.
+// V=보라 계열·A=마젠타 계열, 배터리=실선/어댑터=점선으로 계열 내 구분(색으로 축↔선 매칭).
+const OV_C = {
+  dark: { batV: 0xb388ff, adpV: 0x7e57c2, batA: 0xff6eb4, adpA: 0xd81b8c },
+  light: { batV: 0x6a3fd8, adpV: 0x4527a0, batA: 0xc2185b, adpA: 0x880e4f },
+};
+const OVC = () => OV_C[state.theme] || OV_C.dark;
+const hexCss = n => '#' + n.toString(16).padStart(6, '0');
+// 활성 오버레이 계열(배터리/어댑터)의 현재 2D 창(_fw) 안 실측 최대값 → 축 상한(5V/1A 배수로 올림, 최소 15V/3A)
+function overlayRanges() {
+  let vMax = 0, aMax = 0;
+  const vBat = state.ovV === 'bat' || state.ovV === 'both', vAdp = state.ovV === 'adp' || state.ovV === 'both';
+  const aBat = state.ovA === 'bat' || state.ovA === 'both', aAdp = state.ovA === 'adp' || state.ovA === 'both';
+  if (state.report && (vBat || vAdp || aBat || aAdp)) {
+    for (const run of state.report.runs) for (const p of run.points) {
+      if (p.t < _fw.w0 || p.t > _fw.w1) continue;
+      if (vBat && p.voltage != null) vMax = Math.max(vMax, p.voltage);
+      if (vAdp && p.dcInV != null) vMax = Math.max(vMax, p.dcInV);
+      if (aBat && p.amperage != null) aMax = Math.max(aMax, Math.abs(p.amperage) / 1000);
+      if (aAdp && p.dcInA != null) aMax = Math.max(aMax, Math.abs(p.dcInA));
+    }
+  }
+  return { vMax: Math.max(15, Math.ceil(vMax / 5) * 5), aMax: Math.max(3, Math.ceil(aMax / 1) * 1) };
+}
 
 // per-point SIGNED rate d(잔량)/dt in %/min over a short backward window.
 // Uses the fine mAh-based level (p.cap, ~0.02% res) so the curve is smooth — pct is macOS's INTEGER %
@@ -320,6 +369,7 @@ function buildLines(report) {
     const frac = Math.min(1, (_fw.w1 - _fw.w0) / Math.max(1, sp.max - sp.min));
     flatStride = Math.max(1, Math.ceil(total * frac / 50000));
   }
+  _flatStride = flatStride;   // V/A 오버레이(drawOverlayVA)도 같은 다운샘플 간격을 재사용
   const numeric = state.color !== 'state' && state.color !== 'lowPower';   // 'state'/'lowPower' are categorical, not ramped
   let cMin = null, cMax = null;
   if (numeric) {
@@ -425,14 +475,19 @@ function rebuild() {
   if (rwg) rwg.hidden = state.y !== 'rate';   // 평활 창 컨트롤은 방전속도(rate) 모드에서만
   const wrg = document.getElementById('wattsRailGrp');
   if (wrg) wrg.hidden = state.y !== 'watts';  // 전력 레일(배터리/시스템/어댑터)은 전력 W 모드에서만
+  const ovShow = state.y === 'watts' && state.view === 'flat';   // V/A 오버레이는 전력 W · 2D 시간축에서만 노출(3D는 스코프 아웃)
+  const ovVGrp = document.getElementById('ovVGrp'), ovAGrp = document.getElementById('ovAGrp');
+  if (ovVGrp) ovVGrp.hidden = !ovShow;
+  if (ovAGrp) ovAGrp.hidden = !ovShow;
   const r = state.report;
   document.getElementById('empty').hidden = !(r && (!r.runs || r.runs.length === 0));
   if (!r) return;
   const { yMax, maxDay, cMin, cMax } = buildLines(r);
-  if (state.view === 'flat') buildFlatAxes(yMax, yLabel()); else buildAxes(yMax, yLabel(), maxDay, r.firstT);
+  if (state.view === 'flat') { fitFlatCamera(); buildFlatAxes(yMax, yLabel()); } else buildAxes(yMax, yLabel(), maxDay, r.firstT);
   projYMax = yMax; projMaxDay = maxDay; drawProjection3D();   // 방전 예상선(현재→0%) 겹쳐 그리기
   drawNowMarker(r, yMax, maxDay);   // '현재' 위치 점 — 자다 깬 직후에도 지금 잔량을 찍어줌
   drawIntervalOverlay();            // 구간 전력량 넓이 음영(2D) — 창 팬/줌마다 다시 그림
+  drawOverlayVA();                  // V/A 오버레이(전력 W · 2D 전용)
   ivRecompute();                    // 그래프 계열이 바뀌면 구간 전력량 결과도 그 계열로 재계산
   syncFlatUI();                     // 2D 전용 UI(기간 세그·미니맵·힌트 문구) 표시/갱신
 
@@ -1067,6 +1122,73 @@ function renderRates() {
   renderTrend();
 }
 
+// ---- 기능 A: 내 충전기·보조배터리 통계 (server: /api/chargers, 내 데이터 전용) --------------------
+// #buckets(좌하단)와 같은 고정 접이식 카드 관례를 우하단에 복제. 데모 소스엔 hidden(내 데이터만 의미 있음).
+function chargerName(c) {
+  if (c.name) return c.name;
+  if (c.key === 'unknown') return TECH_KO.unknown;                              // '미상' — 어댑터 필드 없던 과거 이력
+  if (c.wattsNom == null) return c.key;
+  const techLbl = c.tech ? TECH_KO[c.tech] : null;
+  return techLbl ? `${c.wattsNom}W ${techLbl}` : `${c.wattsNom}W`;
+}
+function chgMetaLine(c) {
+  const rate = c.wattsNom != null ? `정격 ${c.wattsNom}W${c.voltsNom != null ? `·${c.voltsNom}V` : ''} · ` : '';
+  const maxS = c.maxW != null ? `실측 최대 ${c.maxW.toFixed(1)}W` : '실측 최대 —';
+  const avgS = c.avgW != null ? `평균 ${c.avgW.toFixed(1)}W` : '평균 —';
+  const whS = c.energyWh != null ? `공급 ${c.energyWh.toFixed(1)}Wh` : '공급 —';
+  return `${rate}${maxS} · ${avgS} · ${whS} · 총 사용 ${fmtDur(c.minutes * 60)}`;
+}
+// #panel(우상단)과 #chargers(우하단)는 둘 다 right:16 고정이라 같은 세로줄을 나눠 쓴다. #panel은
+// 충전/방전 예상 카드까지 실리면 긴 실사용 이력에서 기본 46vh 가정보다 훨씬 길어져(거의 풀스크린)
+// #chargers와 겹칠 수 있다(실측 확인됨) — #chargers가 지금 실제로 차지한 높이(접힘 시 필 하나·펼치면
+// 카드 전체)만큼 #panel의 max-height를 동적으로 줄여 자리를 내준다. #panel은 이미 overflow-y:auto라
+// 스크롤로 자연 흡수(트렌드 접힘 때 #buckets를 밀어 올리는 기존 html.trend-folded 관례와 같은 발상).
+function fitPanelForChargers() {
+  const panel = document.getElementById('panel'), el = document.getElementById('chargers');
+  if (!panel) return;
+  if (!el || el.hidden) { panel.style.maxHeight = ''; return; }   // 데모 소스: 카드 없음 → 기본 CSS(46vh 아님, calc(100vh-32px))로 복귀
+  const gap = 8, margin = 16;
+  const reserve = el.getBoundingClientRect().height + gap + margin;
+  panel.style.maxHeight = Math.max(160, innerHeight - 32 - reserve) + 'px';
+}
+if (typeof ResizeObserver !== 'undefined') {
+  const chargersRO = new ResizeObserver(fitPanelForChargers);
+  const chargersEl = document.getElementById('chargers'); if (chargersEl) chargersRO.observe(chargersEl);
+}
+
+function renderChargers() {
+  const el = document.getElementById('chargers');
+  el.hidden = state.source !== 'real';       // 충전기 데이터는 내 데이터 전용 — /api/charge-rates와 같은 이유
+  if (el.hidden) return;
+  el.classList.toggle('folded', !!state.foldChargers);
+  const cFold = `<button class="pcollapse" data-cfold title="${state.foldChargers ? '펼치기' : '접기(최소화)'}">${state.foldChargers ? '▸' : '▾'}</button>`;
+  const data = state.chargers;
+  if (!data) { el.innerHTML = `<h2>${cFold}내 충전기·보조배터리</h2><div class="note">불러오는 중…</div>`; fitPanelForChargers(); return; }
+  const rows = (data.chargers || []).slice().sort((a, b) => b.lastSeen - a.lastSeen);   // lastSeen 내림차순(서버는 정렬 안 함)
+  if (!rows.length) {
+    el.innerHTML = `<h2>${cFold}내 충전기·보조배터리</h2><div class="note">충전기 데이터 없음 — 충전 중 기록이 쌓이면 표시됩니다</div>`;
+    fitPanelForChargers();
+    return;
+  }
+  const totalWh = rows.reduce((s, c) => s + (c.energyWh || 0), 0);
+  const commonMax = Math.max(1, ...rows.map(c => Math.max(c.wattsNom || 0, c.maxW || 0)));   // 카드 내 공통 스케일 → 크로스 비교
+  const body = rows.map(c => {
+    const badge = c.isPowerBank ? '<span class="pbadge">보조배터리</span>' : '';
+    const ratedPct = c.wattsNom != null ? Math.min(100, c.wattsNom / commonMax * 100) : 0;
+    const maxPct = c.maxW != null ? Math.min(100, c.maxW / commonMax * 100) : 0;
+    const avgPct = c.avgW != null ? Math.min(100, c.avgW / commonMax * 100) : null;
+    return `<div class="chgRow">
+      <div class="chgHead"><span class="chgName">${chargerName(c)}</span>${badge}<span class="chgAgo" title="마지막 사용">${agoText(c.lastSeen * 1000)}</span></div>
+      <div class="chgTrack">${c.wattsNom != null ? `<div class="chgRated" style="width:${ratedPct}%"></div>` : ''}${c.maxW != null ? `<div class="chgMax" style="width:${maxPct}%"></div>` : ''}${avgPct != null ? `<div class="chgAvgMark" style="left:${avgPct}%"></div>` : ''}</div>
+      <div class="chgMeta">${chgMetaLine(c)}</div>
+    </div>`;
+  }).join('');
+  el.innerHTML = `<h2>${cFold}내 충전기·보조배터리</h2>` +
+    `<div class="note">충전기 ${rows.length}개 · 총 공급 ${totalWh.toFixed(1)} Wh</div>` +
+    body;
+  fitPanelForChargers();
+}
+
 // ---- trend over time: single/all bands · 2D line · heatmap · 3D · metric/period/delta ----
 // band identity = battery level → the universal battery semantic: full=green → empty=red
 // (ordered warm sweep, no blue/purple leg; legend + hover carry exact identity)
@@ -1696,7 +1818,13 @@ async function load() {
     // 충전기 프로필별 충전 통계 + 에너지 수지 — 충전 예상 카드/3D 충전선의 소스 (내 데이터 전용)
     fetch(`/api/charge-rates?level=${state.rateLevel}`).then(res => res.ok ? res.json() : null)
       .then(cr => { state.chargeRates = cr; renderChargeCard(); drawProjection3D(); }).catch(() => {});
-  } else { state.chargeRates = null; renderChargeCard(); if (state.detail) { state.detail = null; if (state.report) updateHud(state.report); } }
+    // 내 충전기·보조배터리 통계 카드 (기능 A, 내 데이터 전용) — 서버가 30s 캐시
+    fetch('/api/chargers').then(res => res.ok ? res.json() : null)
+      .then(d => { state.chargers = d; renderChargers(); }).catch(() => {});
+  } else {
+    state.chargeRates = null; renderChargeCard(); if (state.detail) { state.detail = null; if (state.report) updateHud(state.report); }
+    state.chargers = null; renderChargers();
+  }
   scheduleLive();              // (re)arm the 60s live refresh for '내 데이터'
 }
 
@@ -1933,6 +2061,48 @@ function drawIntervalOverlay() {
     }
   }
 }
+
+// ── V/A 오버레이 (전력 W · 2D 시간축 전용) ──────────────────────────────────────────────────
+// 배터리 V/A(voltage/amperage)·어댑터 V/A(dcInV/dcInA)를 가는 선으로 겹쳐 그린다. 배터리=실선,
+// 어댑터=점선(계열 내 구분), 우측 보조축(OVC 색)과 짝지어 항상 0..max 무부호 크기로 스케일한다.
+function drawOverlayVA() {
+  disposeGroup(overlayVA);
+  overlayVA.visible = state.view === 'flat' && state.y === 'watts' && (state.ovV !== 'off' || state.ovA !== 'off');
+  if (!overlayVA.visible || !state.report) return;
+  const ovc = OVC(), or = overlayRanges();
+  const addSeries = (field, maxVal, color, dashed, scale) => {
+    for (const run of state.report.runs) {
+      let pos = [], pi = -1;
+      const flush = () => {
+        if (pos.length >= 6) {
+          const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+          const mat = dashed
+            ? new THREE.LineDashedMaterial({ color, dashSize: 0.6, gapSize: 0.4, transparent: true, opacity: 0.9 })
+            : new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 });
+          const line = new THREE.Line(g, mat);
+          if (dashed) line.computeLineDistances();
+          overlayVA.add(line);
+        }
+        pos = [];
+      };
+      for (const p of run.points) {
+        pi++;
+        if (p.t < _fw.w0 || p.t > _fw.w1) { flush(); continue; }              // 창 밖은 선분 단절
+        if (_flatStride > 1 && (pi % _flatStride) !== 0) continue;            // buildLines와 같은 다운샘플
+        const raw = p[field];
+        if (raw == null) { flush(); continue; }                              // 값 없는 구간(앱 미실행 등)은 선을 끊는다
+        const v = scale ? scale(raw) : raw;
+        pos.push(xFlat(p.t), (v / maxVal) * Y, 0.03);                        // 부호축 여부와 무관하게 항상 0..Y 무부호
+      }
+      flush();
+    }
+  };
+  if (state.ovV === 'bat' || state.ovV === 'both') addSeries('voltage', or.vMax, ovc.batV, false);
+  if (state.ovV === 'adp' || state.ovV === 'both') addSeries('dcInV', or.vMax, ovc.adpV, true);
+  if (state.ovA === 'bat' || state.ovA === 'both') addSeries('amperage', or.aMax, ovc.batA, false, raw => Math.abs(raw) / 1000);   // mA → A(크기만, 부호는 W 그래프가 이미 표현)
+  if (state.ovA === 'adp' || state.ovA === 'both') addSeries('dcInA', or.aMax, ovc.adpA, true, raw => Math.abs(raw));
+}
+
 {
   document.getElementById('ivCalc').addEventListener('click', ivCalc);
   document.getElementById('ivNow').addEventListener('click', ivFillFromView);
@@ -1978,6 +2148,8 @@ document.querySelectorAll('.seg').forEach(seg => {
     else if (group === 'xScale') { setXScale(+val); }
     else if (group === 'rateWin') { state.rateWin = +val; try { localStorage.setItem('battRateWin', val); } catch { /* ignore */ } rebuild(); }
     else if (group === 'wattsRail') { state.wattsRail = val; try { localStorage.setItem('battWattsRail', val); } catch { /* ignore */ } rebuild(); }
+    else if (group === 'ovV') { state.ovV = val; try { localStorage.setItem('battOvV', val); } catch { /* ignore */ } rebuild(); }
+    else if (group === 'ovA') { state.ovA = val; try { localStorage.setItem('battOvA', val); } catch { /* ignore */ } rebuild(); }
     else if (group === 'powerMethod') { state.powerMethod = val; try { localStorage.setItem('battPowerMethod', val); } catch { /* ignore */ } rebuild(); loadRates(); }   // 그래프 배터리 전력 + 구간별전력 재계산
     else if (group === 'markerSize') { state.markerSize = +val; marker.scale.setScalar(+val); try { localStorage.setItem('battMarkerSize', val); } catch { /* ignore */ } }
     else if (group === 'rateLevel') { state.rateLevel = val; try { localStorage.setItem('battRateLevel', val); } catch { /* ignore */ } load(); }   // 전역 정밀도: 리포트+속도패널+그래프 전부 재계산
@@ -2107,8 +2279,11 @@ function fitFlatCamera() {
   const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
   const { L, R } = flatFreeStrip();
   const W = Math.max(1, innerWidth);
-  // 여유 17%: 값 라벨(x0−2.2)·축 제목(x0−4.5)까지 빈 구간 안에 — 빈 구간 기준으로 전체 가시 폭을 역산
-  const Vw = FLAT_W * 1.17 * W / Math.max(1, W - L - R);
+  // 여유 17%: 값 라벨(x0−2.2)·축 제목(x0−4.5)까지 빈 구간 안에 — 빈 구간 기준으로 전체 가시 폭을 역산.
+  // V/A 오버레이 활성 시(전력 W · 2D)엔 우측에 보조축 눈금(x1+2.2, 최대 x1+5.2)이 추가로 필요해 여유를 더 준다
+  // — 안 그러면 그 라벨이 #panel(우측 고정 카드)의 예약 영역 경계에 걸려 가려진다.
+  const ovActive = state.y === 'watts' && (state.ovV !== 'off' || state.ovA !== 'off');
+  const Vw = FLAT_W * (ovActive ? 1.30 : 1.17) * W / Math.max(1, W - L - R);
   _flatK = Vw / FLAT_W;
   const D = (Vw / 2) / Math.tan(hFov / 2);
   const cx = (R - L) / 2 * Vw / W;   // 월드 x=0(그래프 중앙)이 빈 구간의 중앙에 오도록 카메라를 평행 이동
@@ -2222,6 +2397,15 @@ document.getElementById('buckets').addEventListener('click', e => {
   const tr = e.target.closest('tr[data-band]');
   if (tr) { state.selectedBand = +tr.dataset.band; state.trendAll = false; renderRates(); }
 });
+// 기능 A 카드: 접기/펼치기뿐 — 클릭 인터랙션 없음(과설계 금지)
+document.getElementById('chargers').addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (btn && btn.hasAttribute('data-cfold')) {
+    state.foldChargers = !state.foldChargers;
+    try { localStorage.setItem('battFoldC', state.foldChargers ? '1' : '0'); } catch { /* ignore */ }
+    renderChargers();
+  }
+});
 document.getElementById('trendchart').addEventListener('click', e => {
   const cell = e.target.closest('[data-period]');
   if (cell && !e.target.closest('button')) { state.selectedPeriod = cell.dataset.period; renderTrend(); return; }
@@ -2248,6 +2432,7 @@ addEventListener('resize', () => {
   if (state.view === 'flat') fitFlatCamera();
   renderer.setSize(innerWidth, innerHeight);
   if (t3 && state.trendAll && state.trendView === '3d' && !state.foldTrend) renderTrend();   // 3D trend canvas resizes too
+  fitPanelForChargers();   // 창 높이 변화(100vh 기반 #panel max-height) 반영
 });
 
 // keep labels readable (face camera handled by Sprite; nothing extra needed)

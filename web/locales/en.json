@@ -314,6 +314,30 @@
       "$1y"
     ],
     [
+      "충전기 (\\d+)개",
+      "$1 chargers"
+    ],
+    [
+      "총 공급",
+      "total supplied"
+    ],
+    [
+      "실측 최대",
+      "measured max"
+    ],
+    [
+      "정격",
+      "rated"
+    ],
+    [
+      "공급",
+      "supplied"
+    ],
+    [
+      "총 사용",
+      "total use"
+    ],
+    [
       "([\\d,]+)개",
       "$1"
     ],
@@ -834,5 +858,16 @@
   "6 · 미니 배지": "6 · Mini badge",
   "7 · 윤곽선+온도계": "7 · Outline + thermometer",
   "1 · 일반 (번개가 채움 위)": "1 · Plain (bolt over fill)",
-  "각진 6꼭지점 번개 — 참조 아트에서 추출한 날카로운 실루엣": "Angular 6-vertex bolt — sharp silhouette extracted from reference art"
+  "각진 6꼭지점 번개 — 참조 아트에서 추출한 날카로운 실루엣": "Angular 6-vertex bolt — sharp silhouette extracted from reference art",
+  "내 충전기·보조배터리": "My chargers & power banks",
+  "보조배터리": "Power bank",
+  "마지막 사용": "Last used",
+  "충전기 데이터 없음 — 충전 중 기록이 쌓이면 표시됩니다": "No charger data yet — appears once charging history accumulates",
+  "V 오버레이 (전력 W · 2D)": "V overlay (Power W · 2D)",
+  "A 오버레이 (전력 W · 2D)": "A overlay (Power W · 2D)",
+  "둘다": "Both",
+  "배터리 V": "Battery V",
+  "어댑터 V": "Adapter V",
+  "배터리 A": "Battery A",
+  "전류 A": "Current A"
 }

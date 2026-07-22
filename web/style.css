@@ -221,12 +221,12 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
 #trendchart .tbtns button.more { font-weight: 700; letter-spacing: 1px; padding: 2px 7px; }
 #trendchart .tbtns button.more.on { background: var(--accent); color: var(--onfg); border-color: var(--accent); }
-/* fold/collapse: bigger, top-right corner — shared by both bottom panels */
-#trendchart .tcollapse, #buckets .pcollapse { position: absolute; top: 8px; right: 10px; z-index: 3;
+/* fold/collapse: bigger, top-right corner — shared by all three corner/bottom panels */
+#trendchart .tcollapse, #buckets .pcollapse, #chargers .pcollapse { position: absolute; top: 8px; right: 10px; z-index: 3;
   border: 1px solid var(--line); background: var(--btn); color: var(--fg);
   border-radius: 7px; width: 30px; height: 26px; font-size: 15px; line-height: 1; cursor: pointer; padding: 0; }
-#trendchart .tcollapse:hover, #buckets .pcollapse:hover { border-color: var(--accent); color: var(--accent); }
-#trendchart h2, #buckets h2 { padding-right: 38px; }   /* room for the top-right collapse button */
+#trendchart .tcollapse:hover, #buckets .pcollapse:hover, #chargers .pcollapse:hover { border-color: var(--accent); color: var(--accent); }
+#trendchart h2, #buckets h2, #chargers h2 { padding-right: 38px; }   /* room for the top-right collapse button */
 #trendchart h2 .fviews { color: var(--dim); font-weight: 400; font-size: 10px; }   /* 접힘 상태 부제 (small과 달리 접혀도 보임) */
 #trendchart .tlegend { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 7px; font-size: 10px; color: var(--dim); }
 #trendchart .tlegend span { display: flex; align-items: center; gap: 4px; }
@@ -260,6 +260,31 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #empty { position: fixed; z-index: 15; left: 50%; top: 52%; transform: translate(-50%,-50%);
   text-align: center; color: var(--dim); background: var(--panel); border: 1px solid var(--line);
   border-radius: 12px; padding: 20px 26px; line-height: 1.7; }
+
+/* 기능 A — 내 충전기·보조배터리 통계 카드: #buckets(좌하단 고정 카드) 관례를 우하단에 복제.
+   #panel(우상단 248px)·#buckets(좌하단)·#trendchart와 겹치지 않음. 내 데이터 전용(demo/demo2엔 hidden). */
+#chargers { position: fixed; z-index: 10; right: 16px; bottom: 16px; padding: 12px 14px; box-sizing: border-box;
+  background: var(--panel); backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: 14px;
+  width: 340px; max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; }
+#chargers h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--fg); }
+#chargers .note { color: var(--dim); font-size: 10px; margin: 0 0 9px; }
+#chargers .chgRow { margin-bottom: 10px; padding-bottom: 9px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+#chargers .chgRow:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+#chargers .chgHead { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; margin-bottom: 4px; }
+#chargers .chgName { font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chargers .chgAgo { margin-left: auto; flex: none; color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; }
+#chargers .pbadge { flex: none; background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent);
+  border-radius: 20px; padding: 1px 7px; font-size: 9.5px; font-weight: 600; white-space: nowrap; }
+#chargers .chgTrack { position: relative; height: 8px; border-radius: 4px; background: var(--btn);
+  border: 1px solid var(--line); margin: 4px 0; }
+#chargers .chgRated { position: absolute; left: 0; top: -1px; bottom: -1px; border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent); }
+#chargers .chgMax { position: absolute; left: 0; top: -1px; bottom: -1px; border-radius: 4px; background: var(--accent); }
+#chargers .chgAvgMark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #e8a13c; }   /* 평균 전력 표식 — 그래프의 평균 점선과 같은 색 */
+#chargers .chgMeta { color: var(--dim); font-size: 10px; line-height: 1.5; }
+#chargers.folded { width: auto; min-width: 0; }
+#chargers.folded > :not(h2) { display: none; }
+#chargers.folded h2 { margin: 0; }
 
 /* ---- fold (접기): panels collapse to a slim header pill ---- */
 .fold { border: none; background: none; color: var(--dim); cursor: pointer; font-size: 11px;

@@ -61,6 +61,24 @@
         <button data-val="adapter" title="어댑터 입력 전력 (SMC) — 외부 전원 연결 + 앱 실행 중에만.">어댑터</button>
       </div>
     </div>
+    <div class="grp" id="ovVGrp" hidden>
+      <span class="lbl">V 오버레이 (전력 W · 2D)</span>
+      <div class="seg" data-group="ovV">
+        <button data-val="off" class="on">끔</button>
+        <button data-val="bat" title="배터리 V">배터리</button>
+        <button data-val="adp" title="어댑터 V">어댑터</button>
+        <button data-val="both">둘다</button>
+      </div>
+    </div>
+    <div class="grp" id="ovAGrp" hidden>
+      <span class="lbl">A 오버레이 (전력 W · 2D)</span>
+      <div class="seg" data-group="ovA">
+        <button data-val="off" class="on">끔</button>
+        <button data-val="bat" title="배터리 A">배터리</button>
+        <button data-val="adp" title="전류 A">어댑터</button>
+        <button data-val="both">둘다</button>
+      </div>
+    </div>
     <div class="grp">
       <span class="lbl">보기</span>
       <div class="seg" data-group="view">
@@ -188,6 +206,9 @@
 
   <!-- bottom: selected-band rate trend over time (aging) -->
   <section id="trendchart" hidden data-i18n></section>
+
+  <!-- bottom-right: 내 충전기·보조배터리 통계 (내 데이터 전용) -->
+  <div id="chargers" hidden data-i18n></div>
 
   <!-- hover detail -->
   <nav id="lnav"></nav>            <!-- layout nav (tabs / dock / sidebar list) — filled per layout -->
