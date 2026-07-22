@@ -12,6 +12,7 @@ import { sample, detail } from './lib/battery.js';
 import { chargerKey, readAdapters, upsertAdapter } from './lib/adapters.js';
 import { chargeStats, ratesWithFallback, classKey, energyBalanceETA } from './lib/chargeRates.js';
 import { aggregateChargers } from './lib/chargerStats.js';
+import { readLabels, setLabel } from './lib/chargerLabels.js';
 import { userDataDir, cacheDir, appendSample } from './lib/paths.js';
 import { applyLiveSMC } from './lib/battery.js';
 import * as measure from './lib/measure.js';
@@ -309,9 +310,27 @@ export function startServer({ root, port } = {}) {
           const adapters = readAdapters();
           chargersCache = { at: Date.now(), data: { generatedAt: Math.round(Date.now() / 1000), chargers: aggregateChargers(samples, adapters) } };
         }
+        // 별명(label)은 집계 캐시와 별도로 매 요청 파일에서 새로 읽는다 — POST 직후에도 바로 반영되게.
+        const labels = readLabels();
+        const chargers = chargersCache.data.chargers.map(c => labels[c.modelKey] ? { ...c, label: labels[c.modelKey] } : c);
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-        res.end(JSON.stringify(chargersCache.data));
+        res.end(JSON.stringify({ ...chargersCache.data, chargers }));
       } catch (e) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+      return;
+    }
+
+    // 충전기 별명(라벨) 지정/해제 — body {key: modelKey, label}. label 빈 문자열이면 삭제.
+    if (url.pathname === '/api/chargers/label' && req.method === 'POST') {
+      let body = '';
+      req.on('data', c => { body += c; if (body.length > 1e4) req.destroy(); });
+      req.on('end', () => {
+        try {
+          const { key, label } = JSON.parse(body || '{}');
+          if (!key || typeof key !== 'string') { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'key required' })); return; }
+          const labels = setLabel(key, label);
+          res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, label: labels[key] || null }));
+        } catch (e) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+      });
       return;
     }
 

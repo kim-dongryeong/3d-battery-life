@@ -271,7 +271,9 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #chargers .chgRow { margin-bottom: 10px; padding-bottom: 9px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
 #chargers .chgRow:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
 #chargers .chgHead { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; margin-bottom: 4px; }
-#chargers .chgName { font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chargers .chgName { font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+#chargers .chgName:hover { color: var(--accent); }
+#chargers .chgOrigName { font-weight: 400; color: var(--dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #chargers .chgAgo { margin-left: auto; flex: none; color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; }
 #chargers .pbadge { flex: none; background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent);
   border-radius: 20px; padding: 1px 7px; font-size: 9.5px; font-weight: 600; white-space: nowrap; }

@@ -1133,6 +1133,20 @@ function chargerName(c) {
   const techLbl = c.tech ? TECH_KO[c.tech] : null;
   return techLbl ? `${c.ratedW}W ${techLbl}` : `${c.ratedW}W`;
 }
+// (기능 C) 별명 — HTML/속성 이스케이프. 이름·라벨 모두 서드파티 입력(충전기 자체 표기 · 사용자 프롬프트)이라 필요.
+const escHtml = s => String(s).replace(/[<>&"]/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[ch]));
+// 모델명 헤더 HTML — 클릭해서 별명(라벨) 지정(prompt). 라벨이 있으면 라벨을 굵게, 원래 이름은
+// "⟨…⟩"로 옆에 회색 작게(예: "서재 65W ⟨pd charger⟩"). data-modelkey로 클릭 핸들러가 행을 식별한다.
+function chgNameHtml(c) {
+  const base = chargerName(c);
+  const key = escHtml(c.modelKey);
+  const title = '클릭해서 별명 지정';
+  if (c.label) {
+    return `<span class="chgName" data-modelkey="${key}" title="${title}">${escHtml(c.label)}</span>` +
+      `<span class="chgOrigName">⟨${escHtml(base)}⟩</span>`;
+  }
+  return `<span class="chgName" data-modelkey="${key}" title="${title}">${escHtml(base)}</span>`;
+}
 // 트랙(바 배경)의 기준 100% — 제공 메뉴가 있으면 그 최대 W(단독 사용 시 풀 메뉴), 없으면 계약 정격 최대.
 function chgTrackMaxW(c) {
   return c.offeredMenu && c.offeredMenu.length ? Math.max(...c.offeredMenu.map(p => p.w)) : (c.ratedW || 0);
@@ -1165,6 +1179,7 @@ function chgMeasuredLine(c) {
   if (c.avgA != null) parts.push(`평균 ${c.avgA.toFixed(2)}A`);
   if (c.energyWh != null) parts.push(`공급 ${c.energyWh.toFixed(1)}Wh`);
   parts.push(`총 ${fmtDur(c.minutes * 60)}`);
+  if (c.serial) parts.push(`S/N …${escHtml(String(c.serial).slice(-4))}`);   // (b) 충전기 개체 식별 증거
   return `<div class="chgMeta">실측: ${parts.join(' · ')}</div>`;
 }
 // #panel(우상단)과 #chargers(우하단)는 둘 다 right:16 고정이라 같은 세로줄을 나눠 쓴다. #panel은
@@ -1208,7 +1223,7 @@ function renderChargers() {
     const maxPct = c.maxW != null ? Math.min(100, c.maxW / commonMax * 100) : 0;
     const avgPct = c.avgW != null ? Math.min(100, c.avgW / commonMax * 100) : null;
     return `<div class="chgRow">
-      <div class="chgHead"><span class="chgName">${chargerName(c)}</span>${badge}<span class="chgAgo" title="마지막 사용">${agoText(c.lastSeen * 1000)}</span></div>
+      <div class="chgHead">${chgNameHtml(c)}${badge}<span class="chgAgo" title="마지막 사용">${agoText(c.lastSeen * 1000)}</span></div>
       <div class="chgTrack">${trackW ? `<div class="chgRated" style="width:${ratedPct}%"></div>` : ''}${c.maxW != null ? `<div class="chgMax" style="width:${maxPct}%"></div>` : ''}${avgPct != null ? `<div class="chgAvgMark" style="left:${avgPct}%"></div>` : ''}</div>
       ${chgOfferedLine(c)}
       ${chgProfilesLine(c)}
@@ -2429,14 +2444,24 @@ document.getElementById('buckets').addEventListener('click', e => {
   const tr = e.target.closest('tr[data-band]');
   if (tr) { state.selectedBand = +tr.dataset.band; state.trendAll = false; renderRates(); }
 });
-// 기능 A 카드: 접기/펼치기뿐 — 클릭 인터랙션 없음(과설계 금지)
+// 기능 A 카드: 접기/펼치기 + (기능 C) 모델명 클릭 → 별명 지정
 document.getElementById('chargers').addEventListener('click', e => {
   const btn = e.target.closest('button');
   if (btn && btn.hasAttribute('data-cfold')) {
     state.foldChargers = !state.foldChargers;
     try { localStorage.setItem('battFoldC', state.foldChargers ? '1' : '0'); } catch { /* ignore */ }
     renderChargers();
+    return;
   }
+  const nameEl = e.target.closest('[data-modelkey]');
+  if (!nameEl) return;
+  const key = nameEl.dataset.modelkey;
+  const row = (state.chargers && state.chargers.chargers || []).find(c => c.modelKey === key);
+  const next = prompt(t('충전기 별명을 입력하세요 (비우면 삭제)'), (row && row.label) || '');
+  if (next === null) return;   // 취소
+  fetch('/api/chargers/label', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, label: next }) })
+    .then(() => fetch('/api/chargers')).then(res => res.ok ? res.json() : null)
+    .then(d => { if (d) { state.chargers = d; renderChargers(); } }).catch(() => {});
 });
 document.getElementById('trendchart').addEventListener('click', e => {
   const cell = e.target.closest('[data-period]');

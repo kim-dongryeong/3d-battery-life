@@ -43,6 +43,8 @@ function plistXML(interval) {
 <plist version="1.0">
 <dict>
   <key>Label</key><string>${LABEL}</string>
+  <key>AssociatedBundleIdentifiers</key>
+  <array><string>kr.kdr.joule</string></array>
   <key>ProgramArguments</key>
   <array>
 ${args}
@@ -118,6 +120,8 @@ function smcdOn() {
 <plist version="1.0">
 <dict>
   <key>Label</key><string>${SMCD_LABEL}</string>
+  <key>AssociatedBundleIdentifiers</key>
+  <array><string>kr.kdr.joule</string></array>
   <key>ProgramArguments</key>
   <array>
     <string>${xml(bin)}</string>
