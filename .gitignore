@@ -14,6 +14,7 @@ node_modules/
 # build outputs
 dist/
 *.tsbuildinfo
+web/build.json   # build-app.sh가 빌드 시 생성(로드된 빌드 식별용 커밋 해시) — 생성물, 커밋 금지
 
 # Tauri (Rust) build artifacts
 src-tauri/target/

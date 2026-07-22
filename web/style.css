@@ -44,6 +44,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .hcHdr { color: var(--dim); font-size: 10px; font-weight: 600; margin-bottom: 3px; }
 .hcHdr small { font-weight: 400; opacity: .85; }
 .hcSvg { display: block; width: 100%; height: auto; }
+/* 로드된 빌드 식별: "v1.1.0 · 97b9c24" — 버전(사람용 이정표) · 커밋 짧은 해시(자동 빌드 지문) */
+.buildId { margin-top: 8px; color: var(--dim); font-size: 9.5px; font-variant-numeric: tabular-nums; opacity: .75; }
+.buildId:empty { display: none; }
 /* 방전 예상(projection) */
 #projChart, #chgChart { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 #projChart:empty, #chgChart:empty { display: none; }

@@ -17,6 +17,12 @@ BINDIR="$DIR/src-tauri/binaries"; mkdir -p "$BINDIR"
 
 build_one() { # <triple> <bun-target>
   local triple="$1" bt="$2"
+  # 로드된 빌드 식별: 버전(semver, tauri.conf.json/package.json)=사람용 이정표, 이 커밋 짧은 해시(+미커밋
+  # 변경시 -dirty)=자동 빌드 지문. web/build.json은 ../web이 번들 리소스로 통째 복사되므로 앱에 그대로 실린다.
+  local hash dirty=""
+  hash="$(git -C "$DIR" rev-parse --short HEAD 2>/dev/null || echo dev)"
+  [ -n "$(git -C "$DIR" status --porcelain 2>/dev/null)" ] && dirty="-dirty"
+  printf '{"hash":"%s%s","builtAt":"%s"}\n' "$hash" "$dirty" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$DIR/web/build.json"
   echo "▶ [$triple] sidecar"
   bun build "$DIR/bin/cli.js" --compile --minify --target="$bt" --outfile "$BINDIR/joule-$triple"
   chmod +x "$BINDIR/joule-$triple"

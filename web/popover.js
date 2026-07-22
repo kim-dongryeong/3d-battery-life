@@ -18,6 +18,7 @@ let sparkH = +(qs('sh') ?? ls('battSparkH', '6'));        // mini-chart window h
 let three = null, t3d = null, t3dLoading = false;     // lazy Three.js + persistent live-3D scene (survives DOM rebuilds)
 let cfg = { colorize: true, low_pct: 20, high_pct: 80, widget: 'icon', glyph_xl: false, shortcut: true, text_pct: true, text_time: false, text_w_sys: true, text_w_bat: false, w7_src: 'sys', digit_deco: true, bolt_style: 'bold', text_temp: false, text_adp: false, chg_fill: 'current', small_unit: false };
 let live = null, procs = [], detail = {}, spark = [], lastLiveAt = 0, settingsOpen = qs('settings') === '1', moreOpen = false;
+let buildInfo = null;   // 로드된 빌드 식별(버전·커밋 해시) — 프로세스 수명 동안 불변이라 1회만 조회
 // menu-bar preview (settings panel): glyph dumps from the Rust tray renderer via /api/tray-preview
 let pvSim = 'cur', pvData = null, pvTimer = 0, pvMeasure = null;
 
@@ -149,6 +150,11 @@ async function pullSpark() {
   if (settingsOpen) return;
   if (sparkMode === '3d' && t3d && t3d.active) build3DGeom();   // live 3D up: update geometry in place, don't rebuild the canvas
   else { renderSpark(); fitWindow(); }
+}
+// 로드된 빌드 식별 — 서버 프로세스 수명 동안 불변이라 폴링 없이 1회만 (설정 패널 하단에 표기).
+async function pullBuildInfo() {
+  try { const r = await fetch('/api/version', { cache: 'no-store' }); if (r.ok) buildInfo = await r.json(); } catch { /* keep null (표기 생략) */ }
+  if (settingsOpen) render();
 }
 
 function batterySVG(pct, s) {
@@ -491,6 +497,7 @@ function settingsHTML() {
     <div class="srow"><span>충전 완료</span>${selEl('data-c', 'high_pct', cfg.high_pct, pctOpts([0, 70, 75, 80, 85, 90, 100]))}</div>
 
     <div class="shint">메뉴바·알림 설정은 즉시 저장되어 메뉴바에 반영됩니다.</div>
+    ${buildInfo ? `<div class="buildId">v${buildInfo.version} · ${buildInfo.hash}</div>` : ''}
   </div>`;
 }
 
@@ -788,7 +795,7 @@ document.addEventListener('keydown', e => {
 
 initI18nPop();   // 언어(팝오버 설정에서 선택, localStorage 공용) 적용 + 이후 렌더 자동 번역
 render();
-pull(); pullProcs(); pullDetail(); pullConfig(); pullSpark(); pullMeasure();
+pull(); pullProcs(); pullDetail(); pullConfig(); pullSpark(); pullMeasure(); pullBuildInfo();
 setInterval(() => { if (!document.hidden) pull(); }, 2000);
 setInterval(() => { if (!document.hidden) pullMeasure(); }, 2000);   // 상태 무관 상시 폴링 — idle 게이트는 숨김→복귀 시 stale UI를 만들었음(409 유령 세션 사건)
 setInterval(() => { if (!document.hidden) pullProcs(); }, 5000);

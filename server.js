@@ -5,7 +5,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { readSamples, buildReport } from './lib/report.js';
 import { analyzeRates } from './lib/bucketRates.js';
 import { sample, detail } from './lib/battery.js';
@@ -190,6 +190,40 @@ export function resolveRoot(root) {
   return exe;
 }
 
+// ── 로드된 빌드 식별: 버전(semver, 사람용 이정표) + 커밋 해시(자동 빌드 지문) — /api/version, UI엔
+// "v1.1.0 · 97b9c24"로 병기. 둘 다 시작 시 1회만 계산해 캐시(프로세스 수명 동안 불변, startServer 참고).
+function computeVersion(base) {
+  // package.json은 dev·npx CLI·컴파일 바이너리 옆엔 있지만, Tauri 번들은 "../web"만 리소스로 실어(위
+  // resolveRoot 참고) package.json이 없다 — 그럴 땐 tauri.conf.json의 version으로 Tauri가 자동 생성한
+  // Info.plist(CFBundleShortVersionString, Resources의 부모)를 대신 읽는다. release.sh가 둘을 동일 값으로 동기화.
+  let here; try { here = path.dirname(fileURLToPath(import.meta.url)); } catch { here = null; }   // 컴파일 바이너리: 가상 fs
+  for (const c of [here, path.dirname(process.execPath), base, process.cwd()]) {
+    if (!c) continue;
+    try { const p = JSON.parse(fs.readFileSync(path.join(c, 'package.json'), 'utf8')); if (p.version) return String(p.version); } catch { /* 다음 후보 */ }
+  }
+  try {
+    const plist = fs.readFileSync(path.join(base, '..', 'Info.plist'), 'utf8');
+    const m = plist.match(/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]*)<\/string>/);
+    if (m) return m[1];
+  } catch { /* macOS .app 번들이 아님 */ }
+  return 'unknown';
+}
+function computeHash(base) {
+  // ① 패키지 앱: build-app.sh가 빌드 시 심어 둔 web/build.json의 해시(번들 리소스라 항상 그 커밋 그대로).
+  try {
+    const b = JSON.parse(fs.readFileSync(path.join(base, 'web', 'build.json'), 'utf8'));
+    if (b && b.hash) return String(b.hash);
+  } catch { /* dev: build.json은 생성물이라 .gitignore됨 → 아래 git으로 대체 */ }
+  // ② dev: 저장소에서 직접 계산 — 실패(git 없음·저장소 아님·컴파일 바이너리)하면 "dev".
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const short = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: here, encoding: 'utf8' }).trim();
+    const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: here, encoding: 'utf8' }).trim() ? '-dirty' : '';
+    if (short) return short + dirty;
+  } catch { /* not a git checkout */ }
+  return 'dev';
+}
+
 export function startServer({ root, port } = {}) {
   measureResume();   // resume a crash-interrupted measurement — only the real server, never importers
   // Resident backup recorder: launchd's StartInterval job is ProcessType=Background, which macOS
@@ -207,6 +241,7 @@ export function startServer({ root, port } = {}) {
   const PORT = port || process.env.PORT || 4317;
   const webDir = fs.realpathSync(path.join(base, 'web'));
   const assetDir = path.join(base, 'data');            // shipped demo .jsonl
+  const versionInfo = { version: computeVersion(base), hash: computeHash(base) };   // 로드된 빌드 식별 — 프로세스 수명 동안 불변
 
   const server = http.createServer((req, res) => {
     try { handle(req, res); }                                  // a malformed request must not crash the server
@@ -216,6 +251,13 @@ export function startServer({ root, port } = {}) {
   function handle(req, res) {
     if (!hostAllowed(req)) { res.writeHead(403); res.end('forbidden'); return; }
     const url = new URL(req.url, `http://localhost:${PORT}`);
+
+    // 로드된 빌드 식별: 뷰어 HUD·팝오버 설정 하단에 "v1.1.0 · 97b9c24"로 병기 — 시작 시 계산해 둔 값 그대로.
+    if (url.pathname === '/api/version') {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(versionInfo));
+      return;
+    }
 
     if (url.pathname === '/api/report') {
       try {
@@ -519,7 +561,9 @@ export function startServer({ root, port } = {}) {
       if (e || path.relative(webDir, real).startsWith('..')) { res.writeHead(404); res.end('not found'); return; }
       fs.readFile(real, (err, buf) => {
         if (err) { res.writeHead(404); res.end('not found'); return; }
-        res.writeHead(200, { 'content-type': MIME[path.extname(real)] || 'application/octet-stream' });
+        // no-cache(저장은 하되 매번 재검증): WKWebView가 옛 main.js를 계속 들고 있어 "새 기능이 무반응"인
+        // 사고가 재발하지 않게 — 리로드·재오픈 때 항상 서버에 새로 물어보게 한다.
+        res.writeHead(200, { 'content-type': MIME[path.extname(real)] || 'application/octet-stream', 'cache-control': 'no-cache' });
         res.end(buf);
       });
     });

@@ -230,6 +230,8 @@ body.settings-open #foot .vsel { opacity: .4; }
 .tgl.on { background: var(--accent); }
 .tgl.on > i { transform: translateX(17px); }
 .shint { color: var(--faint); font-size: 10.5px; margin-top: 13px; line-height: 1.5; }
+/* 로드된 빌드 식별: "v1.1.0 · 97b9c24" — 버전(사람용 이정표) · 커밋 짧은 해시(자동 빌드 지문) */
+.buildId { color: var(--faint); font-size: 9.5px; margin-top: 8px; font-variant-numeric: tabular-nums; opacity: .75; }
 
 /* ── menu-bar widget picker (settings): preview strip + shape gallery + text chips ──
    Swatches are a mid graphite "menu bar over wallpaper" backdrop in BOTH themes — the glyphs are

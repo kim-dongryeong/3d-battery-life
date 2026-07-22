@@ -2529,3 +2529,9 @@ addEventListener('resize', () => {
 // 저장/딥링크로 2D 시간축 모드로 시작하는 경우: 첫 로드 전에 카메라 고정 + 회전 컨트롤 off
 if (state.view === 'flat') { controls.enabled = false; fitFlatCamera(); }
 load();
+
+// 로드된 빌드 식별 — 프로세스 수명 동안 불변이라 1회만 조회해 HUD 하단에 "v1.1.0 · 97b9c24"로 병기.
+// 언어중립 표기(단어 없음)라 i18n 불필요.
+fetch('/api/version').then(r => r.ok ? r.json() : null)
+  .then(v => { if (v && v.version) document.getElementById('buildId').textContent = `v${v.version} · ${v.hash}`; })
+  .catch(() => {});
