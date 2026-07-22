@@ -24,6 +24,26 @@ const MIME = {
   '.css': 'text/css; charset=utf-8', '.json': 'application/json',
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
 };
+// Whether the sampler's SMAppService-registered LaunchAgent is currently loaded in launchd.
+// Replaces the old `fs.existsSync(~/Library/LaunchAgents/kr.kdr.joule.sampler.plist)` check —
+// v1.2 moved registration to SMAppService (Contents/Library/LaunchAgents/ inside the app bundle,
+// see src-tauri/src/smapp.rs), which registers under the SAME launchd label, so `launchctl print`
+// still finds it either way (legacy agent, SMAppService agent, or the npx/dev CLI's own legacy
+// install). Cached 15s: /api/live is polled every ~2s by the popover, and spawning launchctl on
+// every poll would be wasteful.
+let recCache = { t: 0, v: false };
+function recordingOn() {
+  const now = Date.now();
+  if (now - recCache.t < 15000) return recCache.v;
+  let v = false;
+  try {
+    execFileSync('launchctl', ['print', `gui/${process.getuid()}/kr.kdr.joule.sampler`], { stdio: 'ignore' });
+    v = true;
+  } catch { v = false; }
+  recCache = { t: now, v };
+  return v;
+}
+
 // Demos are GENERATED on demand (deterministic) and cached — not shipped (keeps the app small).
 // If an older bundle still ships one next to the app, prefer that.
 // DEMO_VER busts the cache when the generators change — otherwise a stale cached demo
@@ -300,8 +320,8 @@ export function startServer({ root, port } = {}) {
     if (url.pathname === '/api/live') {
       try {
         const s = sample();
-        // whether the launchd sampler is installed (so the popover's recording toggle shows the right label)
-        try { s.recording = fs.existsSync(path.join(process.env.HOME || '', 'Library/LaunchAgents/kr.kdr.joule.sampler.plist')); } catch { /* ignore */ }
+        // whether the sampler is loaded in launchd (so the popover's recording toggle shows the right label)
+        s.recording = recordingOn();
         // systemW/adapterW + the live battery rail are merged inside sample() now (applyLiveSMC),
         // so both /api/live AND the launchd sampler record them when the app is running.
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });

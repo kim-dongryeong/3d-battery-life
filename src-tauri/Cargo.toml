@@ -17,7 +17,7 @@ serde_json = "1"
 fontdue = "0.9"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSWorkspace", "NSRunningApplication", "NSFont", "NSAttributedString", "NSButton", "NSControl", "NSFontDescriptor", "NSBitmapImageRep", "NSImage", "NSImageRep", "NSGraphics", "NSCell"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSGeometry", "NSArray", "NSAttributedString", "NSString", "NSDictionary", "NSValue", "NSObject"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSGeometry", "NSArray", "NSAttributedString", "NSString", "NSDictionary", "NSValue", "NSObject", "NSError"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"                        # round the popover's native NSWindow (transparent + clipped corners)

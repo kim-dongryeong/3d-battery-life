@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  SMAppService(ServiceManagement, macOS 13+) LaunchAgent — bundled at
+  Joule.app/Contents/Library/LaunchAgents/ (tauri.conf.json bundle.macOS.files) and registered by
+  the app via SMAppService.agent(plistName:). Registering a bundle-embedded agent this way makes
+  Settings > 일반 > 로그인 항목 및 확장 프로그램 > 백그라운드 앱 활동 group this row under "Joule"
+  (app name + icon) instead of the code-signing developer name — a hand-installed
+  ~/Library/LaunchAgents plist always groups under the developer name regardless of
+  AssociatedBundleIdentifiers (BTM Parent Identifier is fixed for legacy agents; see the
+  "macOS 백그라운드 앱 활동(BTM)…" 지식노트).
+
+  This file is static and shipped identically to every user, so it must NOT contain any
+  per-user absolute path: no JOULE_DATA env var, no StandardOut/ErrorPath. lib/paths.js's
+  default data directory (~/Library/Application Support/joule) already covers this when the env
+  var is unset.
+
+  BundleProgram is bundle-root-relative (Apple: "Updating Helper Executables From Earlier
+  Versions of macOS" — replace the legacy Program key with BundleProgram, path relative to the
+  bundle, e.g. Contents/MacOS/…). ProgramArguments[0] is just the argv[0] name token passed to
+  the process (NOT a path) — BundleProgram alone supplies the executable to exec.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>kr.kdr.joule.sampler</string>
+  <key>BundleProgram</key><string>Contents/MacOS/joule</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>joule</string>
+    <string>sample</string>
+  </array>
+  <key>StartInterval</key><integer>60</integer>
+  <key>RunAtLoad</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>LowPriorityIO</key><true/>
+</dict>
+</plist>

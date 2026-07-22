@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  SMAppService(ServiceManagement, macOS 13+) LaunchAgent for joule-smcd — the KeepAlive resident
+  daemon that keeps publishing live SMC power/temp + per-minute recording even while Joule.app
+  itself isn't running (see native/smcd). Bundled at
+  Joule.app/Contents/Library/LaunchAgents/ (tauri.conf.json bundle.macOS.files); registering it
+  via SMAppService.agent(plistName:) groups its Settings > 백그라운드 앱 활동 row under "Joule"
+  instead of the code-signing developer name (same reasoning as kr.kdr.joule.sampler.plist —
+  see the BTM 지식노트).
+
+  Static/shipped-identically: no per-user path baked in (no JOULE_DATA env, no
+  StandardOut/ErrorPath) — native/smcd's own default (~/Library/Application Support/joule)
+  already covers this.
+
+  BundleProgram is bundle-root-relative; ProgramArguments[0] is only the argv[0] name token
+  (BundleProgram supplies the actual executable to exec) — same convention as the sampler agent.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>kr.kdr.joule.smcd</string>
+  <key>BundleProgram</key><string>Contents/MacOS/joule-smcd</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>joule-smcd</string>
+  </array>
+  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>

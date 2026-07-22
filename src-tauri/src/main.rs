@@ -7,6 +7,7 @@
 mod live;
 mod smc;
 mod power;
+mod smapp;
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -94,25 +95,78 @@ fn demote_if_no_visible_ui(app: &AppHandle) {
 #[cfg(not(target_os = "macos"))]
 fn demote_if_no_visible_ui(_app: &AppHandle) {}
 
-const LABEL: &str = "kr.kdr.joule.sampler";
+// SMAppService plist filenames (Contents/Library/LaunchAgents/<name>, shipped by tauri.conf.json
+// bundle.macOS.files from launchd/bundle/*.plist — see smapp.rs). The *_LABEL constants are the
+// same launchd labels, kept only for the legacy-agent migration below (which still has to find/
+// bootout a hand-installed ~/Library/LaunchAgents/<label>.plist by that name).
+const SAMPLER_LABEL: &str = "kr.kdr.joule.sampler";
+const SAMPLER_PLIST: &str = "kr.kdr.joule.sampler.plist";
+const SMCD_LABEL: &str = "kr.kdr.joule.smcd";
+const SMCD_PLIST: &str = "kr.kdr.joule.smcd.plist";
 
 fn home() -> PathBuf { PathBuf::from(std::env::var("HOME").unwrap_or_default()) }
-fn plist_path() -> PathBuf { home().join("Library/LaunchAgents").join(format!("{LABEL}.plist")) }
 fn data_dir() -> PathBuf { home().join("Library/Application Support/joule") }
+
+// Whether the sampler agent counts as "on" for the tray/menu. SMAppService `enabled` is the
+// normal running state; `requiresApproval` also counts as on — registration succeeded and the
+// job IS installed, the user just hasn't approved it in Settings > Login Items yet. Treating it
+// as off there would let the toggle loop forever (re-registering an already-requiresApproval
+// service is a harmless no-op, so it would never flip to "정지").
+fn recording_on() -> bool {
+    matches!(smapp::sm_status(SAMPLER_PLIST), smapp::STATUS_ENABLED | smapp::STATUS_REQUIRES_APPROVAL)
+}
 
 fn status_text(on: bool) -> &'static str {
     if on { "🟢 배터리 기록: 켜짐 (백그라운드 · 앱과 무관)" } else { "⚪ 배터리 기록: 꺼짐" }
 }
 
-// The sidecar binary sits next to this executable inside the .app (Contents/MacOS/joule).
-fn sidecar_bin() -> Option<PathBuf> {
-    std::env::current_exe().ok()?.parent().map(|d| d.join("joule"))
-}
-// Run `joule record <sub>` (on|off|status) — sets up / tears down the launchd sampler.
+// Register/unregister the bundle-embedded sampler agent via SMAppService (was: shell out to the
+// sidecar's `joule record <sub>`, which hand-wrote a ~/Library/LaunchAgents plist — see the BTM
+// 지식노트 for why that always grouped under the developer name in Settings, never "Joule").
+// The interval/ProcessType/etc. now live in the static bundled plist itself, so there's nothing
+// left to pass through.
 fn run_record(sub: &'static str) {
-    if let Some(bin) = sidecar_bin() {
-        let _ = Sh::new(bin).args(["record", sub]).status();
+    match sub {
+        "on" => smapp::sm_register(SAMPLER_PLIST),
+        "off" => smapp::sm_unregister(SAMPLER_PLIST),
+        _ => {}
     }
+}
+
+// Current console user's uid, via `id -u` — matches this file's existing style of shelling out
+// for OS facts (osascript/pmset/pkill/open) rather than pulling in an FFI crate for one integer.
+fn current_uid() -> Option<String> {
+    Sh::new("id").arg("-u").output().ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn launchctl_loaded(uid: &str, label: &str) -> bool {
+    Sh::new("launchctl").args(["print", &format!("gui/{uid}/{label}")])
+        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+        .status().map(|s| s.success()).unwrap_or(false)
+}
+
+// v1.2: migrate a hand-installed legacy launchd agent (~/Library/LaunchAgents/<label>.plist —
+// pre-SMAppService) to the bundle-embedded SMAppService agent of the same name. Idempotent (an
+// already-`enabled` agent short-circuits) and error-tolerant: every step logs and continues
+// rather than panicking — a broken migration must never stop Joule from starting.
+fn migrate_legacy_agent(label: &str, plist_name: &str) {
+    if smapp::sm_status(plist_name) == smapp::STATUS_ENABLED { return; }   // already migrated
+    let legacy = home().join("Library/LaunchAgents").join(format!("{label}.plist"));
+    if !legacy.exists() { return; }
+    let Some(uid) = current_uid() else {
+        eprintln!("[migrate] uid 조회 실패 — {label} 마이그레이션 건너뜀");
+        return;
+    };
+    let was_loaded = launchctl_loaded(&uid, label);   // remember activity BEFORE tearing it down
+    let _ = Sh::new("launchctl").args(["bootout", &format!("gui/{uid}/{label}")]).status();
+    if let Err(e) = std::fs::remove_file(&legacy) {
+        eprintln!("[migrate] legacy plist 삭제 실패 ({}): {e}", legacy.display());
+    }
+    if was_loaded { smapp::sm_register(plist_name); }   // preserve prior on/off state
 }
 
 // First-run consent via a native macOS dialog (osascript — no extra plugin/permission needed).
@@ -272,6 +326,13 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
+            // 0) v1.2: migrate any hand-installed legacy launchd agent (pre-SMAppService) to the
+            //    bundle-embedded SMAppService agent of the same name — before anything below reads
+            //    recording_on(), so a migrated user's tray/menu/consent-marker checks see the
+            //    post-migration state on this very first tick.
+            migrate_legacy_agent(SAMPLER_LABEL, SAMPLER_PLIST);
+            migrate_legacy_agent(SMCD_LABEL, SMCD_PLIST);
+
             // Menu-bar-only until a popover/viewer is requested. with_regular_app waits for Dock to
             // finish its async registration before showing and focusing that first window.
             #[cfg(target_os = "macos")]
@@ -317,7 +378,7 @@ fn main() {
 
             // 2) tray menu (menu-bar item).
             // Recording (launchd) is INDEPENDENT of the app — quitting the app never stops it.
-            let recording = plist_path().exists();
+            let recording = recording_on();
             let status = MenuItem::with_id(app, "status", status_text(recording), false, None::<&str>)?;
             let open = MenuItem::with_id(app, "open", "Joule 분석 리포트 열기", true, None::<&str>)?;
             // all display/menu-bar/alert settings now live in the popover's settings panel (gear)
@@ -350,7 +411,7 @@ fn main() {
                     "open" => show_main(app),
                     "settings" => open_popover(app, true),   // show the popover straight in its settings panel
                     "rec_toggle" => {
-                        let turning_on = !plist_path().exists();   // toggle relative to the live launchd state
+                        let turning_on = !recording_on();   // toggle relative to the live SMAppService state
                         let _ = status_for_menu.set_text(status_text(turning_on));
                         let _ = rec_for_menu.set_text(if turning_on { "배터리 기록 중지" } else { "배터리 기록 시작" });
                         std::thread::spawn(move || run_record(if turning_on { "on" } else { "off" }));
@@ -365,7 +426,7 @@ fn main() {
             //    The marker is written AFTER the dialog resolves: writing it up-front meant a
             //    quit/crash while the dialog was open suppressed consent forever.
             let marker = data_dir().join(".consent-asked");
-            if !plist_path().exists() && !marker.exists() {
+            if !recording_on() && !marker.exists() {
                 let status_for_consent = status.clone();
                 let rec_for_consent = rec_item.clone();
                 std::thread::spawn(move || {
@@ -429,7 +490,7 @@ fn main() {
                         if l.ok { if let Some(p) = disp_pct { l.pct = p; } }   // starship's ratio % can sit 1–2% off macOS's shown %
                         tick = tick.wrapping_add(1);
                         // keep the tray recording label synced to the real launchd state (menu/popover/external)
-                        let now_rec = plist_path().exists();
+                        let now_rec = recording_on();
                         if now_rec != rec_state {
                             rec_state = now_rec;
                             let (r, st) = (rec_ticker.clone(), status_ticker.clone());
@@ -525,7 +586,7 @@ fn main() {
                                 match a.trim() {
                                     "report" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } show_main(&h); }); }
                                     "quit" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || h.exit(0)); }
-                                    "record" => { let on = !plist_path().exists(); std::thread::spawn(move || run_record(if on { "on" } else { "off" })); }
+                                    "record" => { let on = !recording_on(); std::thread::spawn(move || run_record(if on { "on" } else { "off" })); }
                                     "hide" => { let h = handle.clone(); let _ = handle.run_on_main_thread(move || { if let Some(w) = h.get_webview_window("popover") { let _ = w.hide(); } demote_if_no_visible_ui(&h); }); }
                                     _ => {}
                                 }

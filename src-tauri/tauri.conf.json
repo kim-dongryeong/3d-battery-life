@@ -49,6 +49,12 @@
     ],
     "resources": {
       "../web": "web"
+    },
+    "macOS": {
+      "files": {
+        "Library/LaunchAgents/kr.kdr.joule.sampler.plist": "../launchd/bundle/kr.kdr.joule.sampler.plist",
+        "Library/LaunchAgents/kr.kdr.joule.smcd.plist": "../launchd/bundle/kr.kdr.joule.smcd.plist"
+      }
     }
   }
 }

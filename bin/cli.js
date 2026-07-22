@@ -78,6 +78,7 @@ function recordOn(interval) {
   }
   console.log(`✅ recording ON — every ${interval}s → ${samplesFile()}`);
   console.log(`   auto-starts at login (survives reboot).  status: joule record status   stop: joule record off`);
+  console.log(RECOMMEND_APP_NOTE);
 }
 function recordOff() {
   const uid = process.getuid();
@@ -85,6 +86,29 @@ function recordOff() {
   const had = fs.existsSync(AGENT);
   if (had) fs.rmSync(AGENT);
   console.log(`🛑 recording OFF${had ? '' : ' (was not installed)'} — data kept at ${userDataDir()}`);
+  console.log(RECOMMEND_APP_NOTE);
+}
+// installed Joule.app이 있으면 메뉴바 토글을 권장 — SMAppService로 표준 등록되어 설정 앱의
+// 백그라운드 앱 활동에 "Joule"로 표시되고(이 legacy 경로는 개발자 이름으로 뜸 — BTM 지식노트),
+// 앱이 이미 켜둔 등록과 중복되지도 않는다.
+const RECOMMEND_APP_NOTE = '   💡 설치된 Joule.app이 있다면 메뉴바 아이콘에서 켜고 끄는 걸 권장합니다 (표준 등록 · 설정 앱에 "Joule"로 표시).';
+// This compiled binary's own execPath is inside a Joule.app bundle — i.e. we ARE the app's sidecar
+// (Contents/MacOS/joule), invoked directly instead of through the tray app. `record on` here would
+// hand-install a SECOND, legacy ~/Library/LaunchAgents plist next to the app's own SMAppService
+// registration (same label) — harmless to launchd (bootstrap/bootout just re-target the same
+// label) but pointless and regresses the Settings-app grouping back to the developer name for
+// that entry. So: warn and defer to the app instead of installing.
+function insideAppBundle() {
+  return COMPILED && /\.app\/Contents\/MacOS\//.test(process.execPath);
+}
+function guardedRecordOn(interval) {
+  if (insideAppBundle()) {
+    console.error('⚠️  이 실행 파일은 설치된 Joule.app 내부의 사이드카입니다 — legacy 설치를 건너뜁니다.');
+    console.error('   메뉴바 아이콘에서 "배터리 기록 시작"을 사용하세요 (SMAppService 표준 등록 · 설정 앱에 Joule로 표시 · 중복 등록 방지).');
+    process.exitCode = 1;
+    return;
+  }
+  recordOn(interval);
 }
 function recordStatus() {
   const uid = process.getuid();
@@ -175,12 +199,12 @@ switch (cmd) {
   }
   case 'record': {
     const sub = (process.argv[3] || 'status').replace(/^-+/, '');
-    if (sub === 'on') recordOn(parseInt(process.argv[4] || process.env.BATTERY_INTERVAL || '60', 10) || 60);
+    if (sub === 'on') guardedRecordOn(parseInt(process.argv[4] || process.env.BATTERY_INTERVAL || '60', 10) || 60);
     else if (sub === 'off') recordOff();
     else recordStatus();
     break;
   }
-  case 'install': recordOn(parseInt(process.argv[3] || '60', 10) || 60); break;   // aliases
+  case 'install': guardedRecordOn(parseInt(process.argv[3] || '60', 10) || 60); break;   // aliases
   case 'uninstall': recordOff(); break;
   case 'smcd': {
     const sub = (process.argv[3] || 'status').replace(/^-+/, '');
@@ -209,6 +233,7 @@ switch (cmd) {
   record on [sec]   start auto-recording every [sec]s (default 60), auto-starts at login
   record off        stop auto-recording (collected data kept)
   record status     show whether recording is on + sample count
+                    (설치된 Joule.app이 있다면 메뉴바 아이콘에서 켜고 끄는 걸 권장 — 표준 등록 · 설정 앱에 "Joule"로 표시)
   smcd on|off       앱이 꺼져 있어도 SMC 전력(0.5초 표본·1분 평균)+분당 기록을 유지하는 상주 데몬
   demo | demo2      generate demo data (data/demo*.jsonl)                 [Node]
 
