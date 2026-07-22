@@ -13,17 +13,13 @@
   StandardOut/ErrorPath) — native/smcd's own default (~/Library/Application Support/joule)
   already covers this.
 
-  BundleProgram is bundle-root-relative; ProgramArguments[0] is only the argv[0] name token
-  (BundleProgram supplies the actual executable to exec) — same convention as the sampler agent.
+  Do NOT combine ProgramArguments with BundleProgram — launchd rejects the spawn with
+  EX_CONFIG (measured 2026-07-22); BundleProgram alone supplies the executable.
 -->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>kr.kdr.joule.smcd</string>
   <key>BundleProgram</key><string>Contents/MacOS/joule-smcd</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>joule-smcd</string>
-  </array>
   <key>KeepAlive</key><true/>
   <key>RunAtLoad</key><true/>
 </dict>

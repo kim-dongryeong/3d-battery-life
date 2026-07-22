@@ -18,7 +18,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));        // .../bin (de
 const pkgRoot = path.dirname(here);                              // for spawning dev scripts (Node/npx only)
 // Let server.js decide where web/ lives: BATTERY_ROOT → exe dir → .app Resources → cwd.
 const root = resolveRoot();
-const cmd = (process.argv[2] || 'serve').replace(/^-+/, '');
+// JOULE_MODE: SMAppService 번들 plist(launchd/bundle/*.plist)가 서브커맨드를 전달하는 통로 —
+// BundleProgram과 ProgramArguments를 병용하면 launchd가 EX_CONFIG로 스폰을 거부해(실측 2026-07-22)
+// 인자 대신 정적 EnvironmentVariables로 넘긴다.
+const cmd = (process.argv[2] || process.env.JOULE_MODE || 'serve').replace(/^-+/, '');
 
 // ── launchd auto-recording ──────────────────────────────────────────────────
 const LABEL = 'kr.kdr.joule.sampler';

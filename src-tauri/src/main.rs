@@ -127,9 +127,27 @@ fn status_text(on: bool) -> &'static str {
 // left to pass through.
 fn run_record(sub: &'static str) {
     match sub {
-        "on" => smapp::sm_register(SAMPLER_PLIST),
-        "off" => smapp::sm_unregister(SAMPLER_PLIST),
+        "on" => { smapp::sm_register(SAMPLER_PLIST); write_service_state("sampler", true); }
+        "off" => { smapp::sm_unregister(SAMPLER_PLIST); write_service_state("sampler", false); }
         _ => {}
+    }
+}
+
+// ── 서비스 desired-state (~/…/joule/service-state.json) ────────────────────────
+// launchd/BTM의 현재 등록 상태와 별개로 "사용자가 원한 on/off"를 기억한다. 이게 없으면
+// 미등록 상태(사용자가 설정 앱에서 끔, bootout, 등록 실패)를 앱이 복구할 근거가 없다.
+fn service_state_path() -> PathBuf { data_dir().join("service-state.json") }
+fn read_service_state() -> serde_json::Value {
+    std::fs::read_to_string(service_state_path()).ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+fn write_service_state(name: &str, on: bool) {
+    let mut v = read_service_state();
+    v[name] = serde_json::Value::String(if on { "on" } else { "off" }.into());
+    let _ = std::fs::create_dir_all(data_dir());
+    if let Err(e) = std::fs::write(service_state_path(), v.to_string()) {
+        eprintln!("[smapp] service-state 기록 실패: {e}");
     }
 }
 
@@ -153,10 +171,13 @@ fn launchctl_loaded(uid: &str, label: &str) -> bool {
 // pre-SMAppService) to the bundle-embedded SMAppService agent of the same name. Idempotent (an
 // already-`enabled` agent short-circuits) and error-tolerant: every step logs and continues
 // rather than panicking — a broken migration must never stop Joule from starting.
-fn migrate_legacy_agent(label: &str, plist_name: &str) {
-    if smapp::sm_status(plist_name) == smapp::STATUS_ENABLED { return; }   // already migrated
+fn migrate_legacy_agent(label: &str, plist_name: &str, state_name: &str) {
+    // ⚠️ sm_status()==ENABLED로 먼저 스킵하면 안 된다 — legacy 작업이 '같은 launchd 라벨'로
+    // 로드돼 있으면 SMAppService가 그걸 보고 enabled라 답해(라벨 충돌) 마이그레이션이 조용히
+    // 스킵된다(2026-07-22 실측). 판단 기준은 오직 legacy plist 파일의 존재 — 없으면 이미 완료.
     let legacy = home().join("Library/LaunchAgents").join(format!("{label}.plist"));
     if !legacy.exists() { return; }
+    eprintln!("[migrate] legacy {label} 발견 — SMAppService로 이전");
     let Some(uid) = current_uid() else {
         eprintln!("[migrate] uid 조회 실패 — {label} 마이그레이션 건너뜀");
         return;
@@ -167,6 +188,41 @@ fn migrate_legacy_agent(label: &str, plist_name: &str) {
         eprintln!("[migrate] legacy plist 삭제 실패 ({}): {e}", legacy.display());
     }
     if was_loaded { smapp::sm_register(plist_name); }   // preserve prior on/off state
+    write_service_state(state_name, was_loaded);        // desired-state에도 반영
+}
+
+// 시작 시 서비스 상태 정합(ensure) + 번들 교체 재고정(re-pin). 멱등·best-effort.
+// ① desired-state가 on인데 미등록(설정 앱에서 껐다 켬, bootout, 과거 등록 실패)이면 register,
+//    off인데 등록돼 있으면 unregister — 사용자가 트레이로 정한 상태가 항상 이긴다.
+// ② 앱 번들이 교체되면(수동 재설치·자동 업데이트 — 경로 같아도 inode/서명 변경) launchd의
+//    SMAppService 번들 참조가 stale해져 스폰이 EX_CONFIG로 죽는다(실측 2026-07-22: rm -rf 후
+//    재복사 → runs=10 전부 spawn failed). (버전|exe경로) 지문이 바뀌었으면 unregister→register.
+fn ensure_services() {
+    let exe = std::env::current_exe().ok().and_then(|p| p.to_str().map(String::from)).unwrap_or_default();
+    let fingerprint = format!("{}|{exe}", env!("CARGO_PKG_VERSION"));
+    let marker = data_dir().join(".sm-registered");
+    let bundle_changed = std::fs::read_to_string(&marker).unwrap_or_default() != fingerprint;
+    let st = read_service_state();
+    for (name, plist) in [("sampler", SAMPLER_PLIST), ("smcd", SMCD_PLIST)] {
+        let want_on = st[name].as_str().map(|s| s == "on");
+        let registered = matches!(smapp::sm_status(plist), smapp::STATUS_ENABLED | smapp::STATUS_REQUIRES_APPROVAL);
+        match (want_on, registered) {
+            (Some(true), false) => { eprintln!("[smapp] {name}: desired=on인데 미등록 → register"); smapp::sm_register(plist); }
+            (Some(false), true) => { eprintln!("[smapp] {name}: desired=off인데 등록됨 → unregister"); smapp::sm_unregister(plist); }
+            (_, true) if bundle_changed => {
+                eprintln!("[smapp] 번들 변경 감지 — {name} 재고정(unregister→register)");
+                smapp::sm_unregister(plist);
+                smapp::sm_register(plist);
+            }
+            _ => {}
+        }
+    }
+    if bundle_changed {
+        let _ = std::fs::create_dir_all(data_dir());
+        if let Err(e) = std::fs::write(&marker, &fingerprint) {
+            eprintln!("[smapp] re-pin 마커 기록 실패: {e}");
+        }
+    }
 }
 
 // First-run consent via a native macOS dialog (osascript — no extra plugin/permission needed).
@@ -330,8 +386,9 @@ fn main() {
             //    bundle-embedded SMAppService agent of the same name — before anything below reads
             //    recording_on(), so a migrated user's tray/menu/consent-marker checks see the
             //    post-migration state on this very first tick.
-            migrate_legacy_agent(SAMPLER_LABEL, SAMPLER_PLIST);
-            migrate_legacy_agent(SMCD_LABEL, SMCD_PLIST);
+            migrate_legacy_agent(SAMPLER_LABEL, SAMPLER_PLIST, "sampler");
+            migrate_legacy_agent(SMCD_LABEL, SMCD_PLIST, "smcd");
+            ensure_services();
 
             // Menu-bar-only until a popover/viewer is requested. with_regular_app waits for Dock to
             // finish its async registration before showing and focusing that first window.

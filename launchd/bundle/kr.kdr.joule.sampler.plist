@@ -17,18 +17,16 @@
 
   BundleProgram is bundle-root-relative (Apple: "Updating Helper Executables From Earlier
   Versions of macOS" — replace the legacy Program key with BundleProgram, path relative to the
-  bundle, e.g. Contents/MacOS/…). ProgramArguments[0] is just the argv[0] name token passed to
-  the process (NOT a path) — BundleProgram alone supplies the executable to exec.
+  bundle, e.g. Contents/MacOS/…). Do NOT combine ProgramArguments with BundleProgram — launchd
+  rejects the spawn with EX_CONFIG (measured 2026-07-22); subcommands travel via the static
+  JOULE_MODE env var instead (read by bin/cli.js).
 -->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>kr.kdr.joule.sampler</string>
   <key>BundleProgram</key><string>Contents/MacOS/joule</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>joule</string>
-    <string>sample</string>
-  </array>
+  <key>EnvironmentVariables</key>
+  <dict><key>JOULE_MODE</key><string>sample</string></dict>
   <key>StartInterval</key><integer>60</integer>
   <key>RunAtLoad</key><true/>
   <key>ProcessType</key><string>Background</string>
