@@ -1124,19 +1124,48 @@ function renderRates() {
 
 // ---- 기능 A: 내 충전기·보조배터리 통계 (server: /api/chargers, 내 데이터 전용) --------------------
 // #buckets(좌하단)와 같은 고정 접이식 카드 관례를 우하단에 복제. 데모 소스엔 hidden(내 데이터만 의미 있음).
+// 스키마 v2: 한 행 = 물리 충전기(모델). 같은 충전기라도 포트 분배로 계약(chargerKey)이 갈리는 경우
+// (예: Apple 듀얼포트 35W→27W→17W)는 lib/chargerStats.js가 이미 modelKey로 합쳐서 내려준다 —
+// 여기(뷰)는 모델 행 하나에 제공 메뉴(offeredMenu)·계약별 사용시간(profiles)·실측치 3줄만 그리면 된다.
 function chargerName(c) {
   if (c.name) return c.name;
-  if (c.key === 'unknown') return TECH_KO.unknown;                              // '미상' — 어댑터 필드 없던 과거 이력
-  if (c.wattsNom == null) return c.key;
+  if (c.ratedW == null) return TECH_KO.unknown;                              // 정격조차 모름 — '미상'(어댑터 필드 없던 과거 이력 포함)
   const techLbl = c.tech ? TECH_KO[c.tech] : null;
-  return techLbl ? `${c.wattsNom}W ${techLbl}` : `${c.wattsNom}W`;
+  return techLbl ? `${c.ratedW}W ${techLbl}` : `${c.ratedW}W`;
 }
-function chgMetaLine(c) {
-  const rate = c.wattsNom != null ? `정격 ${c.wattsNom}W${c.voltsNom != null ? `·${c.voltsNom}V` : ''} · ` : '';
-  const maxS = c.maxW != null ? `실측 최대 ${c.maxW.toFixed(1)}W` : '실측 최대 —';
-  const avgS = c.avgW != null ? `평균 ${c.avgW.toFixed(1)}W` : '평균 —';
-  const whS = c.energyWh != null ? `공급 ${c.energyWh.toFixed(1)}Wh` : '공급 —';
-  return `${rate}${maxS} · ${avgS} · ${whS} · 총 사용 ${fmtDur(c.minutes * 60)}`;
+// 트랙(바 배경)의 기준 100% — 제공 메뉴가 있으면 그 최대 W(단독 사용 시 풀 메뉴), 없으면 계약 정격 최대.
+function chgTrackMaxW(c) {
+  return c.offeredMenu && c.offeredMenu.length ? Math.max(...c.offeredMenu.map(p => p.w)) : (c.ratedW || 0);
+}
+// "제공: 5V·3A · 9V·3A · … (최대 35W)" — 충전기 자체가 제공하는 PD 프로필 메뉴(adapters.json hvcMenu).
+// 메뉴가 없으면(비-PD·구형 USB 등) 아예 생략.
+function chgOfferedLine(c) {
+  if (!c.offeredMenu || !c.offeredMenu.length) return '';
+  const items = c.offeredMenu.map(p => `${p.v}V·${p.a}A`).join(' · ');
+  const maxW = Math.max(...c.offeredMenu.map(p => p.w));
+  return `<div class="chgMeta">제공: ${items} (최대 ${maxW}W)</div>`;
+}
+// "사용 계약: 20V·35W 7.8시간 · …" — 모델을 이룬 계약(chargerKey)별 실사용 시간, minutes 내림차순(profiles 순서 그대로).
+function chgProfilesLine(c) {
+  if (!c.profiles || !c.profiles.length) return '';
+  const items = c.profiles.map(p => {
+    const label = [p.vnom != null ? `${p.vnom}V` : null, p.wnom != null ? `${p.wnom}W` : null].filter(Boolean).join('·');
+    return `${label}${label ? ' ' : ''}${(p.minutes / 60).toFixed(1)}시간`;
+  }).join(' · ');
+  return `<div class="chgMeta">사용 계약: ${items}</div>`;
+}
+// "실측: 최대 33.1W · 평균 12.4W · 평균 19.9V · 최대 1.68A · 평균 0.92A · 공급 235.6Wh · 총 28시간 30분"
+// — 모델 단위로 풀링된 실측치. 항목별로 값이 없으면(V/A 실측이 한 번도 없었던 구형 이력 등) 그 토막만 생략.
+function chgMeasuredLine(c) {
+  const parts = [];
+  if (c.maxW != null) parts.push(`최대 ${c.maxW.toFixed(1)}W`);
+  if (c.avgW != null) parts.push(`평균 ${c.avgW.toFixed(1)}W`);
+  if (c.avgV != null) parts.push(`평균 ${c.avgV.toFixed(1)}V`);
+  if (c.maxA != null) parts.push(`최대 ${c.maxA.toFixed(2)}A`);
+  if (c.avgA != null) parts.push(`평균 ${c.avgA.toFixed(2)}A`);
+  if (c.energyWh != null) parts.push(`공급 ${c.energyWh.toFixed(1)}Wh`);
+  parts.push(`총 ${fmtDur(c.minutes * 60)}`);
+  return `<div class="chgMeta">실측: ${parts.join(' · ')}</div>`;
 }
 // #panel(우상단)과 #chargers(우하단)는 둘 다 right:16 고정이라 같은 세로줄을 나눠 쓴다. #panel은
 // 충전/방전 예상 카드까지 실리면 긴 실사용 이력에서 기본 46vh 가정보다 훨씬 길어져(거의 풀스크린)
@@ -1171,16 +1200,19 @@ function renderChargers() {
     return;
   }
   const totalWh = rows.reduce((s, c) => s + (c.energyWh || 0), 0);
-  const commonMax = Math.max(1, ...rows.map(c => Math.max(c.wattsNom || 0, c.maxW || 0)));   // 카드 내 공통 스케일 → 크로스 비교
+  const commonMax = Math.max(1, ...rows.map(c => Math.max(chgTrackMaxW(c), c.maxW || 0)));   // 카드 내 공통 스케일 → 크로스 비교
   const body = rows.map(c => {
     const badge = c.isPowerBank ? '<span class="pbadge">보조배터리</span>' : '';
-    const ratedPct = c.wattsNom != null ? Math.min(100, c.wattsNom / commonMax * 100) : 0;
+    const trackW = chgTrackMaxW(c);
+    const ratedPct = trackW ? Math.min(100, trackW / commonMax * 100) : 0;
     const maxPct = c.maxW != null ? Math.min(100, c.maxW / commonMax * 100) : 0;
     const avgPct = c.avgW != null ? Math.min(100, c.avgW / commonMax * 100) : null;
     return `<div class="chgRow">
       <div class="chgHead"><span class="chgName">${chargerName(c)}</span>${badge}<span class="chgAgo" title="마지막 사용">${agoText(c.lastSeen * 1000)}</span></div>
-      <div class="chgTrack">${c.wattsNom != null ? `<div class="chgRated" style="width:${ratedPct}%"></div>` : ''}${c.maxW != null ? `<div class="chgMax" style="width:${maxPct}%"></div>` : ''}${avgPct != null ? `<div class="chgAvgMark" style="left:${avgPct}%"></div>` : ''}</div>
-      <div class="chgMeta">${chgMetaLine(c)}</div>
+      <div class="chgTrack">${trackW ? `<div class="chgRated" style="width:${ratedPct}%"></div>` : ''}${c.maxW != null ? `<div class="chgMax" style="width:${maxPct}%"></div>` : ''}${avgPct != null ? `<div class="chgAvgMark" style="left:${avgPct}%"></div>` : ''}</div>
+      ${chgOfferedLine(c)}
+      ${chgProfilesLine(c)}
+      ${chgMeasuredLine(c)}
     </div>`;
   }).join('');
   el.innerHTML = `<h2>${cFold}내 충전기·보조배터리</h2>` +

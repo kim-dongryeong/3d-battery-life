@@ -414,6 +414,10 @@
       "avg"
     ],
     [
+      "사용 계약",
+      "Used contracts"
+    ],
+    [
       "계약",
       "contract"
     ],
@@ -444,6 +448,22 @@
     [
       "USB-C 5V 추정 · 비-PD 가능",
       "likely USB-C 5V · possibly non-PD"
+    ],
+    [
+      "제공",
+      "Offered"
+    ],
+    [
+      "실측",
+      "Measured"
+    ],
+    [
+      "최대",
+      "max"
+    ],
+    [
+      "총",
+      "total"
     ]
   ],
   "Joule — 분석 리포트": "Joule — Analysis Report",
