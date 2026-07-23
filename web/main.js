@@ -1188,16 +1188,16 @@ function chgOfferedLine(c) {
   const label = c.menuVariants && c.menuVariants.length ? '제공(단독)' : '제공';
   return `<div class="chgMeta">${label}: ${fmtMenuMaxLine(c.offeredMenu, maxW)}</div>`;
 }
-// "분배 관측: 5V·3A · 9V·3A · 15V·1.83A · 20V·1.37A (최대 27W)" 다음 줄에
-// "           5V·3A · 9V·1.94A · 15V·1.16A · 20V·0.87A (최대 17W)" — 듀얼포트 어댑터가 다른
-// 포트와 전력을 나눌 때 협상한 축소 메뉴들의 V·A 전체(menuVariants, offeredMenu 제외 내림차순).
+// "재협상 관측: 5V·3A · 9V·3A · 15V·1.83A · 20V·1.37A (최대 27W)" 다음 줄에
+// "           5V·3A · 9V·1.94A · 15V·1.16A · 20V·0.87A (최대 17W)" — 재협상(듀얼포트 분배·만충 등
+// 수요 감소·파워뱅크 잔량 저하 등)으로 협상한 축소 메뉴들의 V·A 전체(menuVariants, offeredMenu 제외 내림차순).
 // 첫 줄만 라벨을 보이고 이후 줄은 라벨을 숨겨(.chgMetaCont) 들여쓴 것처럼 이어 붙인다.
 // 없으면(단일 메뉴만 관측) 생략. fmtMenuMaxLine()으로 chgOfferedLine과 포맷을 공유한다.
 function chgMenuVariantsLine(c) {
   if (!c.menuVariants || !c.menuVariants.length) return '';
-  const title = '듀얼포트 전력 분배 등으로 축소 광고된 메뉴가 관측됨';
+  const title = '재협상으로 축소 광고된 메뉴가 관측됨 — 원인: 듀얼포트 분배·만충 등 수요 감소·파워뱅크 잔량 저하 등';
   return c.menuVariants.map((v, i) => {
-    const labelHtml = i === 0 ? '분배 관측: ' : '<span class="chgMetaCont">분배 관측: </span>';
+    const labelHtml = i === 0 ? '재협상 관측: ' : '<span class="chgMetaCont">재협상 관측: </span>';
     return `<div class="chgMeta" title="${title}">${labelHtml}${fmtMenuMaxLine(v.menu, v.maxW)}</div>`;
   }).join('');
 }

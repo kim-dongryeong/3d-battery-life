@@ -345,3 +345,82 @@ test('f) profiles[]는 계약별 maxW/avgW/energyWh도 담는다(모델 합산 �
   assert.notEqual(row.avgW, p35.avgW);
   assert.equal(row.maxW, 34);   // 최댓값은 두 계약 중 더 큰 쪽과 일치
 });
+
+// ---- 2026-07-22: 정체 브리징(1) · 플러그 세션 귀속(2) ------------------------------------------
+
+test('h) 정체 브리징: 재협상 과도기 한 틱만 일반명/id0로 떨어져도 양옆 동일 Wnom·Vnom·familyCode면 상속(7/17 08:34 패턴)', () => {
+  const FAM = 'e000400a', AID = 28699, NAME = '35W USB-C Power Adapter';
+  const t0 = 20_000_000;
+  const samples = [];
+  for (let i = 0; i <= 14; i++) {
+    const isGhost = i === 7;   // 딱 한 틱만 정체 유실
+    samples.push({
+      t: t0 + i * 60, ac: true, charging: !isGhost, adapterW: 26,
+      adapterWnom: 27, adapterVnom: 20, familyCode: FAM,     // Wnom·Vnom·familyCode는 유령 틱도 동일
+      adapterId: isGhost ? 0 : AID,
+      adapterName: isGhost ? 'pd charger' : NAME,
+    });
+  }
+  const adapters = { [`27W@20V/${FAM}#${AID}`]: { name: NAME } };
+  const rows = aggregateChargers(samples, adapters);
+  assert.equal(rows.length, 1, '브리징 후 계약이 끊기지 않고 이어져 모델도 1행');
+  const row = rows[0];
+  assert.equal(row.name, NAME, '브리징된 정체는 구체 이름으로 귀속돼야 함(유령 pd charger 모델 아님)');
+  assert.equal(row.profiles.length, 1, '브리징 후 계약도 하나(27W)로 합쳐짐 — pd charger#0 별도 계약 없음');
+  assert.equal(row.profiles[0].wnom, 27);
+  assert.equal(row.minutes, 14, '유령 틱 양옆 쌍 모두 같은 계약으로 이어져 14분 전부 집계돼야 함');
+});
+
+test('h2) 정체 브리징: 양옆에 매칭되는 이웃이 없으면(다른 Wnom 등) 상속하지 않는다', () => {
+  const FAM = 'e000400a', t0 = 21_000_000;
+  // 유령 틱의 Wnom(20)과 일치하는 구체 이웃이 3틱 내 없음(앞뒤 모두 다른 Wnom) → 상속 없이 그대로 'unknown'류 취급
+  const samples = [
+    ...Array.from({ length: 12 }, (_, i) => ({ t: t0 + i * 60, ac: true, charging: true, adapterW: 30,
+      adapterWnom: 35, adapterVnom: 20, familyCode: FAM, adapterId: 28699, adapterName: '35W USB-C Power Adapter' })),
+    { t: t0 + 12 * 60, ac: true, charging: false, adapterW: 18,
+      adapterWnom: 20, adapterVnom: 20, familyCode: FAM, adapterId: 0, adapterName: 'pd charger' },   // Wnom 불일치 → 상속 안 됨
+    ...Array.from({ length: 12 }, (_, i) => ({ t: t0 + (13 + i) * 60, ac: true, charging: true, adapterW: 30,
+      adapterWnom: 35, adapterVnom: 20, familyCode: FAM, adapterId: 28699, adapterName: '35W USB-C Power Adapter' })),
+  ];
+  const adapters = { [`35W@20V/${FAM}#28699`]: { name: '35W USB-C Power Adapter' } };
+  const rows = aggregateChargers(samples, adapters);
+  const ghost = rows.find(r => r.profiles.some(p => p.wnom === 20));
+  assert.equal(ghost, undefined, '단독 틱이라 쌍을 못 이뤄 20W 계약 자체가 집계되지 않아야 함(상속 안 된 채 경계로 처리)');
+  const named = rows.find(r => r.profiles.some(p => p.wnom === 35));
+  assert.ok(named);
+  assert.equal(named.name, '35W USB-C Power Adapter');
+});
+
+test('i) 플러그 세션 귀속: 같은 run 안에서 계약(Wnom)만 바뀌어도 같은 물리 충전기로 병합(재협상)', () => {
+  const FAM = 'e000400a';
+  const K65 = '65W@20V/e000400a#0', K45 = '45W@20V/e000400a#0';
+  const adapters = {
+    [K65]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 3.25 }] },
+    [K45]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 2.25 }] },
+  };
+  const t0 = 22_000_000;
+  const samples = [
+    ...acRun({ t0, n: 15, adapter: { adapterWnom: 65, adapterVnom: 20, familyCode: FAM, adapterId: 0, adapterName: 'pd charger' }, adapterW: 60 }),
+    ...acRun({ t0: t0 + 16 * 60, n: 15, adapter: { adapterWnom: 45, adapterVnom: 20, familyCode: FAM, adapterId: 0, adapterName: 'pd charger' }, adapterW: 40 }),
+  ];
+  const rows = aggregateChargers(samples, adapters);
+  assert.equal(rows.length, 1, '같은 run 안의 65W↔45W 재협상은 같은 물리 충전기로 병합돼야 함(xtorm 사례)');
+  const row = rows[0];
+  assert.equal(row.profiles.length, 2);
+  assert.ok(row.profiles.some(p => p.wnom === 65));
+  assert.ok(row.profiles.some(p => p.wnom === 45));
+  assert.equal(row.minutes, 15 + 15);
+});
+
+test('j) 플러그 세션 귀속: run 안에서 tech가 다르면(usb host 5V → PD 27W) 병합하지 않고 분리', () => {
+  const t0 = 23_000_000;
+  const samples = [
+    ...acRun({ t0, n: 15, adapter: { adapterWnom: 5, adapterVnom: 5, familyCode: 'e0004009', adapterId: 10 }, adapterW: 4 }),           // usbc-5v
+    ...acRun({ t0: t0 + 16 * 60, n: 15, adapter: { adapterWnom: 27, adapterVnom: 20, familyCode: 'e000400a', adapterId: 0, adapterName: 'pd charger' }, adapterW: 25 }),  // usbc-pd — 실제 교체
+  ];
+  const rows = aggregateChargers(samples);
+  assert.equal(rows.length, 2, 'tech 경계에서는 분리 유지 — 강제 병합하지 않아야 함');
+  const slow = findByWnom(rows, 5), pd = findByWnom(rows, 27);
+  assert.ok(slow && pd);
+  assert.notEqual(slow.modelKey, pd.modelKey);
+});

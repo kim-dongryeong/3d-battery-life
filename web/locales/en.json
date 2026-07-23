@@ -458,8 +458,8 @@
       "Offered"
     ],
     [
-      "분배 관측: ",
-      "Distribution observed: "
+      "재협상 관측: ",
+      "Renegotiation observed: "
     ],
     [
       "실측",
@@ -892,8 +892,10 @@
   "Apple 정품": "Apple genuine",
   "Apple이 인증한 정품 정보(Manufacturer=Apple Inc.)가 이 충전기에서 실측됐어요": "Apple-certified genuine info (Manufacturer=Apple Inc.) was measured from this charger",
   "식별정보 미제공": "No identity info",
-  "듀얼포트 전력 분배 등으로 축소 광고된 메뉴가 관측됨": "A menu advertised at reduced capacity was observed, e.g. from dual-port power sharing",
+  "재협상으로 축소 광고된 메뉴가 관측됨 — 원인: 듀얼포트 분배·만충 등 수요 감소·파워뱅크 잔량 저하 등": "A menu advertised at reduced capacity was observed via renegotiation — causes include dual-port power sharing, reduced demand (e.g. near-full charge), or a power bank's dropping reserve",
   "USB-PD는 제품명을 전송하지 않고, 인증 제품만 macOS가 Name/Manufacturer를 채워요": "USB-PD doesn't transmit a product name — macOS fills in Name/Manufacturer only for certified products",
+  "USB-C PD · PD 협상": "USB-C PD · PD negotiated",
+  "USB-C 5V · 비-PD(5V 고정)": "USB-C 5V · non-PD (fixed 5 V)",
   "V 오버레이 (전력 W · 2D)": "V overlay (Power W · 2D)",
   "A 오버레이 (전력 W · 2D)": "A overlay (Power W · 2D)",
   "둘다": "Both",
