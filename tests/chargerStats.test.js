@@ -4,7 +4,7 @@
 // 문자열을 하드코딩하지 않고 profiles[].wnom으로 찾는다(반올림/서픽스 규칙은 (b)(d)에서 직접 검증).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { aggregateChargers } from '../lib/chargerStats.js';
+import { aggregateChargers, reconcileLabels } from '../lib/chargerStats.js';
 
 const SLOW = { adapterWnom: 15, adapterVnom: 5, familyCode: 'e0004009', adapterId: 10 };
 const FAST = { adapterWnom: 96, adapterVnom: 20, familyCode: 'e000400a', adapterId: 30183 };
@@ -224,13 +224,18 @@ test('g) 메뉴가 1종뿐이면 menuVariants는 빈 배열', () => {
   assert.deepEqual(rows[0].menuVariants, []);
 });
 
-test('b) adapterId 0 + 일반명, 메뉴 최대 65W vs 67W → 반올림 같은 클래스로 병합, 90W는 별도 유지', () => {
+// 2026-07-22 kdr 실물 확인: "pd charger"(adapterId 0)로 잡히는 보조배터리 중 67W 계약을 내는 실물과
+// 65W/45W 계약을 내는 실물은 서로 다른 물리 충전기다. 예전엔 hvcMenu 최대 W를 5W 단위로 반올림한
+// "전력 클래스(|cNN)"로 묶어 round5(65)=round5(67)=65가 되어 이 둘을 오병합했다. 이제 modelKeyOf는
+// 반올림 없는 "정확한 메뉴 지문"을 쓰므로, 메뉴가 다르면 세션(같은 플러그 연결) 증거 없이는 절대
+// 병합되지 않는다 — 아래에서 세 계약은 서로 멀리 떨어진(연속 AC run이 아닌) 시점이라 세션 링크도 없다.
+test('b) adapterId 0 + 일반명, 메뉴 지문이 다르면(65W vs 67W) 세션 증거 없이 반올림만으론 절대 안 묶인다', () => {
   const FAM = 'e000400a';
   const K65 = '65W@20V/e000400a#0', K67 = '67W@20V/e000400a#0', K90 = '90W@20V/e000400a#0';
   const adapters = {
-    [K65]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 3.25 }] },                              // 65W
-    [K67]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 3.25 }, { v: 20.3, a: 3.3 }] },          // 66.99W → round5(65)와 같은 클래스
-    [K90]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 4.5 }] },                                // 90W → 별도 클래스
+    [K65]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 3.25 }] },                              // 65W — 실물 A
+    [K67]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 3.25 }, { v: 20.3, a: 3.3 }] },          // 66.99W — 실물 B(다른 실물!)
+    [K90]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 4.5 }] },                                // 90W — 실물 C
   };
   const samples = [
     ...acRun({ t0: 1, n: 15, adapter: { adapterWnom: 65, adapterVnom: 20, familyCode: FAM, adapterId: 0 }, adapterW: 60 }),
@@ -238,20 +243,17 @@ test('b) adapterId 0 + 일반명, 메뉴 최대 65W vs 67W → 반올림 같은 
     ...acRun({ t0: 200_000, n: 15, adapter: { adapterWnom: 90, adapterVnom: 20, familyCode: FAM, adapterId: 0 }, adapterW: 85 }),
   ];
   const rows = aggregateChargers(samples, adapters);
-  const merged = findByWnom(rows, 65);
-  assert.ok(merged, '65W 계약을 담은 모델이 있어야 함');
-  assert.ok(merged.modelKey.endsWith('|c65'), `클래스 65로 묶여야 함(${merged.modelKey})`);
-  assert.equal(merged.profiles.length, 2, '65W·67W 두 계약이 한 모델에 묶임');
-  assert.equal(merged.minutes, 15 + 20);
-  assert.ok(merged.profiles.some(p => p.wnom === 67));
-  // offeredMenu는 두 계약 중 메뉴 최댓값이 더 큰 67W 쪽(66.99W)을 채택 — 20.3V 항목의 존재로 확인
-  assert.ok(merged.offeredMenu.some(p => p.v === 20.3), '67W 계약의 메뉴(20.3V 포함)가 선택돼야 함');
-
-  const solo90 = findByWnom(rows, 90);
-  assert.ok(solo90, '90W는 별도 모델로 남아야 함');
-  assert.notEqual(solo90.modelKey, merged.modelKey);
-  assert.ok(solo90.modelKey.endsWith('|c90'));
-  assert.equal(solo90.profiles.length, 1);
+  const r65 = findByWnom(rows, 65), r67 = findByWnom(rows, 67), r90 = findByWnom(rows, 90);
+  assert.ok(r65 && r67 && r90, '세션 링크(연속 AC run)가 전혀 없으므로 세 계약 모두 별도 모델로 남아야 함');
+  assert.notEqual(r65.modelKey, r67.modelKey, '65W·67W는 메뉴 지문이 달라 오병합되면 안 됨(서로 다른 실물)');
+  assert.notEqual(r65.modelKey, r90.modelKey);
+  assert.notEqual(r67.modelKey, r90.modelKey);
+  assert.equal(r65.profiles.length, 1);
+  assert.equal(r67.profiles.length, 1);
+  assert.equal(r90.profiles.length, 1);
+  assert.equal(r65.minutes, 15);
+  assert.equal(r67.minutes, 20);
+  assert.equal(r90.minutes, 15);
 });
 
 test('c) avgV/avgA 시간가중 수계산 검증 (dcInV/dcInA, dt 다른 두 쌍)', () => {
@@ -410,6 +412,48 @@ test('i) 플러그 세션 귀속: 같은 run 안에서 계약(Wnom)만 바뀌어
   assert.ok(row.profiles.some(p => p.wnom === 65));
   assert.ok(row.profiles.some(p => p.wnom === 45));
   assert.equal(row.minutes, 15 + 15);
+});
+
+// ---- 2026-07-22: 라벨 마이그레이션(reconcileLabels) — xtorm 사례 재현 ---------------------------
+
+test('k) reconcileLabels: 고아 라벨(옛 round5 클래스 키)은 겹침 비중이 더 높은 모델로 마이그레이션', () => {
+  const FAM = 'e000400a';
+  const K65 = '65W@20V/e000400a#0', K67 = '67W@20V/e000400a#0', K45 = '45W@20V/e000400a#0';
+  const adapters = {
+    [K65]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 3.25 }] },
+    [K67]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 3.25 }, { v: 20.3, a: 3.3 }] },
+    [K45]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 2.25 }] },
+  };
+  // 67W는 세션 링크가 전혀 없는 별도 시점(단독 모델) — 65W↔45W는 같은 run 안 재협상(세션 링크, xtorm 실물).
+  const t0 = 30_000_000;
+  const samples = [
+    ...acRun({ t0, n: 20, adapter: { adapterWnom: 67, adapterVnom: 20, familyCode: FAM, adapterId: 0, adapterName: 'pd charger' }, adapterW: 62 }),
+    ...acRun({ t0: t0 + 100_000, n: 15, adapter: { adapterWnom: 65, adapterVnom: 20, familyCode: FAM, adapterId: 0, adapterName: 'pd charger' }, adapterW: 60 }),
+    ...acRun({ t0: t0 + 100_000 + 16 * 60, n: 15, adapter: { adapterWnom: 45, adapterVnom: 20, familyCode: FAM, adapterId: 0, adapterName: 'pd charger' }, adapterW: 40 }),
+  ];
+  const rows = aggregateChargers(samples, adapters);
+  const r67 = findByWnom(rows, 67);
+  const r6545 = findByWnom(rows, 65);
+  assert.ok(r67 && r6545);
+  assert.notEqual(r67.modelKey, r6545.modelKey, '67W와 65W+45W는 분리된 모델이어야 함');
+  assert.ok(r6545.profiles.some(p => p.wnom === 45), '65W+45W는 세션 링크로 한 모델에 묶임');
+
+  // 옛(고쳐지기 전) 알고리즘에서 65W·67W는 round5(65)=round5(67)=65라 같은 클래스로 묶였다 —
+  // 그 시절 저장된 라벨 키가 바로 이 모양이다.
+  const oldLabels = { 'e000400a#0|pd charger|c65': 'xtorm' };
+  const { labels, migrations } = reconcileLabels(oldLabels, rows, adapters);
+  assert.equal(migrations.length, 1);
+  assert.equal(migrations[0].to, r67.modelKey, '겹침 비중(67W 단독 모델=100%) > (65W+45W 병합 모델=50%) → 67W 모델로 마이그레이션');
+  assert.equal(labels[r67.modelKey], 'xtorm');
+  assert.equal(labels['e000400a#0|pd charger|c65'], undefined, '옛 키는 지워짐');
+});
+
+test('l) reconcileLabels: 겹침이 전부 0이면 라벨은 그대로 유지(미표시)', () => {
+  const rows = [{ modelKey: 'e000400a#123|Foo Charger', chargerKeys: ['12W@20V/e000400a#123'], name: 'Foo Charger' }];
+  const oldLabels = { 'aabbccdd#0|pd charger|c99': 'ghost' };
+  const { labels, migrations } = reconcileLabels(oldLabels, rows, {});
+  assert.equal(migrations.length, 0);
+  assert.equal(labels['aabbccdd#0|pd charger|c99'], 'ghost', '겹침 0이면 라벨 자체는 유지(다만 현재 모델에 없어 화면엔 안 보임)');
 });
 
 test('j) 플러그 세션 귀속: run 안에서 tech가 다르면(usb host 5V → PD 27W) 병합하지 않고 분리', () => {

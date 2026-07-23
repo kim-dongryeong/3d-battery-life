@@ -11,8 +11,8 @@ import { analyzeRates } from './lib/bucketRates.js';
 import { sample, detail } from './lib/battery.js';
 import { chargerKey, readAdapters, upsertAdapter } from './lib/adapters.js';
 import { chargeStats, ratesWithFallback, classKey, energyBalanceETA } from './lib/chargeRates.js';
-import { aggregateChargers } from './lib/chargerStats.js';
-import { readLabels, setLabel } from './lib/chargerLabels.js';
+import { aggregateChargers, reconcileLabels } from './lib/chargerStats.js';
+import { readLabels, setLabel, writeLabels } from './lib/chargerLabels.js';
 import { userDataDir, cacheDir, appendSample } from './lib/paths.js';
 import { applyLiveSMC } from './lib/battery.js';
 import * as measure from './lib/measure.js';
@@ -370,10 +370,14 @@ export function startServer({ root, port } = {}) {
         if (Date.now() - chargersCache.at > 30000) {
           const samples = readSource('real', assetDir);
           const adapters = readAdapters();
-          chargersCache = { at: Date.now(), data: { generatedAt: Math.round(Date.now() / 1000), chargers: aggregateChargers(samples, adapters) } };
+          chargersCache = { at: Date.now(), data: { generatedAt: Math.round(Date.now() / 1000), chargers: aggregateChargers(samples, adapters) }, adapters };
         }
         // 별명(label)은 집계 캐시와 별도로 매 요청 파일에서 새로 읽는다 — POST 직후에도 바로 반영되게.
-        const labels = readLabels();
+        // modelKey 그룹핑 규칙이 바뀌면(2026-07-22: 반올림 클래스 → 메뉴 지문) 저장된 라벨 키가 고아가
+        // 될 수 있어, 매 요청 현재 모델 목록과 대조해 겹치는 새 모델로 1회 마이그레이션한다(reconcileLabels).
+        let labels = readLabels();
+        const { labels: migrated, migrations } = reconcileLabels(labels, chargersCache.data.chargers, chargersCache.adapters || {});
+        if (migrations.length) { writeLabels(migrated); labels = migrated; }
         const chargers = chargersCache.data.chargers.map(c => labels[c.modelKey] ? { ...c, label: labels[c.modelKey] } : c);
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(JSON.stringify({ ...chargersCache.data, chargers }));
