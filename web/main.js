@@ -15,6 +15,7 @@ const FLAT_W = 72;                    // 2D 시간축의 월드 폭 (3D의 X=24�
 let _fw = { w0: 0, w1: 1 };           // buildLines 시점에 고정된 보이는 창 — 좌표·축·예상선이 공유
 let _flatStride = 1;                  // buildLines가 정한 다운샘플 간격 — V/A 오버레이도 같은 간격으로 그려 성능 일치
 const xFlat = tt => ((tt - _fw.w0) / (_fw.w1 - _fw.w0) - 0.5) * FLAT_W;
+const xFlatInv = wx => _fw.w0 + (wx / FLAT_W + 0.5) * (_fw.w1 - _fw.w0);   // world x → epoch 초 (xFlat의 역함수, flat 전용)
 const flatSpanNow = () => FV.span(state.report);
 // 창 적용: 이미 flatViewport 전이 함수로 정규화된 창(null 허용)만 받는다. rAF 스로틀 재구축.
 let _flatRAF = 0;
@@ -1715,7 +1716,10 @@ function pickAt(cx, cy) {   // raycast the curves → nearest vertex, or null
   const idx = dj < di ? j : i;
   const vp = new THREE.Vector3(pos.getX(idx), pos.getY(idx), pos.getZ(idx)); line.localToWorld(vp);
   if (line.userData.proj) return { line, vp, proj: { ...line.userData.meta[idx], kind: line.userData.kind } };
-  return { line, vp, point: arr[idx], dayIndex: line.userData.dayIndex };
+  // 2D flat 모드: 스냅 전 커서 시각(hit.point의 시간축 좌표 역산) — 스냅된 샘플과의 시각차(Δt)를 툴팁 배지로 보여주려는 용도.
+  // (3D 모드는 시간축이 flat이 아니라 xFlat 역함수가 무의미하므로 계산하지 않는다 → 기존 툴팁 그대로)
+  const cursorT = state.view === 'flat' ? xFlatInv(hit.point.x) : null;
+  return { line, vp, point: arr[idx], dayIndex: line.userData.dayIndex, cursorT };
 }
 function setHovered(line) {
   if (hovered === line) return;
@@ -1734,7 +1738,7 @@ addEventListener('pointermove', e => {
   if (!h) { clearHover(); return; }
   setHovered(h.line); curHover = h; placeGuides(h.vp); overlay.visible = true;
   if (h.proj) showProjTip(h.proj, e.clientX, e.clientY, false);
-  else showTip(h.dayIndex, h.point, e.clientX, e.clientY, false);
+  else showTip(h.dayIndex, h.point, e.clientX, e.clientY, false, h.cursorT);
 });
 // 클릭 = 마커 고정 토글 (그다음 드래그로 각도 바꿔가며 관찰) — 드래그(회전)와는 이동량으로 구분
 let downXY = null;
@@ -1746,7 +1750,7 @@ renderer.domElement.addEventListener('pointerup', e => {
   if (pinned) { pinned = null; tipManual = false; tip.classList.remove('pinned'); setHovered(null); tip.hidden = true; overlay.visible = false; return; }   // 고정 해제
   if (curHover) { pinned = curHover; tipManual = false; tip.classList.add('pinned'); placeGuides(curHover.vp); overlay.visible = true;
     if (curHover.proj) showProjTip(curHover.proj, e.clientX, e.clientY, true);
-    else showTip(curHover.dayIndex, curHover.point, e.clientX, e.clientY, true); }
+    else showTip(curHover.dayIndex, curHover.point, e.clientX, e.clientY, true, curHover.cursorT); }
 });
 // ---- 2D 시간축 내비게이션: 휠 = 커서 중심 줌 · 드래그 = 팬 · 더블클릭 = 전체 ------------------
 // 카메라는 고정이므로 화면 x(px) → z=0 평면의 월드 x → epoch 초로 되돌린다.
@@ -1755,7 +1759,7 @@ function flatTimeAtScreen(cx) {
   const dir = ndc.sub(camera.position).normalize();
   const k = -camera.position.z / dir.z;
   const wx = camera.position.x + dir.x * k;
-  return _fw.w0 + (wx / FLAT_W + 0.5) * (_fw.w1 - _fw.w0);
+  return xFlatInv(wx);
 }
 renderer.domElement.addEventListener('wheel', e => {
   if (state.view !== 'flat') return;
@@ -1845,11 +1849,23 @@ function powerRowsHTML(p) {
   return rows.map(([k, v]) => `<tr><td class="k">${k}</td><td>${v}</td></tr>`).join('');
 }
 
-function showTip(dayIndex, p, x, y, isPinned) {
+function showTip(dayIndex, p, x, y, isPinned, cursorT) {
   const d = new Date(p.t * 1000);
   const st = p.charging ? '⚡ 충전 중' : p.ac ? '🔌 만충/유휴' : '🔋 방전 중';
+  // 2D flat 모드만: 호버는 가장 가까운 "실측 샘플"에 스냅되는데, 샘플 지터(55~66초)로 커서 시각과
+  // 표시 시각이 최대 수십 초 어긋날 수 있다 — 초 단위 표기 + Δt 배지로 그 착시를 없앤다 (3D는 기존 그대로).
+  const flatMode = state.view === 'flat';
+  const timeStr = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}${flatMode ? ':' + String(d.getSeconds()).padStart(2, '0') : ''}`;
+  let snapBadge = '';
+  if (flatMode && cursorT != null) {
+    const dt = p.t - cursorT;                                 // 스냅된 샘플(p.t) − 커서 시각: 샘플이 과거면 음수
+    if (Math.abs(dt) >= 5) {
+      const sign = dt >= 0 ? '+' : '−';
+      snapBadge = ` <span class="snapbadge" title="호버는 가장 가까운 실측 샘플에 스냅됩니다">커서 ${sign}${Math.round(Math.abs(dt))}s</span>`;
+    }
+  }
   tip.innerHTML = `
-    <h3>${isPinned ? '📌 ' : ''}${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${dayIndex}일차</h3>
+    <h3>${isPinned ? '📌 ' : ''}${timeStr} · ${dayIndex}일차${snapBadge}</h3>
     <div><span class="big">${state.rateLevel === 'pct' ? (p.pct ?? '?') : (p.cap != null ? p.cap.toFixed(1) : (p.pct ?? '?'))}%</span> <span class="tsm">${state.rateLevel === 'pct' ? (p.cap != null ? `정밀 ${p.cap.toFixed(1)}%` : '') : `정수 ${p.pct ?? '?'}%`}</span> &nbsp; ${st}</div>
     <table>
       ${p.rawCap != null ? `<tr><td class="k">원시 용량 <small class="tsm">rawCap</small></td><td>${p.rawCap.toLocaleString()}${p.rawMax ? ` / ${p.rawMax.toLocaleString()}` : ''} mAh</td></tr>` : ''}

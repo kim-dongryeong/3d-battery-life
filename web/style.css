@@ -183,6 +183,9 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 #tip td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 #tip .pmg { display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 5px; font-size: 9px;
   font-weight: 700; color: #04110b; background: var(--good, #46d17f); vertical-align: middle; }
+/* 2D 호버 스냅 배지 — "커서 −61s": 스냅된 샘플 시각과 실제 커서 시각의 차이(|Δt|≥5s)를 회색 배지로 표시 */
+#tip .snapbadge { display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 5px; font-size: 9px;
+  font-weight: 700; color: var(--dim); background: var(--line); vertical-align: middle; }
 
 #buckets { position: fixed; z-index: 10; left: 16px; bottom: 16px; padding: 12px 14px;
   background: var(--panel); backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: 14px;
