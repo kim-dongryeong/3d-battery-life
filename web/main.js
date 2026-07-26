@@ -1268,7 +1268,40 @@ if (typeof ResizeObserver !== 'undefined') {
   const chargersEl = document.getElementById('chargers'); if (chargersEl) chargersRO.observe(chargersEl);
 }
 
+// (a) 그래프 툴팁용 chargerKey↔별명 매핑. lib/adapters.js chargerKey()와 정확히 같은 지문(브라우저 전용이라
+// 그 파일을 import 못 해 사본을 둔다 — GENERIC_NAME_RE와 같은 관례). state.chargers가 바뀔 때마다
+// renderChargers()에서 무효화한다(그 뒤가 유일한 갱신 경로).
+function pointChargerKey(p) {
+  if (p.adapterWnom == null) return null;
+  return `${p.adapterWnom}W@${p.adapterVnom != null ? Math.round(p.adapterVnom) : '?'}V/${p.familyCode || '?'}#${p.adapterId ?? '?'}`;
+}
+let _chargerMapCache = null;
+function chargerMap() {
+  if (_chargerMapCache) return _chargerMapCache;
+  const map = new Map();
+  const data = state.chargers;
+  if (data && data.chargers) {
+    for (const c of data.chargers) {
+      const entry = { label: c.label || null, base: chargerName(c) };   // chargerName()과 같은 표시명 보강(기능 B)
+      for (const k of (c.chargerKeys || [])) map.set(k, entry);
+    }
+  }
+  return _chargerMapCache = map;
+}
+// 툴팁 어댑터 정보 영역에 끼울 "충전기: ⟨별명⟩ ⟨원표시명⟩" 한 줄. 매핑 실패/데모 소스면 빈 문자열(줄 생략).
+function chargerNicknameRow(p) {
+  if (state.source !== 'real' || p.adapterWnom == null) return '';
+  const key = pointChargerKey(p);
+  const entry = key && chargerMap().get(key);
+  if (!entry) return '';
+  const val = entry.label
+    ? `<b>${escHtml(entry.label)}</b> <span class="tsm">⟨${escHtml(entry.base)}⟩</span>`
+    : escHtml(entry.base);
+  return `<tr><td class="k">충전기</td><td>${val}</td></tr>`;
+}
+
 function renderChargers() {
+  _chargerMapCache = null;   // state.chargers가 이 함수 호출 직전 항상 바뀌므로(모든 대입 지점 참조) 여기서 일괄 무효화
   const el = document.getElementById('chargers');
   el.hidden = state.source !== 'real';       // 충전기 데이터는 내 데이터 전용 — /api/charge-rates와 같은 이유
   if (el.hidden) return;
@@ -1294,7 +1327,7 @@ function renderChargers() {
     const maxPct = c.maxW != null ? Math.min(100, c.maxW / commonMax * 100) : 0;
     const avgPct = c.avgW != null ? Math.min(100, c.avgW / commonMax * 100) : null;
     return `<div class="chgRow">
-      <div class="chgHead">${chgNameHtml(c)}${badge}<span class="chgAgo" title="마지막 사용">${agoText(c.lastSeen * 1000)}</span></div>
+      <div class="chgHead">${chgNameHtml(c)}${badge}<button class="chgGraphBtn" data-graph="${escHtml(c.modelKey)}" title="그래프에서 이 충전기가 쓰인 구간으로 이동">그래프</button><span class="chgAgo" title="마지막 사용">${agoText(c.lastSeen * 1000)}</span></div>
       ${chgIdentityLine(c)}
       <div class="chgTrack">${trackW ? `<div class="chgRated" style="width:${ratedPct}%"></div>` : ''}${c.maxW != null ? `<div class="chgMax" style="width:${maxPct}%"></div>` : ''}${avgPct != null ? `<div class="chgAvgMark" style="left:${avgPct}%"></div>` : ''}</div>
       ${chgOfferedLine(c)}
@@ -1311,6 +1344,49 @@ function renderChargers() {
     if (input) { input.focus(); input.select(); }
   }
   fitPanelForChargers();
+}
+
+// (b) 카드 → 그래프 점프: 그 모델(chargerKeys)이 쓰인, lastSeen을 포함하는 마지막 연속 사용 구간을 찾아
+// 2D 시간창(state.flatWin)을 그 구간(±10% 패딩, 최소 5분)으로 줌한다. 점 스트림은 state.report.runs를
+// 전부 이어붙여(runs 자체의 8분 경계와 무관하게) chargerKey가 일치하는 점만 모으고, gap>10분이면 끊는다.
+const CHARGER_JUMP_GAP = 10 * 60;
+function chargerModelSession(modelKey) {
+  const data = state.chargers, report = state.report;
+  const row = data && (data.chargers || []).find(c => c.modelKey === modelKey);
+  if (!row || !report || !report.runs) return null;
+  const keySet = new Set(row.chargerKeys || []);
+  const pts = [];
+  for (const run of report.runs) for (const p of run.points) {
+    const k = pointChargerKey(p);
+    if (k && keySet.has(k)) pts.push(p);
+  }
+  if (!pts.length) return null;
+  pts.sort((a, b) => a.t - b.t);
+  const runsOf = [[pts[0]]];
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].t - runsOf[runsOf.length - 1][runsOf[runsOf.length - 1].length - 1].t > CHARGER_JUMP_GAP) runsOf.push([]);
+    runsOf[runsOf.length - 1].push(pts[i]);
+  }
+  const lastSeen = row.lastSeen;
+  let best = runsOf[0], bestDt = Infinity;
+  for (const r of runsOf) {
+    const t0 = r[0].t, t1 = r[r.length - 1].t;
+    const dt = (lastSeen >= t0 && lastSeen <= t1) ? 0 : Math.min(Math.abs(lastSeen - t0), Math.abs(lastSeen - t1));
+    if (dt < bestDt) { bestDt = dt; best = r; }
+  }
+  const t0 = best[0].t, t1 = best[best.length - 1].t;
+  const pad = Math.max(300, (t1 - t0) * 0.1);   // 구간의 10%, 최소 5분
+  return { t0: t0 - pad, t1: t1 + pad };
+}
+function jumpToChargerModel(modelKey) {
+  const win = chargerModelSession(modelKey);
+  if (state.chargersBig) {   // 확대 상태면 접어 그래프가 보이게
+    state.chargersBig = false;
+    try { localStorage.setItem('battChgBig', '0'); } catch { /* ignore */ }
+  }
+  if (win) state.flatWin = FV.normalizeWindow(win, flatSpanNow());   // setView()가 곧바로 rebuild()하므로 그 전에 창을 맞춰 둔다(applyFlatWin의 rAF 이중 재구축 회피)
+  setView('flat');
+  renderChargers();
 }
 
 // ---- trend over time: single/all bands · 2D line · heatmap · 3D · metric/period/delta ----
@@ -1851,7 +1927,8 @@ function powerRowsHTML(p) {
   else if (p.ac && p.adapterVnom != null) rows.push(['충전 기술', p.adapterVnom >= 8 ? `USB-C PD 추정 (${p.adapterVnom.toFixed(0)}V 협상)` : 'USB-C 5V 추정 · 비-PD 가능']);
   if (p.adapterWnom != null) rows.push(['어댑터 · ioreg 공칭(계약)', sw(p.adapterWnom, p.adapterVnom, (p.adapterWnom && p.adapterVnom) ? p.adapterWnom / p.adapterVnom * 1000 : null, false)]);
   if (p.adapterW != null) rows.push(['어댑터 · SMC 실측 PDTR', sw(p.adapterW, p.dcInV, p.dcInA != null ? p.dcInA * 1000 : null, false)]);
-  return rows.map(([k, v]) => `<tr><td class="k">${k}</td><td>${v}</td></tr>`).join('');
+  const chgRow = chargerNicknameRow(p);   // (a) 별명 카드(기능 C)와 연결 — 매핑 실패/데모 소스면 빈 문자열
+  return rows.map(([k, v]) => `<tr><td class="k">${k}</td><td>${v}</td></tr>`).join('') + chgRow;
 }
 
 function showTip(dayIndex, p, x, y, isPinned, cursorT) {
@@ -2612,6 +2689,8 @@ document.getElementById('chargers').addEventListener('click', e => {
     renderChargers();
     return;
   }
+  const gbtn = e.target.closest('[data-graph]');
+  if (gbtn) { jumpToChargerModel(gbtn.dataset.graph); return; }
   if (e.target.closest('.chgNameEdit')) return;   // 편집 중인 input 클릭 — 캐럿 이동일 뿐, 새로 시작하지 않음
   const nameEl = e.target.closest('[data-modelkey]');
   if (!nameEl) return;
