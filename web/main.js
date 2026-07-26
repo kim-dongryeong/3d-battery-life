@@ -121,6 +121,10 @@ const overlayVA = new THREE.Group(); scene.add(overlayVA);   // V/A 오버레이
 let projYMax = 100, projMaxDay = 1;   // stashed from the last buildLines so loadRates can redraw the projection alone
 let pinned = null, curHover = null;   // 마커 고정 상태 · 현재 호버 결과 {vp,point,dayIndex,line}
 let tipManual = false;                // 고정 툴팁을 드래그해 직접 배치했는지 → 그러면 마커 추적 중단
+// 핀 고정을 지오메트리 참조(pinned.line/vp)가 아니라 "포인트 정체"(t 타임스탬프)로도 기억해 둔다 —
+// rebuild()가 lineRoot를 통째로 dispose·재생성해도(줌·스크롤·2D↔3D 전환) 같은 t의 점을 새 지오메트리에서
+// 되찾아 pinned를 복원할 수 있게. null = 핀 없음. state에 둬 재빌드/전환 전 구간에서도 값이 살아남는다.
+state.pinnedT = null;
 
 // ---- helpers ------------------------------------------------------------
 const todOf = t => { const d = new Date(t * 1000); return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600; };
@@ -487,6 +491,7 @@ function rebuild() {
   document.getElementById('empty').hidden = !(r && (!r.runs || r.runs.length === 0));
   if (!r) return;
   const { yMax, maxDay, cMin, cMax } = buildLines(r);
+  restorePinnedMarker();   // 줌/스크롤/2D↔3D 전환으로 지오메트리가 새로 생겼어도 핀 고정(state.pinnedT)을 복원
   if (state.view === 'flat') { fitFlatCamera(); buildFlatAxes(yMax, yLabel()); } else buildAxes(yMax, yLabel(), maxDay, r.firstT);
   projYMax = yMax; projMaxDay = maxDay; drawProjection3D();   // 방전 예상선(현재→0%) 겹쳐 그리기
   drawNowMarker(r, yMax, maxDay);   // '현재' 위치 점 — 자다 깬 직후에도 지금 잔량을 찍어줌
@@ -1747,8 +1752,8 @@ renderer.domElement.addEventListener('pointerup', e => {
   if (!downXY) return;
   const moved = Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]); downXY = null;
   if (moved > 5) return;                                       // 드래그(회전) → 클릭 아님
-  if (pinned) { pinned = null; tipManual = false; tip.classList.remove('pinned'); setHovered(null); tip.hidden = true; overlay.visible = false; return; }   // 고정 해제
-  if (curHover) { pinned = curHover; tipManual = false; tip.classList.add('pinned'); placeGuides(curHover.vp); overlay.visible = true;
+  if (pinned) { pinned = null; state.pinnedT = null; tipManual = false; tip.classList.remove('pinned'); setHovered(null); tip.hidden = true; overlay.visible = false; return; }   // 고정 해제(빈 곳 클릭 포함 — 여기 도달 자체가 "이미 고정 중" 조건이라 별도 분기 불필요)
+  if (curHover) { pinned = curHover; state.pinnedT = curHover.proj ? null : (curHover.point ? curHover.point.t : null); tipManual = false; tip.classList.add('pinned'); placeGuides(curHover.vp); overlay.visible = true;
     if (curHover.proj) showProjTip(curHover.proj, e.clientX, e.clientY, true);
     else showTip(curHover.dayIndex, curHover.point, e.clientX, e.clientY, true, curHover.cursorT); }
 });
@@ -1904,6 +1909,38 @@ function showProjTip(pj, x, y, isPinned) {
     <div class="tsm" style="margin-top:6px; opacity:.8">과거 ${isChg ? '충전' : '방전'} 속도 기반 추정 · 실제와 다를 수 있음</div>`;
   tip.hidden = false;
   positionTip(x, y);
+}
+
+// rebuild()가 lineRoot를 다시 그린 뒤 호출 — state.pinnedT(포인트 정체)가 있으면 새 `lines`에서 같은
+// t의 점을 되찾아 마커·보조선·툴팁을 복원한다. 정확 일치 우선, 없으면 가장 가까운 t(±90초 이내)로
+// 스냅 — 최소거리 스캔이라 두 케이스가 자연히 한 로직으로 처리된다. 2D 시간창 밖으로 벗어난 점은
+// buildLines가 애초에 그 창 안의 점만 그리므로(_fw±flatPad) 여기서 못 찾는 게 정상 — 그럴 땐 툴팁/
+// 보조선만 숨기고 pinnedT는 그대로 둬(다음 리빌드에서 창에 다시 들어오면) 재표시되게 한다.
+// proj(예상선) 핀은 대상에서 제외 — 매 리빌드마다 새로 계산되는 합성값이라 정체가 없고, 기존처럼
+// drawProjection3D()가 따로 정리한다.
+function restorePinnedMarker() {
+  if (state.pinnedT == null) return;
+  let best = null, bestDt = Infinity;
+  for (const line of lines) {
+    const pts = line.userData.pts;
+    if (!pts) continue;
+    for (let i = 0; i < pts.length; i++) {
+      const dt = Math.abs(pts[i].t - state.pinnedT);
+      if (dt < bestDt) { bestDt = dt; best = { line, idx: i, point: pts[i] }; }
+    }
+  }
+  if (!best || bestDt > 90) { tip.hidden = true; overlay.visible = false; return; }   // 창 밖 등 — pinnedT는 유지, 표시만 숨김
+  const pos = best.line.geometry.attributes.position;
+  const vp = new THREE.Vector3(pos.getX(best.idx), pos.getY(best.idx), pos.getZ(best.idx));
+  best.line.localToWorld(vp);
+  const cursorT = state.view === 'flat' ? best.point.t : null;
+  pinned = { line: best.line, vp, point: best.point, dayIndex: best.line.userData.dayIndex, cursorT };
+  curHover = null; tipManual = false;
+  setHovered(best.line);
+  placeGuides(vp);
+  overlay.visible = true;
+  tip.classList.add('pinned');
+  showTip(pinned.dayIndex, pinned.point, innerWidth / 2, innerHeight / 2, true, pinned.cursorT);   // x,y는 임시값 — animate()가 매 프레임 pinned.vp 기준으로 다시 배치한다
 }
 
 // ---- data ---------------------------------------------------------------
@@ -2274,7 +2311,7 @@ document.querySelectorAll('.seg').forEach(seg => {
     seg.querySelectorAll('button').forEach(x => x.classList.remove('on'));
     b.classList.add('on');
     const group = seg.dataset.group, val = b.dataset.val;
-    if (group === 'source') { state.source = val; state.selectedPeriod = null; state.flatWin = null; load(); }   // stale period keys don't cross sources · 2D 창은 소스별 epoch라 반드시 리셋(P0-3)
+    if (group === 'source') { state.source = val; state.selectedPeriod = null; state.flatWin = null; state.pinnedT = null; load(); }   // stale period keys don't cross sources · 2D 창은 소스별 epoch라 반드시 리셋(P0-3)
     else if (group === 'ui') { applyUI(val); }
     else if (group === 'layout') { applyLayout(val); }
     else if (group === 'view') { setView(val); }
