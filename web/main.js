@@ -41,6 +41,7 @@ state.foldChargers = (() => { try { const v = localStorage.getItem('battFoldC');
 state.chargersBig = (() => { try { return localStorage.getItem('battChgBig') === '1'; } catch { return false; } })();
 state.chargers = null;   // /api/chargers 응답(내 데이터 전용) — load()에서 채움
 state.editingCharger = null;   // 인라인 별명 편집 중인 modelKey(없으면 null) — WKWebView는 prompt() 미지원이라 인라인 입력으로 대체
+state.highlightCharger = null;   // "전체에서 보기" 토글 중인 충전기 modelKey(없으면 null) — 뷰 상태라 localStorage 불필요, flat 전용(buildLines가 무시 여부 판단)
 state.xScale = (() => {
   try {
     const q = +new URLSearchParams(location.search).get('xs');   // ?xs=2 deep-link (shareable view)
@@ -118,6 +119,7 @@ const projGroup = new THREE.Group(); scene.add(projGroup);   // 방전 예상선
 const nowGroup = new THREE.Group(); scene.add(nowGroup);     // '현재' 위치 점(실시간 잔량) — 잔량 모드에서 항상
 const intervalGroup = new THREE.Group(); scene.add(intervalGroup);   // 구간 전력량 강조 밴드(2D 시간축)
 const overlayVA = new THREE.Group(); scene.add(overlayVA);   // V/A 오버레이(전력 W · 2D 시간축 전용)
+const hlBandGroup = new THREE.Group(); scene.add(hlBandGroup);   // 카드 "전체에서 보기" 하이라이트 상단 밴드(2D 전용, state.highlightCharger)
 let projYMax = 100, projMaxDay = 1;   // stashed from the last buildLines so loadRates can redraw the projection alone
 let pinned = null, curHover = null;   // 마커 고정 상태 · 현재 호버 결과 {vp,point,dayIndex,line}
 let tipManual = false;                // 고정 툴팁을 드래그해 직접 배치했는지 → 그러면 마커 추적 중단
@@ -298,6 +300,9 @@ const CURVE_C = {
 };
 const CC = () => CURVE_C[state.theme] || CURVE_C.dark;
 const stateColor = p => (p.charging ? CC().chg : (p.ac ? CC().full : CC().dis));
+// 하이라이트 오버레이(카드 "전체에서 보기") — 비대상 포인트는 색축과 무관하게 회색·저투명도로 눌러 배경화한다(state.highlightCharger, flat 전용).
+const HL_DIM_OPACITY = 0.16;
+const hlDimColor = () => new THREE.Color(TH().scaffold);
 
 // ---- V/A 오버레이 팔레트 (전력 W · 2D 시간축 전용) ------------------------------------------
 // 기존 팔레트(dis 적주황·chg 초록·full 청회·lpm 노랑·0선 청록·accent 파랑)와 겹치지 않도록 보라·마젠타 대역만 사용.
@@ -352,6 +357,7 @@ function buildLines(report) {
   if (tip) tip.hidden = true;
   overlay.visible = false; pinned = null; curHover = null; tipManual = false; if (tip) tip.classList.remove('pinned');   // clear stale hover/pinned marker on rebuild
   disposeGroup(lineRoot); lines = [];
+  disposeGroup(hlBandGroup); hlBandGroup.visible = false;   // 하이라이트 상단 밴드 — 조건 맞으면 아래서 다시 채움
   const runs = report.runs || [];
   if (!runs.length) return { yMax: 100, maxDay: 1, cMin: null, cMax: null };
 
@@ -378,6 +384,10 @@ function buildLines(report) {
     flatStride = Math.max(1, Math.ceil(total * frac / 50000));
   }
   _flatStride = flatStride;   // V/A 오버레이(drawOverlayVA)도 같은 다운샘플 간격을 재사용
+  // 카드 "전체에서 보기" 하이라이트 — flat 전용(3D는 무시). 대상 chargerKey 집합을 미리 구해 포인트별로 대조한다.
+  const highlightOn = flat && state.highlightCharger != null;
+  const hlKeySet = highlightOn ? chargerKeySetFor(state.highlightCharger) : null;
+  const hlSegs = highlightOn ? [] : null;   // 상단 밴드용 대상 연속 구간 [t0,t1] 목록
   const numeric = state.color !== 'state' && state.color !== 'lowPower';   // 'state'/'lowPower' are categorical, not ramped
   let cMin = null, cMax = null;
   if (numeric) {
@@ -407,15 +417,17 @@ function buildLines(report) {
   for (const run of runs) {
     ri++;
     const rates = runRates ? runRates[ri] : null;
-    let pos = [], col = [], pts = [], curDay = null, pi = -1;
+    let pos = [], col = [], pts = [], curDay = null, curHi = null, pi = -1;
     const flush = () => {
       if (pos.length >= 6) {                                    // >=2 vertices
         const g = new THREE.BufferGeometry();
         g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
         g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-        const line = new THREE.Line(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95 }));
+        const dimmed = highlightOn && curHi === false;           // 하이라이트 중 비대상 세그먼트 — 선 전체를 저투명도로
+        const line = new THREE.Line(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: dimmed ? HL_DIM_OPACITY : 0.95 }));
         line.userData = { run, pts, dayIndex: curDay };
         lineRoot.add(line); lines.push(line);
+        if (highlightOn && curHi === true && pts.length) hlSegs.push([pts[0].t, pts[pts.length - 1].t]);   // 상단 밴드용 대상 구간 기록
       }
       pos = []; col = []; pts = [];
     };
@@ -427,18 +439,34 @@ function buildLines(report) {
       if (yv == null || !Number.isFinite(yv)) { flush(); continue; }   // 값 없는 구간(예: 앱 미실행 시 systemW=null)은 선을 끊는다 — 빈 구간을 직선으로 잇지 않음
       const d = dayOfT(p.t);
       if (!flat && curDay !== null && d !== curDay) flush();    // 3D만 자정 분할 (2D는 시간축이 이어짐)
-      curDay = d;
+      const hi = highlightOn ? !!(hlKeySet && hlKeySet.has(pointChargerKey(p))) : null;
+      if (highlightOn && curHi !== null && hi !== curHi) flush();   // 대상/비대상 전환 지점도 끊는다 — 세그먼트가 균일해야 dim을 세그먼트 단위(재질 opacity)로 걸 수 있다
+      curDay = d; curHi = hi;
       if (flat) pos.push(xFlat(p.t), yFromVal(yv, yMax), 0);                                    // X=연속 시간, Z=0 평면
       else pos.push(xFromTod(todOf(p.t)), yFromVal(yv, yMax), zFromDay(d, maxDay));             // X=시각, Y=값, Z=날짜(점별)
-      const c = numeric
+      const rawC = numeric
         ? ramp(cMax > cMin && p[state.color] != null ? (p[state.color] - cMin) / (cMax - cMin) : 0.5)
         : state.color === 'lowPower' ? (p.lowPower ? CC().lpm : CC().lpmOff)
           : stateColor(p);
+      const c = (highlightOn && hi === false) ? hlDimColor() : rawC;   // 비대상은 색축 결과를 무시하고 회색으로
       col.push(c.r, c.g, c.b);
       if (state.y === 'rate') p._rate = yv;   // stash the signed rate so the hover tooltip can show it
       pts.push(p);
     }
     flush();
+  }
+  if (highlightOn) {
+    hlBandGroup.visible = true;
+    const bandY = Y + 0.6;
+    for (const [ts0, ts1] of hlSegs) {
+      const x0 = xFlat(Math.max(ts0, _fw.w0)), x1 = xFlat(Math.min(ts1, _fw.w1));
+      if (!(x1 > x0)) continue;
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(x1 - x0, 0.4),
+        new THREE.MeshBasicMaterial({ color: CC().chg, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }));
+      m.position.set((x0 + x1) / 2, bandY, 0.03);
+      hlBandGroup.add(m);
+    }
   }
   return { yMax, maxDay, cMin, cMax };
 }
@@ -1288,6 +1316,16 @@ function chargerMap() {
   }
   return _chargerMapCache = map;
 }
+// modelKey → chargers 배열의 원본 행(chargerKeys 포함) — chargerModelSession(줌)·하이라이트(buildLines) 공용 조회.
+function chargerRowByModel(modelKey) {
+  const data = state.chargers;
+  return (data && (data.chargers || []).find(c => c.modelKey === modelKey)) || null;
+}
+// modelKey에 속한 chargerKey 집합 — buildLines가 포인트별 하이라이트 소속 판정에 쓴다.
+function chargerKeySetFor(modelKey) {
+  const row = modelKey && chargerRowByModel(modelKey);
+  return row ? new Set(row.chargerKeys || []) : null;
+}
 // 툴팁 어댑터 정보 영역에 끼울 "충전기: ⟨별명⟩ ⟨원표시명⟩" 한 줄. 매핑 실패/데모 소스면 빈 문자열(줄 생략).
 function chargerNicknameRow(p) {
   if (state.source !== 'real' || p.adapterWnom == null) return '';
@@ -1320,14 +1358,20 @@ function renderChargers() {
   }
   const totalWh = rows.reduce((s, c) => s + (c.energyWh || 0), 0);
   const commonMax = Math.max(1, ...rows.map(c => Math.max(chgTrackMaxW(c), c.maxW || 0)));   // 카드 내 공통 스케일 → 크로스 비교
+  // (d) "전체에서 보기" 하이라이트 중이면 카드 상단에 배너로 알려주고 해제 버튼을 둔다 — 토글 버튼 재클릭 외의 해제 경로.
+  const hlRow = state.highlightCharger ? chargerRowByModel(state.highlightCharger) : null;
+  const hlBanner = state.highlightCharger
+    ? `<div class="chgHlBanner">전체에서 강조 중: <b>${escHtml(hlRow ? (hlRow.label || chargerName(hlRow)) : state.highlightCharger)}</b><button class="chgUnhlBtn" data-unhl title="하이라이트 해제">✕ 해제</button></div>`
+    : '';
   const body = rows.map(c => {
     const badge = c.isPowerBank ? '<span class="pbadge">보조배터리</span>' : '';
     const trackW = chgTrackMaxW(c);
     const ratedPct = trackW ? Math.min(100, trackW / commonMax * 100) : 0;
     const maxPct = c.maxW != null ? Math.min(100, c.maxW / commonMax * 100) : 0;
     const avgPct = c.avgW != null ? Math.min(100, c.avgW / commonMax * 100) : null;
+    const hlOn = state.highlightCharger === c.modelKey;
     return `<div class="chgRow">
-      <div class="chgHead">${chgNameHtml(c)}${badge}<button class="chgGraphBtn" data-graph="${escHtml(c.modelKey)}" title="그래프에서 이 충전기가 쓰인 구간으로 이동">그래프</button><span class="chgAgo" title="마지막 사용">${agoText(c.lastSeen * 1000)}</span></div>
+      <div class="chgHead">${chgNameHtml(c)}${badge}<button class="chgGraphBtn" data-graph="${escHtml(c.modelKey)}" title="그래프에서 이 충전기가 쓰인 구간으로 이동">그래프</button><button class="chgGraphBtn chgGraphAllBtn${hlOn ? ' on' : ''}" data-graphall="${escHtml(c.modelKey)}" title="전체 시간축에서 이 충전기 사용 구간을 강조 표시">전체에서 보기</button><span class="chgAgo" title="마지막 사용">${agoText(c.lastSeen * 1000)}</span></div>
       ${chgIdentityLine(c)}
       <div class="chgTrack">${trackW ? `<div class="chgRated" style="width:${ratedPct}%"></div>` : ''}${c.maxW != null ? `<div class="chgMax" style="width:${maxPct}%"></div>` : ''}${avgPct != null ? `<div class="chgAvgMark" style="left:${avgPct}%"></div>` : ''}</div>
       ${chgOfferedLine(c)}
@@ -1338,6 +1382,7 @@ function renderChargers() {
   }).join('');
   el.innerHTML = `<h2>${cFold}${cBig}내 충전기·보조배터리</h2>` +
     `<div class="note">충전기 ${rows.length}개 · 총 공급 ${totalWh.toFixed(1)} Wh</div>` +
+    hlBanner +
     body;
   if (state.editingCharger) {   // 인라인 편집 입력 자동 포커스+select (렌더마다 새 엘리먼트라 다시 잡아줘야 함)
     const input = el.querySelector('.chgNameEdit');
@@ -1351,8 +1396,8 @@ function renderChargers() {
 // 전부 이어붙여(runs 자체의 8분 경계와 무관하게) chargerKey가 일치하는 점만 모으고, gap>10분이면 끊는다.
 const CHARGER_JUMP_GAP = 10 * 60;
 function chargerModelSession(modelKey) {
-  const data = state.chargers, report = state.report;
-  const row = data && (data.chargers || []).find(c => c.modelKey === modelKey);
+  const report = state.report;
+  const row = chargerRowByModel(modelKey);
   if (!row || !report || !report.runs) return null;
   const keySet = new Set(row.chargerKeys || []);
   const pts = [];
@@ -1386,6 +1431,24 @@ function jumpToChargerModel(modelKey) {
   }
   if (win) state.flatWin = FV.normalizeWindow(win, flatSpanNow());   // setView()가 곧바로 rebuild()하므로 그 전에 창을 맞춰 둔다(applyFlatWin의 rAF 이중 재구축 회피)
   setView('flat');
+  renderChargers();
+}
+
+// (c) 카드 "전체에서 보기" 토글: 그 모델의 사용 구간을 전체 시간축(flat, flatWin=null)에서 dim 오버레이로
+// 하이라이트한다(buildLines 참고). 같은 모델을 다시 누르면 해제 — 3D에서 눌러도 flat으로 전환한다(3D는 하이라이트 무시).
+function toggleHighlightCharger(modelKey) {
+  if (state.highlightCharger === modelKey) {
+    state.highlightCharger = null;   // 토글 해제 — 뷰는 바꾸지 않는다
+    rebuild();
+  } else {
+    state.highlightCharger = modelKey;
+    state.flatWin = null;   // 하이라이트는 전체 구간에서 봐야 의미가 있다 — setView('flat')가 곧 rebuild()하므로 그 전에 맞춰 둔다
+    if (state.chargersBig) {   // 확대 상태면 접어 그래프가 보이게 (jumpToChargerModel과 동일 관례)
+      state.chargersBig = false;
+      try { localStorage.setItem('battChgBig', '0'); } catch { /* ignore */ }
+    }
+    setView('flat');
+  }
   renderChargers();
 }
 
@@ -2388,7 +2451,7 @@ document.querySelectorAll('.seg').forEach(seg => {
     seg.querySelectorAll('button').forEach(x => x.classList.remove('on'));
     b.classList.add('on');
     const group = seg.dataset.group, val = b.dataset.val;
-    if (group === 'source') { state.source = val; state.selectedPeriod = null; state.flatWin = null; state.pinnedT = null; load(); }   // stale period keys don't cross sources · 2D 창은 소스별 epoch라 반드시 리셋(P0-3)
+    if (group === 'source') { state.source = val; state.selectedPeriod = null; state.flatWin = null; state.pinnedT = null; state.highlightCharger = null; load(); }   // stale period keys don't cross sources · 2D 창은 소스별 epoch라 반드시 리셋(P0-3) · 충전기 modelKey도 소스별이라 함께 리셋
     else if (group === 'ui') { applyUI(val); }
     else if (group === 'layout') { applyLayout(val); }
     else if (group === 'view') { setView(val); }
@@ -2691,6 +2754,9 @@ document.getElementById('chargers').addEventListener('click', e => {
   }
   const gbtn = e.target.closest('[data-graph]');
   if (gbtn) { jumpToChargerModel(gbtn.dataset.graph); return; }
+  const gabtn = e.target.closest('[data-graphall]');
+  if (gabtn) { toggleHighlightCharger(gabtn.dataset.graphall); return; }
+  if (e.target.closest('[data-unhl]')) { state.highlightCharger = null; rebuild(); renderChargers(); return; }
   if (e.target.closest('.chgNameEdit')) return;   // 편집 중인 input 클릭 — 캐럿 이동일 뿐, 새로 시작하지 않음
   const nameEl = e.target.closest('[data-modelkey]');
   if (!nameEl) return;
