@@ -2552,6 +2552,10 @@ document.getElementById('gear').addEventListener('click', () => {   // ⚙ 뷰�
 function setView(v) {
   state.view = v === 'flat' ? 'flat' : '3d';
   try { localStorage.setItem('battView', state.view); } catch { /* ignore */ }
+  // 프로그램 호출(카드 '그래프'/'전체에서 보기' 등)로 전환될 때 '보기' 세그 토글의 .on을 동기화 —
+  // 안 하면 그래프는 2D인데 토글은 3D가 켜진 채라 혼동을 준다.
+  const vseg = document.querySelector('.seg[data-group="view"]');
+  if (vseg) vseg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.val === state.view));
   if (state.view === 'flat') { controls.enabled = false; controls.autoRotate = false; fitFlatCamera(); }
   else { controls.enabled = true; camera.position.copy(HOME).multiplyScalar(0.6 + 0.4 * state.xScale); controls.target.copy(LOOK); }
   rebuild();
