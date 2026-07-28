@@ -18,6 +18,8 @@ with real charger output and energy cross-checked two ways.</p>
   <a href="https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest"><img alt="Auto-updates" src="https://img.shields.io/badge/auto--updates-built--in-brightgreen"></a>
 </p>
 
+<p align="center"><sub>macOS · Apple Silicon (Intel: core metrics only — see <a href="#install">Compatibility</a>)</sub></p>
+
 <p align="center">
   <a href="https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest">
     <img alt="Download for macOS" src="https://img.shields.io/badge/Download-macOS%20.dmg-success?style=for-the-badge&logo=apple&logoColor=white">
@@ -42,6 +44,8 @@ with real charger output and energy cross-checked two ways.</p>
 Battery apps show you a number. Joule shows you the story over time — a 3D history no other tool draws, real charger output instead of label specs, and energy measured two independent ways and cross-checked against each other.
 
 ## Feature highlights
+
+<p align="center"><sub><i>Power, charger, and cross-check figures below were measured on Apple Silicon — see <a href="#install">Compatibility</a>.</i></sub></p>
 
 ### See time, not just now
 
@@ -98,6 +102,8 @@ Built and proven on one real Mac — no rounded-up marketing figures:
 3. Launch it — it lives quietly in your menu bar.
 
 Updates arrive automatically after that. Everything stays on your Mac; nothing is ever uploaded.
+
+> **Compatibility.** Joule is developed and tested on Apple Silicon. An Intel (x86_64) build is provided and runs, but only the core battery metrics (charge %, health, cycles, discharge rate, temperature) are verified there. The power & charger analysis (wattage, adapter V/A, charger/power-bank stats, V/A overlay) reads Apple-Silicon-specific SMC keys and is **not supported/verified on Intel**. Background auto-recording requires macOS 13+ (SMAppService).
 
 ## How it measures
 

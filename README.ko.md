@@ -18,6 +18,8 @@
   <a href="https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest"><img alt="자동 업데이트" src="https://img.shields.io/badge/auto--updates-built--in-brightgreen"></a>
 </p>
 
+<p align="center"><sub>macOS · Apple Silicon (인텔: 기본 지표만 — <a href="#설치">호환성</a> 참고)</sub></p>
+
 <p align="center">
   <a href="https://github.com/kim-dongryeong/joule-battery-power-charging-analyzer/releases/latest">
     <img alt="macOS 다운로드" src="https://img.shields.io/badge/Download-macOS%20.dmg-success?style=for-the-badge&logo=apple&logoColor=white">
@@ -42,6 +44,8 @@
 배터리 앱은 숫자를 보여줍니다. Joule은 시간에 걸친 이야기를 보여줍니다 — 어떤 앱도 그리지 않는 3D 이력, 라벨이 아닌 실제 충전기 출력, 그리고 서로 다른 두 방식으로 재서 교차검증한 전력량.
 
 ## 주요 기능
+
+<p align="center"><sub><i>아래 전력·충전기 교차검증 수치는 Apple Silicon 기준입니다 — <a href="#설치">호환성</a> 참고.</i></sub></p>
 
 ### '지금'이 아니라 '시간'을 봅니다
 
@@ -98,6 +102,8 @@
 3. 실행 — 메뉴바에 상주합니다.
 
 그 이후의 업데이트는 자동입니다. 모든 데이터는 맥 안에만 있고 아무것도 업로드되지 않습니다.
+
+> **호환성.** Joule은 Apple Silicon에서 개발·검증되었습니다. 인텔(x86_64) 빌드도 제공되며 실행되지만, **배터리 기본 지표(잔량·건강도·사이클·방전 속도·온도)만** 검증되었습니다. 전력·충전 분석(전력 W, 어댑터 V/A, 충전기·보조배터리 통계, V/A 오버레이)은 Apple Silicon 전용 SMC 키를 읽어 **인텔에서는 지원·검증되지 않습니다.** 백그라운드 자동 기록은 macOS 13+ 필요.
 
 ## 측정 원리
 
