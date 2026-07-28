@@ -118,7 +118,7 @@ Joule은 전력을 세 가지 독립 방식(수지 추정·macOS ioreg·PPBR 방
 아니요 — 60초 샘플링은 무시할 수준입니다.
 
 **어떤 기종에서 돌아가나요?**
-macOS · Apple Silicon & Intel. Joule은 ioreg·ps에 더해 SMC를 직접 읽습니다 — sudo도 커널 확장도 없이.
+macOS · Apple Silicon (인텔도 실행되나 기본 지표만 — [호환성](#설치) 참고). Joule은 ioreg·ps에 더해 SMC를 직접 읽습니다 — sudo도 커널 확장도 없이.
 
 ---
 

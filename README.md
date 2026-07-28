@@ -118,7 +118,7 @@ Yes — it never leaves your Mac. Nothing is uploaded, ever.
 No meaningfully — sampling once every 60 seconds is negligible.
 
 **What does Joule need to run?**
-macOS · Apple Silicon & Intel. Joule reads `ioreg`/`ps` plus the SMC directly — no `sudo`, no kernel extensions.
+macOS · Apple Silicon (Intel runs, core metrics only — see [Compatibility](#install)). Joule reads `ioreg`/`ps` plus the SMC directly — no `sudo`, no kernel extensions.
 
 ---
 
