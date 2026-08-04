@@ -456,6 +456,59 @@ test('l) reconcileLabels: 겹침이 전부 0이면 라벨은 그대로 유지(�
   assert.equal(labels['aabbccdd#0|pd charger|c99'], 'ghost', '겹침 0이면 라벨 자체는 유지(다만 현재 모델에 없어 화면엔 안 보임)');
 });
 
+// 2026-08-04 kdr 실사고 재현: 연속 AC run 안에서 물리적으로 다른 두 충전기(Apple 35W#28699와
+// Xtorm 보조배터리 id0 'pd charger')가 인접하면, 옛 buildSessionLinks는 tech/family/구체이름이 모두
+// 같으면(둘 다 e000400a, 둘 다 usbc-pd, 한쪽 이름이 일반명이라 nameDiffers도 false) 그냥 union해
+// 버렸다 — 결과적으로 id0 버킷(Xtorm의 다른 계약들까지 전부)이 Apple 모델에 붕괴했다. 이제
+// hasConcreteId 게이트로 "한쪽이라도 구체 adapterId가 있으면 세션 병합 안 함"을 강제하므로, 이 인접은
+// 더 이상 연결되지 않고 Apple(35W#28699)과 Xtorm(id0 67W)은 별도 모델로 남아야 한다.
+test('m) 세션 병합 방지: 같은 run에 구체 id(Apple 35W#28699)와 id0(Xtorm pd charger 67W)가 인접해도 두 모델로 분리', () => {
+  const FAM = 'e000400a', AID = 28699, NAME = '35W USB-C Power Adapter';
+  const t0 = 40_000_000;
+  const adapters = {
+    [`35W@20V/${FAM}#${AID}`]: { name: NAME, manufacturer: 'Apple Inc.' },
+    [`67W@20V/${FAM}#0`]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 3.25 }, { v: 20.3, a: 3.3 }] },
+  };
+  const samples = [
+    // Apple 35W#28699 구간(10분)
+    ...acRun({ t0, n: 10, adapter: { adapterWnom: 35, adapterVnom: 20, familyCode: FAM, adapterId: AID, adapterName: NAME }, adapterW: 34 }),
+    // 바로 다음 틱부터 같은 연속 AC run 안에서 Xtorm id0 'pd charger' 67W 구간(15분) — 물리적으로 다른 충전기
+    ...acRun({ t0: t0 + 10 * 60 + 60, n: 15, adapter: { adapterWnom: 67, adapterVnom: 20, familyCode: FAM, adapterId: 0, adapterName: 'pd charger' }, adapterW: 62 }),
+  ];
+  const rows = aggregateChargers(samples, adapters);
+  const apple = findByWnom(rows, 35), xtorm = findByWnom(rows, 67);
+  assert.ok(apple && xtorm, '두 계약 모두 노이즈 드롭 없이 살아있어야 함');
+  assert.notEqual(apple.modelKey, xtorm.modelKey, '구체 id(Apple)와 id0(Xtorm)는 인접해도 세션 병합되면 안 됨');
+  assert.equal(apple.name, NAME);
+  assert.equal(apple.manufacturer, 'Apple Inc.');
+  assert.equal(apple.profiles.length, 1);
+  assert.equal(xtorm.profiles.length, 1);
+  assert.equal(xtorm.profiles[0].wnom, 67);
+});
+
+// 대조군: id0끼리는(양쪽 다 구체 id 없음) 같은 run 재협상이면 여전히 한 모델로 묶여야 한다 — 이 규칙이
+// buildSessionLinks 자체를 무력화한 게 아니라 "구체 id가 낀 쌍"만 걸러낸다는 걸 확인.
+test('n) 세션 병합 유지: id0끼리(메뉴 지문 다른 67W↔45W)는 같은 run 재협상이면 여전히 한 모델', () => {
+  const FAM = 'e000400a';
+  const K67 = '67W@20V/e000400a#0', K45 = '45W@20V/e000400a#0';
+  const adapters = {
+    [K67]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 3.25 }, { v: 20.3, a: 3.3 }] },
+    [K45]: { name: 'pd charger', hvcMenu: [{ v: 20, a: 2.25 }] },
+  };
+  const t0 = 41_000_000;
+  const samples = [
+    ...acRun({ t0, n: 15, adapter: { adapterWnom: 67, adapterVnom: 20, familyCode: FAM, adapterId: 0, adapterName: 'pd charger' }, adapterW: 62 }),
+    ...acRun({ t0: t0 + 16 * 60, n: 15, adapter: { adapterWnom: 45, adapterVnom: 20, familyCode: FAM, adapterId: 0, adapterName: 'pd charger' }, adapterW: 40 }),
+  ];
+  const rows = aggregateChargers(samples, adapters);
+  assert.equal(rows.length, 1, 'id0 67W와 id0 45W(다른 메뉴 지문)는 같은 run 재협상이면 여전히 한 모델로 유지돼야 함');
+  const row = rows[0];
+  assert.equal(row.profiles.length, 2);
+  assert.ok(row.profiles.some(p => p.wnom === 67));
+  assert.ok(row.profiles.some(p => p.wnom === 45));
+  assert.equal(row.minutes, 15 + 15);
+});
+
 test('j) 플러그 세션 귀속: run 안에서 tech가 다르면(usb host 5V → PD 27W) 병합하지 않고 분리', () => {
   const t0 = 23_000_000;
   const samples = [
