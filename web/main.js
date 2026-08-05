@@ -262,20 +262,35 @@ function buildFlatAxes(valMax, valLabel) {
   }
   const xt = makeLabel(tr('날짜/시간 →'), { color: TH().titleC }); xt.position.set(0, -2.6, 0); sceneRoot.add(xt);   // 시간축 제목도 항상 플롯 하단(부호축 중앙 아님)
 
-  // V/A 오버레이 보조축 — 전력 W · 2D 전용. 플롯 우변(x1) 바깥에 왼쪽 값축과 별개로 무부호 0..max 5분할.
+  // V/A 오버레이 보조축 — 전력 W · 2D 전용. 플롯 우변(x1) 바깥에 왼쪽 값축과 별개로 눈금.
   // 색으로 축↔선을 매칭(별도 범례 불필요) — 배터리/둘다는 batV·batA 색, 어댑터 단독은 adpV·adpA 색.
+  // V는 voltage/dcInV가 항상 양수라 무부호 0..vMax 5분할 그대로. A는 배터리 전류(부호 있음: 음수=방전)가
+  // 켜져 있으면(ovA==='bat'|'both') 부호축(−aMax..+aMax, 0=플롯 세로 중앙)으로 그린다 — 방전이 0선 아래로
+  // 내려가야 눈에 보이므로. 어댑터 단독(ovA==='adp')이면 어댑터 전류가 항상 양수라 기존처럼 0..aMax 유지.
+  // 눈금 간격은 5등분 반올림이 아니라 '보기 좋은 정수 스텝'(1/2/5/10×10^n)으로 골라 중복 라벨을 없앤다.
   if (state.y === 'watts' && (state.ovV !== 'off' || state.ovA !== 'off')) {
     const ovc = OVC(), or = overlayRanges();
-    const axisTick = (xOff, maxVal, unit, color) => {
+    const niceStep = raw => {
+      const mag = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+      const norm = raw / mag;
+      return (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+    };
+    const axisTick = (xOff, maxVal, unit, color, signed) => {
       const css = hexCss(color);
-      for (let i = 0; i <= 5; i++) {
-        const v = maxVal * i / 5, y = Y * i / 5;
+      const step = niceStep(maxVal / 5);
+      const vMin = signed ? -maxVal : 0;
+      for (let i = 0; ; i++) {
+        const v = vMin + i * step;
+        if (v > maxVal + 1e-6) break;
+        const vv = Math.abs(v) < 1e-9 ? 0 : v;                          // -0 방지
+        const y = signed ? Y / 2 + (vv / maxVal) * (Y / 2) : (vv / maxVal) * Y;   // 부호축: 0=Y/2(플롯 중앙)
         sceneRoot.add(axisLine([xOff - 0.3, y, 0], [xOff, y, 0], color));
-        const s = makeLabel(`${Math.round(v)}${unit}`, { size: 24, color: css }); s.position.set(xOff + 1.3, y, 0); sceneRoot.add(s);
+        const s = makeLabel(`${Math.round(vv)}${unit}`, { size: 24, color: css }); s.position.set(xOff + 1.3, y, 0); sceneRoot.add(s);
       }
     };
-    if (state.ovV !== 'off') axisTick(x1 + 2.2, or.vMax, 'V', state.ovV === 'adp' ? ovc.adpV : ovc.batV);
-    if (state.ovA !== 'off') axisTick(state.ovV !== 'off' ? x1 + 5.2 : x1 + 2.2, or.aMax, 'A', state.ovA === 'adp' ? ovc.adpA : ovc.batA);
+    const aSigned = state.ovA === 'bat' || state.ovA === 'both';
+    if (state.ovV !== 'off') axisTick(x1 + 2.2, or.vMax, 'V', state.ovV === 'adp' ? ovc.adpV : ovc.batV, false);
+    if (state.ovA !== 'off') axisTick(state.ovV !== 'off' ? x1 + 5.2 : x1 + 2.2, or.aMax, 'A', state.ovA === 'adp' ? ovc.adpA : ovc.batA, aSigned);
   }
 }
 
@@ -2375,13 +2390,16 @@ function drawIntervalOverlay() {
 
 // ── V/A 오버레이 (전력 W · 2D 시간축 전용) ──────────────────────────────────────────────────
 // 배터리 V/A(voltage/amperage)·어댑터 V/A(dcInV/dcInA)를 가는 선으로 겹쳐 그린다. 배터리=실선,
-// 어댑터=점선(계열 내 구분), 우측 보조축(OVC 색)과 짝지어 항상 0..max 무부호 크기로 스케일한다.
+// 어댑터=점선(계열 내 구분), 우측 보조축(OVC 색)과 짝지어 스케일한다. V는 항상 0..vMax 무부호(전압은
+// 늘 양수). A는 배터리 전류가 켜져 있으면(ovA==='bat'|'both') 부호축(−aMax..+aMax, 0=플롯 세로 중앙)
+// 이라 배터리 전류(mA, 부호 있음: 음수=방전)를 절대값 없이 그대로 스케일 — 방전 구간이 0선 아래로
+// 내려간다. 어댑터 전류(dcInA)는 항상 양수 공급값이라 부호축이어도 그대로 위쪽 절반만 채운다.
 function drawOverlayVA() {
   disposeGroup(overlayVA);
   overlayVA.visible = state.view === 'flat' && state.y === 'watts' && (state.ovV !== 'off' || state.ovA !== 'off');
   if (!overlayVA.visible || !state.report) return;
   const ovc = OVC(), or = overlayRanges();
-  const addSeries = (field, maxVal, color, dashed, scale) => {
+  const addSeries = (field, maxVal, color, dashed, scale, signed) => {
     for (const run of state.report.runs) {
       let pos = [], pi = -1;
       const flush = () => {
@@ -2403,15 +2421,17 @@ function drawOverlayVA() {
         const raw = p[field];
         if (raw == null) { flush(); continue; }                              // 값 없는 구간(앱 미실행 등)은 선을 끊는다
         const v = scale ? scale(raw) : raw;
-        pos.push(xFlat(p.t), (v / maxVal) * Y, 0.03);                        // 부호축 여부와 무관하게 항상 0..Y 무부호
+        const y = signed ? Y / 2 + (v / maxVal) * (Y / 2) : (v / maxVal) * Y;   // 부호축: 0=Y/2(플롯 중앙)
+        pos.push(xFlat(p.t), y, 0.03);
       }
       flush();
     }
   };
-  if (state.ovV === 'bat' || state.ovV === 'both') addSeries('voltage', or.vMax, ovc.batV, false);
-  if (state.ovV === 'adp' || state.ovV === 'both') addSeries('dcInV', or.vMax, ovc.adpV, true);
-  if (state.ovA === 'bat' || state.ovA === 'both') addSeries('amperage', or.aMax, ovc.batA, false, raw => Math.abs(raw) / 1000);   // mA → A(크기만, 부호는 W 그래프가 이미 표현)
-  if (state.ovA === 'adp' || state.ovA === 'both') addSeries('dcInA', or.aMax, ovc.adpA, true, raw => Math.abs(raw));
+  const aSigned = state.ovA === 'bat' || state.ovA === 'both';
+  if (state.ovV === 'bat' || state.ovV === 'both') addSeries('voltage', or.vMax, ovc.batV, false, null, false);
+  if (state.ovV === 'adp' || state.ovV === 'both') addSeries('dcInV', or.vMax, ovc.adpV, true, null, false);
+  if (state.ovA === 'bat' || state.ovA === 'both') addSeries('amperage', or.aMax, ovc.batA, false, raw => raw / 1000, aSigned);   // mA → A, 부호 유지(음수=방전)
+  if (state.ovA === 'adp' || state.ovA === 'both') addSeries('dcInA', or.aMax, ovc.adpA, true, raw => Math.abs(raw), aSigned);
 }
 
 {
