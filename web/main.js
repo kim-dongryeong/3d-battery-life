@@ -50,6 +50,13 @@ state.xScale = (() => {
   } catch { return 1; }
 })();
 X = X_BASE * state.xScale;   // apply the saved time-axis stretch before the first build
+state.yScale = (() => {
+  try {
+    const q = +new URLSearchParams(location.search).get('ys');   // ?ys=2 deep-link (shareable view)
+    if (q >= 1 && q <= 4) return q;
+    return Math.min(4, Math.max(1, +localStorage.getItem('battYScale') || 1));
+  } catch { return 1; }
+})();
 // ---- 보기 모드: '3d'(시각×날짜) | 'flat'(연속 시간축 2D). 딥링크 ?view=flat 우선.
 state.view = (() => {
   try {
@@ -338,7 +345,7 @@ function overlayRanges() {
       if (p.t < _fw.w0 || p.t > _fw.w1) continue;
       if (vBat && p.voltage != null) vMax = Math.max(vMax, p.voltage);
       if (vAdp && p.dcInV != null) vMax = Math.max(vMax, p.dcInV);
-      if (aBat && p.amperage != null) aMax = Math.max(aMax, Math.abs(p.amperage) / 1000);
+      if (aBat) { const ma = batAmpMa(p); if (ma != null) aMax = Math.max(aMax, Math.abs(ma) / 1000); }
       if (aAdp && p.dcInA != null) aMax = Math.max(aMax, Math.abs(p.dcInA));
     }
   }
@@ -427,6 +434,7 @@ function buildLines(report) {
     // 실제 최대값을 축으로 — p98은 60W 급속충전 플라토 같은 진짜 고전력 구간을 축 위로 잘라 평평하게 그렸음
     yMax = Math.max(5, vals.length ? vals.reduce((m, v) => v > m ? v : m, -Infinity) : 5);
   }
+  if (state.view === 'flat' && state.yScale > 1) yMax = yMax / state.yScale;   // 2D 값축 확대: 상단을 낮춰 값이 더 높이 뻗게
 
   let ri = -1;
   for (const run of runs) {
@@ -511,6 +519,14 @@ function battWatt(p) {
   return bal;
 }
 const wattValueOf = p => state.wattsRail === 'battery' ? battWatt(p) : p[wattField()];
+// 배터리 전류(mA, 부호 有: 음수=방전) — 선택한 '배터리 전력 측정 방식'과 일관되게:
+//   ioreg = 셀 직접 실측 amperage(진짜 전압·전류 쌍) · 수지/혼합 = 그 방식의 W를 ioreg 전압으로 나눈 파생(SMC 0.5초라 반응 빠름).
+// A 오버레이가 W 그래프·팝오버 방식별 표와 같은 값을 보이도록 축 상한(overlayRanges)과 선(drawOverlayVA)이 이 헬퍼를 공유.
+const batAmpMa = p => {
+  if (state.powerMethod === 'ioreg') return p.amperage;
+  const v = p.voltage, w = battWatt(p);
+  return (v && w != null) ? w / v * 1000 : null;
+};
 // 부호축(0을 중앙, 아래=음수)이 필요한 모드: 잔량 변화율 · 배터리 전력
 const isSignedY = () => state.y === 'rate' || (state.y === 'watts' && state.wattsRail === 'battery');
 // legend gradients follow the same per-theme curve inks as buildLines
@@ -894,6 +910,7 @@ function syncFlatUI() {
   const mini = document.getElementById('flatMini'); if (mini) mini.hidden = !on;
   const rng = document.getElementById('flatRangeGrp'); if (rng) rng.hidden = !on;
   const xs = document.getElementById('xScaleGrp'); if (xs) xs.hidden = on;        // 3D 전용 가로폭 배율
+  const ys = document.getElementById('yScaleGrp'); if (ys) ys.hidden = !on;       // 2D 전용 값축 배율
   const spinLbl = document.getElementById('spin'); if (spinLbl && spinLbl.parentElement) spinLbl.parentElement.style.visibility = on ? 'hidden' : '';   // 자동회전은 3D 전용
   const hint = document.getElementById('sceneHint');
   if (hint) hint.textContent = tr(on ? '드래그=이동 · 휠=커서 중심 줌 · 더블클릭=전체 · 아래 미니맵으로 구간 선택'
@@ -2418,7 +2435,7 @@ function drawOverlayVA() {
         pi++;
         if (p.t < _fw.w0 || p.t > _fw.w1) { flush(); continue; }              // 창 밖은 선분 단절
         if (_flatStride > 1 && (pi % _flatStride) !== 0) continue;            // buildLines와 같은 다운샘플
-        const raw = p[field];
+        const raw = typeof field === 'function' ? field(p) : p[field];       // field=문자열이면 원필드, 함수면 방식연동 파생값(배터리 A)
         if (raw == null) { flush(); continue; }                              // 값 없는 구간(앱 미실행 등)은 선을 끊는다
         const v = scale ? scale(raw) : raw;
         const y = signed ? Y / 2 + (v / maxVal) * (Y / 2) : (v / maxVal) * Y;   // 부호축: 0=Y/2(플롯 중앙)
@@ -2430,7 +2447,7 @@ function drawOverlayVA() {
   const aSigned = state.ovA === 'bat' || state.ovA === 'both';
   if (state.ovV === 'bat' || state.ovV === 'both') addSeries('voltage', or.vMax, ovc.batV, false, null, false);
   if (state.ovV === 'adp' || state.ovV === 'both') addSeries('dcInV', or.vMax, ovc.adpV, true, null, false);
-  if (state.ovA === 'bat' || state.ovA === 'both') addSeries('amperage', or.aMax, ovc.batA, false, raw => raw / 1000, aSigned);   // mA → A, 부호 유지(음수=방전)
+  if (state.ovA === 'bat' || state.ovA === 'both') addSeries(batAmpMa, or.aMax, ovc.batA, false, raw => raw / 1000, aSigned);   // 전류=선택한 전력 방식 기준(수지·ioreg·혼합), mA→A, 부호 유지(음수=방전)
   if (state.ovA === 'adp' || state.ovA === 'both') addSeries('dcInA', or.aMax, ovc.adpA, true, raw => Math.abs(raw), aSigned);
 }
 
@@ -2477,6 +2494,7 @@ document.querySelectorAll('.seg').forEach(seg => {
     else if (group === 'view') { setView(val); }
     else if (group === 'flatRange') { applyFlatRange(val); }
     else if (group === 'xScale') { setXScale(+val); }
+    else if (group === 'yScale') { setYScale(+val); }
     else if (group === 'rateWin') { state.rateWin = +val; try { localStorage.setItem('battRateWin', val); } catch { /* ignore */ } rebuild(); }
     else if (group === 'wattsRail') { state.wattsRail = val; try { localStorage.setItem('battWattsRail', val); } catch { /* ignore */ } rebuild(); }
     else if (group === 'ovV') { state.ovV = val; try { localStorage.setItem('battOvV', val); } catch { /* ignore */ } rebuild(); }
@@ -2511,7 +2529,7 @@ setInterval(() => { try { if ((localStorage.getItem('battLang') || 'ko') !== cur
 document.querySelectorAll('.seg').forEach(seg => {
   const g = seg.dataset.group;
   if (g === 'projToggle') { seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', (b.dataset.pt === 'dis' ? state.projDis : state.projChg) === 'on')); return; }
-  seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', g === 'xScale' ? +b.dataset.val === state.xScale : String(state[g]) === b.dataset.val));
+  seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', (g === 'xScale' || g === 'yScale') ? +b.dataset.val === state[g] : String(state[g]) === b.dataset.val));
 });
 
 // ?안내 — the Tauri (WKWebView) window swallows target=_blank, so show help.html in an in-app modal (works in a browser too)
@@ -2639,6 +2657,12 @@ function setXScale(v) {
   X = X_BASE * v;
   try { localStorage.setItem('battXScale', String(v)); } catch { /* ignore */ }
   camera.position.copy(HOME).multiplyScalar(0.6 + 0.4 * v); controls.target.copy(LOOK);
+  rebuild();
+}
+function setYScale(v) {
+  v = Math.min(4, Math.max(1, v));
+  state.yScale = v;
+  try { localStorage.setItem('battYScale', String(v)); } catch { /* ignore */ }
   rebuild();
 }
 
