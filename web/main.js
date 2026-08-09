@@ -6,8 +6,9 @@ import * as FV from './flatViewport.js';   // 2D 시간 창 상태 전이 (순�
 // ---- world dimensions ---------------------------------------------------
 // X = 하루 중 시각 (0..24h)  ·  Y = 배터리 %/W (높이)  ·  Z = 경과 일수 (깊이)
 // (kdr 호칭: 그가 부르는 x=날짜=내 Z · y=시각=내 X · z=잔량=내 Y — 그래프는 그대로, 명칭만 매핑)
-const X_BASE = 24, Y = 16, Z = 44;
+const X_BASE = 24, Y_BASE = 16, Z = 44;
 let X = X_BASE;                                          // effective time-axis width — stretchable via state.xScale
+let Y = Y_BASE;                                          // effective value-axis height — stretchable via state.yScale (2D 전용)
 const xFromTod = h => (h - 12) / 24 * X;                 // 0시 -> -X/2, 24시 -> +X/2
 
 // ---- 2D 연속 시간축 (state.view === 'flat') ----------------------------------------------------
@@ -65,6 +66,11 @@ state.view = (() => {
     return localStorage.getItem('battView') === 'flat' ? 'flat' : '3d';
   } catch { return '3d'; }
 })();
+// 값축 높이는 2D에서만 늘린다(3D는 Z(날짜)축과의 비례가 깨져 씬이 왜곡되므로 항상 기본 높이).
+// X(가로폭)가 xScale로 늘어나는 것과 같은 방식 — 축·격자·데이터·눈금이 전부 Y를 곱해 쓰므로
+// 이 한 값만 바꾸면 그래프 프레임 자체가 세로로 커진다.
+const applyYScale = () => { Y = Y_BASE * (state.view === 'flat' ? state.yScale : 1); };
+applyYScale();   // apply the saved value-axis stretch before the first build
 state.flatWin = null;   // 2D 보이는 시간 창 {t0,t1}(epoch 초) · null = 전체 — 전이는 web/flatViewport.js 경유만
 // deep-linkable view (shareable): ?y=pct|watts|rate · ?color=state|lowPower|tempC|loadPct|watts
 try {
@@ -127,7 +133,7 @@ const nowGroup = new THREE.Group(); scene.add(nowGroup);     // '현재' 위치 
 const intervalGroup = new THREE.Group(); scene.add(intervalGroup);   // 구간 전력량 강조 밴드(2D 시간축)
 const overlayVA = new THREE.Group(); scene.add(overlayVA);   // V/A 오버레이(전력 W · 2D 시간축 전용)
 const hlBandGroup = new THREE.Group(); scene.add(hlBandGroup);   // 카드 "전체에서 보기" 하이라이트 상단 밴드(2D 전용, state.highlightCharger)
-let projYMax = 100, projYLo = 0, projMaxDay = 1;   // stashed from the last buildLines so loadRates can redraw the projection alone
+let projYMax = 100, projMaxDay = 1;   // stashed from the last buildLines so loadRates can redraw the projection alone
 let pinned = null, curHover = null;   // 마커 고정 상태 · 현재 호버 결과 {vp,point,dayIndex,line}
 let tipManual = false;                // 고정 툴팁을 드래그해 직접 배치했는지 → 그러면 마커 추적 중단
 // 핀 고정을 지오메트리 참조(pinned.line/vp)가 아니라 "포인트 정체"(t 타임스탬프)로도 기억해 둔다 —
@@ -181,9 +187,9 @@ function axisLine(a, b, color) {
 // ---- axes / grid --------------------------------------------------------
 // X = 하루 중 시각, Y = 배터리 %/W (높이), Z = 경과 일수 (깊이)
 const zFromDay = (d, maxDay) => (d / Math.max(1, maxDay)) * Z - Z / 2;
-const yFromVal = (v, valMax, lo = 0) => isSignedY()
+const yFromVal = (v, valMax) => isSignedY()
   ? clamp((v + valMax) / (2 * (valMax > 0 ? valMax : 1)), 0, 1) * Y   // signed: −valMax→floor, 0→중앙, +valMax→top
-  : clamp((v - lo) / ((valMax - lo) > 0 ? (valMax - lo) : 1), 0, 1) * Y;   // 무부호: lo(기본 0)→바닥, valMax→천장
+  : clamp(v / (valMax > 0 ? valMax : 1), 0, 1) * Y;
 
 function buildAxes(valMax, valLabel, maxDay, firstT) {
   disposeGroup(sceneRoot);
@@ -227,16 +233,15 @@ function buildAxes(valMax, valLabel, maxDay, firstT) {
 
 // 2D 시간축 모드의 축·격자 — 세로선 = 날짜/시간 눈금(DST 안전, Intl 라벨), 가로선 = 값 눈금.
 // 전부 z=0 평면(XY). 3D buildAxes는 건드리지 않는다.
-function buildFlatAxes(valMax, valLabel, lo = 0) {
+function buildFlatAxes(valMax, valLabel) {
   disposeGroup(sceneRoot);
   const x0 = -FLAT_W / 2, x1 = FLAT_W / 2;
   const signed = isSignedY();
   const baseY = signed ? Y / 2 : 0;
 
-  // 값(가로) 격자선 + 라벨 — 3D buildAxes의 Y 눈금과 같은 수식. 무부호축은 lo(값축 확대 시 바닥이
-  // 0보다 위로 올라감)부터 시작 — 그래서 확대 중엔 맨 아래 눈금이 "0%"가 아니라 "62%"처럼 보임.
+  // 값(가로) 격자선 + 라벨 — 3D buildAxes의 Y 눈금과 같은 수식
   for (let i = 0; i <= 4; i++) {
-    const v = signed ? valMax * (i / 2 - 1) : lo + (valMax - lo) * i / 4, y = Y * i / 4;
+    const v = signed ? valMax * (i / 2 - 1) : valMax * i / 4, y = Y * i / 4;
     const mid = signed && i === 2;                            // 부호축의 0선(충전↔방전 경계)은 청록 강조
     sceneRoot.add(axisLine([x0, y, 0], [x1, y, 0], mid ? 0x4dd0c0 : (i === 0 ? TH().gMain : TH().gMinor)));
     const s = makeLabel(state.y === 'pct' ? `${Math.round(v)}%` : state.y === 'rate' ? v.toFixed(2) : `${v.toFixed(0)}W`, { size: 28, color: TH().tickC });
@@ -382,7 +387,7 @@ function buildLines(report) {
   disposeGroup(lineRoot); lines = [];
   disposeGroup(hlBandGroup); hlBandGroup.visible = false;   // 하이라이트 상단 밴드 — 조건 맞으면 아래서 다시 채움
   const runs = report.runs || [];
-  if (!runs.length) return { yMax: 100, yLo: 0, maxDay: 1, cMin: null, cMax: null };
+  if (!runs.length) return { yMax: 100, maxDay: 1, cMin: null, cMax: null };
 
   // anchor day slices at LOCAL MIDNIGHT (not the first sample's clock time) — otherwise a run
   // crossing midnight isn't split there and draws a full-width wrap line across the scene
@@ -435,31 +440,6 @@ function buildLines(report) {
     // 실제 최대값을 축으로 — p98은 60W 급속충전 플라토 같은 진짜 고전력 구간을 축 위로 잘라 평평하게 그렸음
     yMax = Math.max(5, vals.length ? vals.reduce((m, v) => v > m ? v : m, -Infinity) : 5);
   }
-  // 2D 값축 확대(state.yScale): 부호축(잔량 변화율·배터리 전력)은 0을 중심으로 대칭 축소하면 되지만,
-  // 무부호축(잔량%·시스템/어댑터 전력)은 천장(yMax)이 이미 실측 최댓값(또는 100%)에 붙어 있어 천장만
-  // 낮추면 거기 붙어 있던 값들이 그대로 눌려 잘리기만 하고 시각적으로 안 바뀐 것처럼 보인다 — 특히
-  // 잔량%처럼 늘 상단 근처를 오가는 축에서 두드러짐. 그래서 무부호축은 대신 바닥을 지금 보이는 창의
-  // 실측 최솟값 쪽으로 끌어올려, 여백을 잘라내고 파형 자체를 키운다(천장은 그대로 두어 기준을 유지).
-  let yLo = 0;
-  if (state.view === 'flat' && state.yScale > 1) {
-    if (isSignedY()) {
-      yMax = yMax / state.yScale;
-    } else {
-      const getter = state.y === 'pct' ? levelPct : wattValueOf;
-      let obsLo = Infinity;
-      for (const r of runs) for (const p of r.points) {
-        if (p.t < _fw.w0 || p.t > _fw.w1) continue;
-        const v = getter(p);
-        if (v != null && Number.isFinite(v) && v < obsLo) obsLo = v;
-      }
-      if (Number.isFinite(obsLo)) {
-        const pad = (yMax - Math.max(0, obsLo)) * 0.08;                          // 바닥에 파형이 딱 붙지 않게 8% 여유
-        const target = Math.min(yMax - 1, Math.max(0, obsLo - pad));
-        const t = (state.yScale - 1) / 3;                                        // yScale 1..4 → t 0..1
-        yLo = target * t;
-      }
-    }
-  }
 
   let ri = -1;
   for (const run of runs) {
@@ -490,8 +470,8 @@ function buildLines(report) {
       const hi = highlightOn ? !!(hlKeySet && hlKeySet.has(pointChargerKey(p))) : null;
       if (highlightOn && curHi !== null && hi !== curHi) flush();   // 대상/비대상 전환 지점도 끊는다 — 세그먼트가 균일해야 dim을 세그먼트 단위(재질 opacity)로 걸 수 있다
       curDay = d; curHi = hi;
-      if (flat) pos.push(xFlat(p.t), yFromVal(yv, yMax, yLo), 0);                                    // X=연속 시간, Z=0 평면
-      else pos.push(xFromTod(todOf(p.t)), yFromVal(yv, yMax, yLo), zFromDay(d, maxDay));             // X=시각, Y=값, Z=날짜(점별) — 3D는 yLo 항상 0
+      if (flat) pos.push(xFlat(p.t), yFromVal(yv, yMax), 0);                                    // X=연속 시간, Z=0 평면
+      else pos.push(xFromTod(todOf(p.t)), yFromVal(yv, yMax), zFromDay(d, maxDay));             // X=시각, Y=값, Z=날짜(점별)
       const rawC = numeric
         ? ramp(cMax > cMin && p[state.color] != null ? (p[state.color] - cMin) / (cMax - cMin) : 0.5)
         : state.color === 'lowPower' ? (p.lowPower ? CC().lpm : CC().lpmOff)
@@ -516,7 +496,7 @@ function buildLines(report) {
       hlBandGroup.add(m);
     }
   }
-  return { yMax, yLo, maxDay, cMin, cMax };
+  return { yMax, maxDay, cMin, cMax };
 }
 
 // ---- rebuild everything for current state -------------------------------
@@ -574,11 +554,11 @@ function rebuild() {
   const r = state.report;
   document.getElementById('empty').hidden = !(r && (!r.runs || r.runs.length === 0));
   if (!r) return;
-  const { yMax, yLo, maxDay, cMin, cMax } = buildLines(r);
+  const { yMax, maxDay, cMin, cMax } = buildLines(r);
   restorePinnedMarker();   // 줌/스크롤/2D↔3D 전환으로 지오메트리가 새로 생겼어도 핀 고정(state.pinnedT)을 복원
-  if (state.view === 'flat') { fitFlatCamera(); buildFlatAxes(yMax, yLabel(), yLo); } else buildAxes(yMax, yLabel(), maxDay, r.firstT);
-  projYMax = yMax; projYLo = yLo; projMaxDay = maxDay; drawProjection3D();   // 방전 예상선(현재→0%) 겹쳐 그리기
-  drawNowMarker(r, yMax, maxDay, yLo);   // '현재' 위치 점 — 자다 깬 직후에도 지금 잔량을 찍어줌
+  if (state.view === 'flat') { fitFlatCamera(); buildFlatAxes(yMax, yLabel()); } else buildAxes(yMax, yLabel(), maxDay, r.firstT);
+  projYMax = yMax; projMaxDay = maxDay; drawProjection3D();   // 방전 예상선(현재→0%) 겹쳐 그리기
+  drawNowMarker(r, yMax, maxDay);   // '현재' 위치 점 — 자다 깬 직후에도 지금 잔량을 찍어줌
   drawIntervalOverlay();            // 구간 전력량 넓이 음영(2D) — 창 팬/줌마다 다시 그림
   drawOverlayVA();                  // V/A 오버레이(전력 W · 2D 전용)
   ivRecompute();                    // 그래프 계열이 바뀌면 구간 전력량 결과도 그 계열로 재계산
@@ -909,7 +889,7 @@ function addProjTag(vp, text, color, yBias = 0) {
 // '현재' 위치 점: 실시간 최신 표본(서버가 /api/report 끝에 붙여줌)의 잔량을 3D에 하나 찍는다.
 // 자다 깬 직후처럼 방전 이력에 sleep 공백이 있으면 그 점은 1-포인트 run이라 선으로는 안 그려지므로
 // (buildRuns가 ≥2점만 통과), 이렇게 별도 마커로 "지금 여기"를 항상 보이게 한다. 잔량(%) 모드 전용.
-function drawNowMarker(r, yMax, maxDay, yLo = 0) {
+function drawNowMarker(r, yMax, maxDay) {
   disposeGroup(nowGroup);
   if (!r || state.source !== 'real' || state.y !== 'pct') return;
   const L = r.latest; if (!L || L.pct == null) return;
@@ -918,8 +898,8 @@ function drawNowMarker(r, yMax, maxDay, yLo = 0) {
   const lvl = state.rateLevel === 'pct' ? L.pct : (L.cap != null ? L.cap : L.pct);
   if (state.view === 'flat' && (L.t < _fw.w0 || L.t > _fw.w1)) return;   // 창 밖이면 생략
   const pos = state.view === 'flat'
-    ? new THREE.Vector3(xFlat(L.t), yFromVal(lvl, yMax, yLo), 0)
-    : new THREE.Vector3(xFromTod(todOf(L.t)), yFromVal(lvl, yMax, yLo), zFromDay(day, maxDay));   // 3D는 yLo 항상 0
+    ? new THREE.Vector3(xFlat(L.t), yFromVal(lvl, yMax), 0)
+    : new THREE.Vector3(xFromTod(todOf(L.t)), yFromVal(lvl, yMax), zFromDay(day, maxDay));
   const col = L.charging ? CC().chg : (L.ac ? CC().full : CC().dis);   // 상태색과 일치
   const dot = new THREE.Mesh(new THREE.SphereGeometry(0.26, 18, 18), new THREE.MeshBasicMaterial({ color: 0xffffff }));
   dot.position.copy(pos); nowGroup.add(dot);
@@ -1020,11 +1000,11 @@ function drawProjection3D() {
 function drawProjection3DInner(r) {
   const d0 = new Date((r.firstT || 0) * 1000); d0.setHours(0, 0, 0, 0);
   const t0 = d0.getTime() / 1000, dayOfT = t => Math.floor((t - t0) / 86400);
-  const yMax = projYMax, yLo = projYLo || 0, maxDay = projMaxDay;
+  const yMax = projYMax, maxDay = projMaxDay;
   const flat = state.view === 'flat';   // 2D: 연속 시간축에 한 줄로, 창 밖은 clip (Codex P0-5)
   const posOf = (rt, lvl) => flat
-    ? new THREE.Vector3(xFlat(rt), yFromVal(lvl, yMax, yLo), 0)
-    : new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(lvl, yMax, yLo), zFromDay(dayOfT(rt), maxDay));   // 3D는 yLo 항상 0
+    ? new THREE.Vector3(xFlat(rt), yFromVal(lvl, yMax), 0)
+    : new THREE.Vector3(xFromTod(todOf(rt)), yFromVal(lvl, yMax), zFromDay(dayOfT(rt), maxDay));
   const inWin = rt => !flat || (rt >= _fw.w0 && rt <= _fw.w1);
   let startDrawn = false;
 
@@ -2368,7 +2348,7 @@ function drawIntervalOverlay() {
   const t0 = state.intervalSel.t0, t1 = state.intervalSel.t1;
   const a = flat ? Math.max(t0, visLo) : t0, b = flat ? Math.min(t1, visHi) : t1;
   if (!(b > a)) return;   // (2D) 선택 구간이 화면 밖
-  const yMax = projYMax || 1, yLo = projYLo || 0, base = yFromVal(0, yMax, yLo);
+  const yMax = projYMax || 1, base = yFromVal(0, yMax);
   // 3D 날짜 인덱스: buildLines와 동일하게 report.firstT의 로컬 자정 기준
   const rf = new Date((state.report.firstT || 0) * 1000); rf.setHours(0, 0, 0, 0);
   const dayBase = rf.getTime() / 1000, dayOfT = t => Math.floor((t - dayBase) / 86400);
@@ -2397,7 +2377,7 @@ function drawIntervalOverlay() {
         } else segs.push([s0, w0, s1, w1]);
         for (const [sa, wa, sb, wb] of segs) {
           const xa = X3(sa), xb = X3(sb), za = Z3(sa), zb = Z3(sb);
-          const ya = yFromVal(wa, yMax, yLo), yb = yFromVal(wb, yMax, yLo);
+          const ya = yFromVal(wa, yMax), yb = yFromVal(wb, yMax);
           pos.push(xa, base, za, xa, ya, za, xb, yb, zb);   // 곡선과 0선 사이 사각형 → 두 삼각형
           pos.push(xa, base, za, xb, yb, zb, xb, base, zb);
         }
@@ -2421,7 +2401,7 @@ function drawIntervalOverlay() {
     }
     // 구간 평균 전력선: 계산 결과의 평균 W 높이에 수평 '점선' (실측 곡선=실선과 구분되는 파생 참조선)
     if (state.y === 'watts' && _ivAvgW != null) {
-      const yAvg = yFromVal(_ivAvgW, yMax, yLo);
+      const yAvg = yFromVal(_ivAvgW, yMax);
       const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(xFlat(a), yAvg, 0.05), new THREE.Vector3(xFlat(b), yAvg, 0.05)]);
       const ln = new THREE.Line(g, new THREE.LineDashedMaterial({ color: 0xe8a13c, dashSize: 0.7, gapSize: 0.45 }));
       ln.computeLineDistances();
@@ -2619,6 +2599,7 @@ function setView(v) {
   // 안 하면 그래프는 2D인데 토글은 3D가 켜진 채라 혼동을 준다.
   const vseg = document.querySelector('.seg[data-group="view"]');
   if (vseg) vseg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.val === state.view));
+  applyYScale();   // 값축 확대는 2D 전용 — 3D로 넘어가면 기본 높이로 되돌린다(전환 전에 적용해야 카메라·씬이 같은 Y를 본다)
   if (state.view === 'flat') { controls.enabled = false; controls.autoRotate = false; fitFlatCamera(); }
   else { controls.enabled = true; camera.position.copy(HOME).multiplyScalar(0.6 + 0.4 * state.xScale); controls.target.copy(LOOK); }
   rebuild();
@@ -2662,9 +2643,15 @@ function fitFlatCamera() {
   // — 안 그러면 그 라벨이 #panel(우측 고정 카드)의 예약 영역 경계에 걸려 가려진다.
   const ovActive = state.y === 'watts' && (state.ovV !== 'off' || state.ovA !== 'off');
   const Vw = FLAT_W * (ovActive ? 1.30 : 1.17) * W / Math.max(1, W - L - R);
+  // 값축을 yScale로 늘리면(프레임이 세로로 커짐) 가로 기준 거리만으로는 위아래가 창 밖으로 잘린다.
+  // 세로로 담는 데 필요한 거리도 구해 둘 중 '먼 쪽'을 쓴다 — 기본 배율(Y=16)에선 가로가 항상 더
+  // 멀어서 종전 동작 그대로이고, 크게 늘렸을 때만 세로가 기준이 되어 잘림 없이 창을 꽉 채운다.
   _flatK = Vw / FLAT_W;
-  const D = (Vw / 2) / Math.tan(hFov / 2);
-  const cx = (R - L) / 2 * Vw / W;   // 월드 x=0(그래프 중앙)이 빈 구간의 중앙에 오도록 카메라를 평행 이동
+  const Dw = (Vw / 2) / Math.tan(hFov / 2);
+  const Dh = (Y / 2 + 3.2) / Math.tan(vFov / 2);   // +3.2: 상단 축 제목(Y+2)·하단 시간 라벨 여유
+  const D = Math.max(Dw, Dh);
+  if (D > Dw) _flatK = 2 * D * Math.tan(hFov / 2) / FLAT_W;   // 세로가 기준이면 실제 가시 폭도 그만큼 넓어짐 — px↔시간 환산(팬/줌)이 어긋나지 않게 갱신
+  const cx = (R - L) / 2 * (_flatK * FLAT_W) / W;   // 월드 x=0(그래프 중앙)이 빈 구간의 중앙에 오도록 카메라를 평행 이동
   camera.position.set(cx, Y / 2, D);
   camera.lookAt(cx, Y / 2, 0);
 }
@@ -2688,6 +2675,8 @@ function setYScale(v) {
   v = Math.min(4, Math.max(1, v));
   state.yScale = v;
   try { localStorage.setItem('battYScale', String(v)); } catch { /* ignore */ }
+  applyYScale();                                  // 값축 월드 높이 갱신 → 프레임 자체가 세로로 커짐
+  if (state.view === 'flat') fitFlatCamera();     // 높아진 프레임이 창 안에 들어오도록 카메라 재조정
   rebuild();
 }
 

@@ -196,10 +196,23 @@ fn migrate_legacy_agent(label: &str, plist_name: &str, state_name: &str) {
 //    off인데 등록돼 있으면 unregister — 사용자가 트레이로 정한 상태가 항상 이긴다.
 // ② 앱 번들이 교체되면(수동 재설치·자동 업데이트 — 경로 같아도 inode/서명 변경) launchd의
 //    SMAppService 번들 참조가 stale해져 스폰이 EX_CONFIG로 죽는다(실측 2026-07-22: rm -rf 후
-//    재복사 → runs=10 전부 spawn failed). (버전|exe경로) 지문이 바뀌었으면 unregister→register.
+//    재복사 → runs=10 전부 spawn failed). 지문이 바뀌었으면 unregister→register.
+//    지문에 exe의 inode+mtime+크기까지 넣는 이유: (버전|경로)만 쓰면 '같은 버전을 같은 경로에
+//    재설치'한 경우(개발 중 반복 설치·사용자 수동 재설치·릴리스 재빌드 교체)에 지문이 그대로라
+//    재고정이 안 돌아, 정작 이 코드가 잡으려던 바로 그 케이스를 놓친다 — 실측 2026-08-09:
+//    1.2.2를 같은 경로에 재설치했더니 두 에이전트 모두 EX_CONFIG로 runs=10 spawn failed.
+//    번들을 교체하면 파일이 새로 생성되므로 inode·mtime이 반드시 바뀐다.
 fn ensure_services() {
-    let exe = std::env::current_exe().ok().and_then(|p| p.to_str().map(String::from)).unwrap_or_default();
-    let fingerprint = format!("{}|{exe}", env!("CARGO_PKG_VERSION"));
+    let exe_path = std::env::current_exe().ok();
+    let exe = exe_path.as_ref().and_then(|p| p.to_str().map(String::from)).unwrap_or_default();
+    let ident = exe_path.as_ref().and_then(|p| std::fs::metadata(p).ok()).map(|m| {
+        use std::os::unix::fs::MetadataExt;
+        let mtime = m.modified().ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs()).unwrap_or(0);
+        format!("{}|{}|{}", m.ino(), mtime, m.size())
+    }).unwrap_or_default();
+    let fingerprint = format!("{}|{exe}|{ident}", env!("CARGO_PKG_VERSION"));
     let marker = data_dir().join(".sm-registered");
     let bundle_changed = std::fs::read_to_string(&marker).unwrap_or_default() != fingerprint;
     let st = read_service_state();
