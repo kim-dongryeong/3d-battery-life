@@ -72,6 +72,18 @@ state.view = (() => {
 const applyYScale = () => { Y = Y_BASE * (state.view === 'flat' ? state.yScale : 1); };
 applyYScale();   // apply the saved value-axis stretch before the first build
 state.flatWin = null;   // 2D 보이는 시간 창 {t0,t1}(epoch 초) · null = 전체 — 전이는 web/flatViewport.js 경유만
+// 2D 기본 기간 = 7일. 창은 스팬(=데이터 범위)을 알아야 만들 수 있는데 이 시점엔 report가 없으므로
+// 값만 정해 두고 첫 report 도착 시 적용한다(load()의 _flatRangePending). 사용자가 고른 기간은
+// 다음 실행에도 유지 — '오늘로'(end)는 상태가 아니라 동작이라 저장 대상에서 제외.
+state.flatRange = (() => {
+  try {
+    const q = new URLSearchParams(location.search).get('range');
+    if (['all', '30d', '7d', '24h'].includes(q)) return q;
+    const s = localStorage.getItem('battFlatRange');
+    return ['all', '30d', '7d', '24h'].includes(s) ? s : '7d';
+  } catch { return '7d'; }
+})();
+let _flatRangePending = true;   // 첫 report 도착 시 위 기본 기간을 창으로 적용해야 함
 // deep-linkable view (shareable): ?y=pct|watts|rate · ?color=state|lowPower|tempC|loadPct|watts
 try {
   const q = new URLSearchParams(location.search);
@@ -921,7 +933,13 @@ function syncFlatUI() {
   if (hint) hint.textContent = tr(on ? '드래그=이동 · 휠=커서 중심 줌 · 더블클릭=전체 · 아래 미니맵으로 구간 선택'
     : '드래그=회전 · 휠=줌 · 우클릭드래그=이동 · 곡선에 마우스를 올리면 그 세션 정보가 보입니다.');
   const reset = document.getElementById('reset'); if (reset) reset.textContent = tr(on ? '전체 보기' : '시점 리셋');
-  if (rng) rng.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.val === 'all' && !state.flatWin));
+  // 기간 표시: 종전엔 '전체'만 켜져 7일/30일/24시간을 골라도 아무것도 안 켜졌다. 지금 창의 폭을
+  // 프리셋 폭과 대조해(±2% 허용 — normalizeWindow가 스팬 경계에서 살짝 깎을 수 있음) 맞는 것을 켠다.
+  // '오늘로'는 상태가 아니라 동작이므로 절대 켜지 않는다.
+  if (rng) {
+    const cur = activeFlatRange();
+    rng.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.val === cur));
+  }
   if (on) drawFlatMini();
 }
 function drawFlatMini() {
@@ -2148,7 +2166,10 @@ async function load() {
     state.report = await res.json();
     // 2D에서 끝(최신)을 보고 있었다면 "지금 기준 상대 위치"를 유지하며 Δ만큼 따라간다
     // (끝점 스냅 방식은 미래 패드로 팬해 둔 창을 매분 왼쪽으로 되돌렸음)
-    if (state.view === 'flat' && wasFollowing) state.flatWin = FV.followEnd(state.flatWin, flatSpanNow(), oldSp ? oldSp.max : null);
+    if (_flatRangePending) {   // 첫 report: 이제 스팬을 알므로 기본/저장된 기간을 창으로 적용
+      _flatRangePending = false;
+      state.flatWin = FV.presetWindow(state.flatRange, null, flatSpanNow());
+    } else if (state.view === 'flat' && wasFollowing) state.flatWin = FV.followEnd(state.flatWin, flatSpanNow(), oldSp ? oldSp.max : null);
     document.getElementById('empty').innerHTML = emptyDefaultHTML;
   } catch (e) {
     // keep the previous report on screen (don't clobber state with an error body);
@@ -2660,7 +2681,29 @@ if (typeof ResizeObserver !== 'undefined') {
   const ro = new ResizeObserver(() => { if (state.view === 'flat') fitFlatCamera(); });
   for (const id of ['hud', 'buckets', 'panel']) { const el = document.getElementById(id); if (el) ro.observe(el); }
 }
+// 지금 창의 폭이 어느 프리셋에 해당하는지 — 세그먼트 .on 표시용. 폭만 보고 판단하므로 과거로
+// 팬해 둔 7일 창도 '7일'로 표시된다(기간 = 보는 폭이지 위치가 아님). 어느 것과도 안 맞으면
+// (휠 줌으로 임의 폭이 된 경우) null → 아무것도 안 켜짐.
+function activeFlatRange() {
+  if (!state.flatWin) return 'all';
+  const w = state.flatWin.t1 - state.flatWin.t0;
+  for (const [k, h] of [['30d', 720], ['7d', 168], ['24h', 24]]) {
+    if (Math.abs(w - h * 3600) <= h * 3600 * 0.02) return k;
+  }
+  return null;
+}
 function applyFlatRange(v) {
+  // '오늘로'(end)는 폭을 유지한 채 최신으로 이동하는 동작 — 저장하지 않는다. 다만 '전체'를 보는
+  // 중이면 유지할 폭이 곧 전체 스팬이라 결과가 전체 그대로여서 아무 일도 안 일어난 것처럼 보였다
+  // (normalizeWindow가 스팬 전체를 덮는 창을 null=전체로 되돌림). 그때는 기본 기간(7일) 폭으로 이동.
+  if (v === 'end') {
+    const win = state.flatWin ? FV.presetWindow('end', state.flatWin, flatSpanNow())
+      : FV.presetWindow('7d', null, flatSpanNow());
+    applyFlatWin(win);
+    return;
+  }
+  state.flatRange = v;
+  try { localStorage.setItem('battFlatRange', v); } catch { /* ignore */ }
   applyFlatWin(FV.presetWindow(v, state.flatWin, flatSpanNow()));
 }
 
