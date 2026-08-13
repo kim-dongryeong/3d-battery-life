@@ -8,6 +8,7 @@ mod live;
 mod smc;
 mod power;
 mod smapp;
+mod unnotify;
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -303,6 +304,24 @@ fn notify(title: &str, body: &str) {
     );
     std::thread::spawn(move || { let _ = Sh::new("osascript").args(["-e", &script]).status(); });
 }
+// Battery alert (Low/High) via the real UNUserNotificationCenter API — gives a "이 알림 끄기" button.
+// Falls back to the plain osascript `notify` above ONLY when the UN path is unavailable/denied,
+// so a user who explicitly refused notifications still degrades to the old behavior instead of
+// going silent. Updater notifications keep calling `notify` directly — this is battery-alert only.
+// Runs OFF the ticker thread for the same reason `notify` does (a hung notifier must never stall
+// the tray) — which also lets us wait out the async authorization verdict. Without that wait, an
+// alert firing on the first tick after launch (e.g. relaunching while already past the charge
+// threshold) would fall back to the button-less path just because the answer hadn't landed yet.
+fn notify_alert(kind: unnotify::Alert, title: &str, body: &str) {
+    let (t, b) = (title.to_string(), body.to_string());
+    std::thread::spawn(move || {
+        for _ in 0..40 {                                  // ≤2s, then give up and use the fallback
+            if unnotify::resolved() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        if !unnotify::post(kind, &t, &b) { notify(&t, &b); }
+    });
+}
 // Low/high battery alerts (like Stats/iStat), with hysteresis so each crossing fires once.
 // Long-form ETA for notification bodies, e.g. "1시간 20분" / "45분"; "" when unknown.
 fn fmt_eta(min: Option<i64>) -> String {
@@ -367,14 +386,14 @@ fn notify_check(l: &live::Live, cfg: &live::Cfg, low: &mut bool, crit: &mut bool
         // "매우 부족" is a hard floor at 10% (or the user's low threshold if they set it below 10).
         let crit_t = low_t.min(10.0);
         if low_t > 0.0 {
-            if l.pct <= crit_t && !*crit { notify("배터리 매우 부족", &format!("{pct}% 남음{left} — 지금 충전하세요")); *crit = true; *low = true; }
-            else if l.pct <= low_t && !*low { notify("배터리 부족", &format!("{pct}% 남음{left} — 곧 충전하세요")); *low = true; }
+            if l.pct <= crit_t && !*crit { notify_alert(unnotify::Alert::Low, "배터리 매우 부족", &format!("{pct}% 남음{left} — 지금 충전하세요")); *crit = true; *low = true; }
+            else if l.pct <= low_t && !*low { notify_alert(unnotify::Alert::Low, "배터리 부족", &format!("{pct}% 남음{left} — 곧 충전하세요")); *low = true; }
         }
         if l.pct > low_t + 5.0 { *low = false; *crit = false; }   // hysteresis: re-arm above threshold
     } else if l.charging {
         *low = false; *crit = false;
         let full = if eta.is_empty() { String::new() } else { format!(" (완충까지 약 {eta})") };
-        if high_t > 0.0 && l.pct >= high_t && !*high { notify(&format!("충전 {}% 도달", high_t as i64), &format!("배터리 수명을 위해 뽑아도 좋아요{full}")); *high = true; }
+        if high_t > 0.0 && l.pct >= high_t && !*high { notify_alert(unnotify::Alert::High, &format!("충전 {}% 도달", high_t as i64), &format!("배터리 수명을 위해 뽑아도 좋아요{full}")); *high = true; }
         if l.pct < high_t - 5.0 { *high = false; }
     } else {
         // AC idle / full / on-hold — reset the LOW side (we're plugged) but keep HIGH sticky so
@@ -402,6 +421,11 @@ fn main() {
             migrate_legacy_agent(SAMPLER_LABEL, SAMPLER_PLIST, "sampler");
             migrate_legacy_agent(SMCD_LABEL, SMCD_PLIST, "smcd");
             ensure_services();
+
+            // Actionable battery-alert notifications (UNUserNotificationCenter) — install the
+            // delegate, register categories/actions, and request authorization before the ticker
+            // (which fires the first alert) starts.
+            unnotify::init();
 
             // Menu-bar-only until a popover/viewer is requested. with_regular_app waits for Dock to
             // finish its async registration before showing and focusing that first window.
