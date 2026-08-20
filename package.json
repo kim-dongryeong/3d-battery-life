@@ -1,6 +1,6 @@
 {
   "name": "joule",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "private": true,
   "type": "module",
   "description": "Joule — Battery, Power & Charging Analyzer for macOS. Track battery discharge over time and explore it in 3D.",

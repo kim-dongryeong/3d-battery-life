@@ -1727,7 +1727,7 @@ dependencies = [
 
 [[package]]
 name = "joule-desktop"
-version = "1.2.4"
+version = "1.2.5"
 dependencies = [
  "block2",
  "fontdue",
