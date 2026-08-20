@@ -1864,6 +1864,36 @@ const valPlane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBas
 valPlane.rotation.x = -Math.PI / 2;                 // 바닥(x-z)과 평행한 수평면
 overlay.add(marker, xLine, zLine, valLine, valDot, valPlane);
 
+// ---- 크로스헤어 축 값 태그 ------------------------------------------------------------------
+// 보조선이 축에 닿는 바로 그 지점에 그 축의 수치를 띄운다(주가 차트의 크로스헤어 라벨과 같은 것).
+// 3D 스프라이트(makeLabel)가 아니라 DOM인 이유: 마우스를 움직일 때마다 텍스트가 바뀌는데
+// makeLabel은 호출마다 캔버스+CanvasTexture를 새로 만들어, 초당 수십 개의 텍스처가 생겼다
+// 버려진다. .projTag와 같은 "월드좌표 → 화면좌표 투영" 방식이면 엘리먼트를 재사용할 수 있다.
+const AX_TAGS = {};   // key → {el, vp, align} · key: val(값축) · tod(시각축) · date(날짜축, 3D 전용)
+function setAxTag(key, vp, text, align) {
+  let t = AX_TAGS[key];
+  if (!t) {
+    const el = document.createElement('div');
+    el.className = 'axTag';
+    document.body.appendChild(el);
+    t = AX_TAGS[key] = { el, vp: new THREE.Vector3(), align };
+  }
+  t.vp.copy(vp); t.align = align;
+  t.el.style.display = '';   // 직전 hideAxTags()로 꺼져 있을 수 있다 — 다시 켠다
+  if (t.el.textContent !== text) t.el.textContent = text;   // 같은 값이면 DOM 건드리지 않음(리플로우 회피)
+}
+function hideAxTags() { for (const k in AX_TAGS) AX_TAGS[k].el.style.display = 'none'; }
+// yFromVal의 역함수 — 보조선이 값축에 닿은 높이가 실제로 몇인지. buildLines가 남겨 둔 projYMax와
+// 현재 Y(값축 배율이 걸리면 늘어난 월드 높이)를 그대로 써서 축 눈금과 같은 스케일을 보장한다.
+const valFromY = y => {
+  const m = projYMax || 1;
+  return isSignedY() ? (y / Y) * 2 * m - m : (y / Y) * m;
+};
+const fmtAxVal = v => state.y === 'pct' ? `${v.toFixed(1)}%` : state.y === 'rate' ? v.toFixed(2) : `${v.toFixed(1)}W`;
+const fmtAxTime = t => { const d = new Date(t * 1000); return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const fmtAxTod = h => { const m = Math.round(h * 60), hh = Math.floor(m / 60) % 24; return `${pad2(hh)}:${pad2(m % 60)}`; };
+const fmtAxDate = d => { const dt = new Date(((state.report && state.report.firstT) || 0) * 1000 + d * 86400000); return `${dt.getMonth() + 1}/${dt.getDate()}`; };
+
 // 마커에서 시각(X)·날짜(Z) 축(바닥) + 값(z축=세로) 축으로 안내선/점/면 배치
 function placeGuides(vp) {
   // 2D 시간축(flat): 축 상수가 다르다 — 값축 x0=-FLAT_W/2, 평면 z0=0 (Codex P0-2: 3D 상수를
@@ -1891,6 +1921,21 @@ function placeGuides(vp) {
     : [fp.clone(), vp.clone(), new THREE.Vector3(x0, vp.y, vp.z), VA.clone()]);   // 바닥→수직↑→축과평행→값축
   else if (vg === 'dot') { valDot.position.copy(VA); valDot.scale.setScalar(Math.max(0.12, state.markerSize * 0.9)); }              // 값축에 점만
   else if (vg === 'plane' && !flat) { valPlane.position.set(0, vp.y, 0); valPlane.scale.set(X + 0.5, Z + 0.5, 1); }                 // 그 높이의 수평면
+
+  // 축 교차점 수치 — 각 축의 '눈금 라벨이 놓이는 자리'에 그대로 얹는다(buildFlatAxes/buildAxes와
+  // 같은 좌표). 보조선이 끝나는 지점(플롯 안쪽)에 두면 커서 근처라 툴팁 상자에 절반씩 가렸다.
+  // 눈금 라벨 줄로 내리면 플롯 밖이라 안 가리고, 그 축의 눈금을 덮어쓰는 크로스헤어 관례와도 맞는다.
+  hideAxTags();
+  if (vg !== 'off') setAxTag('val', VA, fmtAxVal(valFromY(vp.y)), 'left');                    // 값축(라벨은 축 왼쪽)
+  if (fg) {
+    // 시각축: flat은 연속 시간축이라 날짜+시각, 3D는 X가 '하루 중 시각'이라 시:분만.
+    // flat의 날짜 라벨은 부호축이어도 항상 플롯 하단(y=-1) — buildFlatAxes와 같은 규칙을 따른다.
+    setAxTag('tod', flat ? new THREE.Vector3(vp.x, -1, 0) : new THREE.Vector3(vp.x, baseY - 1, z0 - 1.2),
+      flat ? fmtAxTime(xFlatInv(vp.x)) : fmtAxTod(vp.x / X * 24 + 12), 'center');
+    // 날짜(Z)축은 3D 전용 — zFromDay의 역함수로 경과 일수를 되돌려 실제 날짜로.
+    if (!flat) setAxTag('date', new THREE.Vector3(x0 - 1.5, baseY - 0.4, vp.z),
+      fmtAxDate(Math.round((vp.z + Z / 2) / Z * Math.max(1, projMaxDay))), 'center');
+  }
 }
 
 function pickAt(cx, cy) {   // raycast the curves → nearest vertex, or null
@@ -2917,6 +2962,22 @@ addEventListener('resize', () => {
   if (pinned && !tipManual) {   // 고정 마커를 화면좌표로 투영해 툴팁이 따라붙게 (단, 직접 드래그로 옮겼으면 그 자리 유지)
     const s = pinned.vp.clone().project(camera);
     positionTip((s.x * 0.5 + 0.5) * innerWidth, (-s.y * 0.5 + 0.5) * innerHeight - 16);
+  }
+  // 크로스헤어 축 값 태그 — placeGuides가 월드 위치를 정해 두면 여기서 화면좌표로 따라붙는다.
+  // 표시 여부는 overlay.visible 하나에 묶는다: 호버 해제 경로가 여러 곳이라 각 지점에서 태그를
+  // 따로 숨기면 빠뜨린 경로에서 태그만 남는다.
+  for (const k in AX_TAGS) {
+    const t = AX_TAGS[k];
+    if (!overlay.visible || t.el.style.display === 'none') { t.el.style.display = 'none'; continue; }
+    const s = t.vp.clone().project(camera);
+    if (s.z > 1) { t.el.style.display = 'none'; continue; }   // 카메라 뒤
+    const x = (s.x * 0.5 + 0.5) * innerWidth, y = (-s.y * 0.5 + 0.5) * innerHeight, r = t.el.getBoundingClientRect();
+    // left = 그 점의 왼쪽에 붙임(값축은 축선이 기준점이라 라벨을 밖으로 밀어야 한다)
+    // center = 그 점을 중심으로(시각·날짜축은 기준점이 이미 눈금 라벨 자리라 그대로 덮는다)
+    const lx = t.align === 'left' ? x - r.width - 8 : x - r.width / 2;
+    const ly = y - r.height / 2;
+    t.el.style.left = Math.min(Math.max(4, lx), innerWidth - r.width - 4) + 'px';
+    t.el.style.top = Math.min(Math.max(4, ly), innerHeight - r.height - 4) + 'px';
   }
   for (const t of proj3DTags) {   // 예상 종료시각 태그를 3D 크로싱 지점에 화면좌표로 붙여 항상 위에 표시
     const s = t.vp.clone().project(camera);

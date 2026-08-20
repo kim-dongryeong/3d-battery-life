@@ -164,6 +164,15 @@ label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   background: rgba(9,13,20,.82); border: 1px solid currentColor;
   box-shadow: 0 2px 12px rgba(0,0,0,.45); backdrop-filter: blur(4px); }
 
+/* 호버 크로스헤어가 축에 닿는 지점의 값 — 보조선 색(청록)으로 축 눈금 위에 덮어 씌운다.
+   불투명 배경인 이유: 정확히 축 눈금 라벨 자리에 겹치므로, 비쳐 보이면 두 숫자가 섞여 읽힌다. */
+/* z는 #tip(50)보다 위 — 축 읽는 값이 툴팁에 가리면 태그의 존재 이유가 없어진다. 태그는 몇 글자짜리
+   작은 칩이라 큰 툴팁 상자를 살짝 덮는 편이 그 반대보다 낫다(크로스헤어 라벨의 일반적 처리). */
+.axTag { position: fixed; z-index: 51; pointer-events: none; white-space: nowrap;
+  padding: 1px 6px; border-radius: 5px; font-size: 11px; font-weight: 700;
+  font-variant-numeric: tabular-nums; letter-spacing: .2px;
+  color: #0b1418; background: #4dd0c0; box-shadow: 0 2px 10px rgba(0,0,0,.45); }
+
 #tip { position: fixed; z-index: 50; pointer-events: none; max-width: 366px; overflow: hidden;   /* 예상 도달시각 태그(.projTag z46)보다 위에 떠야 함 */
   background: var(--tip); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px;
   box-shadow: 0 8px 30px rgba(0,0,0,.5); }
